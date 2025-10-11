@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/utils/currency_formatter.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../providers/auth_provider.dart';
@@ -265,7 +266,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
               ),
               _buildStatItem(
                 icon: Icons.attach_money,
-                value: 'S/ ${_stats['totalSpent'].toStringAsFixed(2)}',
+                value: _stats['totalSpent'].toCurrency(),
                 label: 'Gastado',
               ),
               _buildStatItem(
@@ -450,7 +451,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
                     ],
                   ),
                   Text(
-                    'S/ ${(trip.finalFare ?? trip.estimatedFare).toStringAsFixed(2)}',
+                    (trip.finalFare ?? trip.estimatedFare).toCurrency(),
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -804,7 +805,7 @@ class _TripDetailsModalState extends State<TripDetailsModal> {
                   _buildDetailSection(
                     'Pago',
                     [
-                      _buildDetailRow(Icons.attach_money, 'Monto', 'S/ ${(widget.trip.finalFare ?? widget.trip.estimatedFare).toStringAsFixed(2)}'),
+                      _buildDetailRow(Icons.attach_money, 'Monto', (widget.trip.finalFare ?? widget.trip.estimatedFare).toCurrency()),
                       _buildDetailRow(Icons.payment, 'Método', 'Efectivo (predeterminado)'),
                     ],
                   ),
