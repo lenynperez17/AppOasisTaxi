@@ -1,4 +1,4 @@
-import '../core/utils/currency_formatter.dart';
+import '../../core/utils/currency_formatter.dart';
 
 /// Tipos de notificaciones del sistema OasisTaxi
 enum NotificationType {

@@ -1,33 +1,33 @@
 import 'package:intl/intl.dart';
 import '../constants/app_constants.dart';
 
-/// Utilidades para formatear moneda según el país configurado
+/// Utilidades para formatear moneda segÃºn el paÃ­s configurado
 ///
 /// USO:
 /// ```dart
-/// // Formatear con moneda actual (Perú = 'S/')
-/// formatCurrency(150.50) // ’ 'S/ 150.50'
+/// // Formatear con moneda actual (PerÃº = 'S/')
+/// formatCurrency(150.50) // â†’ 'S/ 150.50'
 ///
 /// // Formatear sin espacios
-/// formatCurrency(150.50, includeSpace: false) // ’ 'S/150.50'
+/// formatCurrency(150.50, includeSpace: false) // â†’ 'S/150.50'
 ///
 /// // Solo el valor formateado
-/// formatCurrencyValue(150.50) // ’ '150.50'
+/// formatCurrencyValue(150.50) // â†’ '150.50'
 ///
-/// // Formatear con otra moneda específica
-/// formatCurrencyWithSymbol(150.50, '\$') // ’ '\$ 150.50'
+/// // Formatear con otra moneda especÃ­fica
+/// formatCurrencyWithSymbol(150.50, '\$') // â†’ '\$ 150.50'
 /// ```
 class CurrencyFormatter {
-  /// Formatea un monto con el símbolo de moneda actual
+  /// Formatea un monto con el sÃ­mbolo de moneda actual
   ///
-  /// Usa la configuración de [AppConstants.CURRENT_COUNTRY]
+  /// Usa la configuraciÃ³n de [AppConstants.CURRENT_COUNTRY]
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrency(150.50) // ’ 'S/ 150.50' (Perú)
-  /// formatCurrency(150.50) // ’ '\$ 150.50' (USA)
-  /// formatCurrency(150.50, includeSpace: false) // ’ 'S/150.50'
-  /// formatCurrency(150.5000) // ’ 'S/ 150.50' (redondea a 2 decimales)
+  /// formatCurrency(150.50) // â†’ 'S/ 150.50' (PerÃº)
+  /// formatCurrency(150.50) // â†’ '\$ 150.50' (USA)
+  /// formatCurrency(150.50, includeSpace: false) // â†’ 'S/150.50'
+  /// formatCurrency(150.5000) // â†’ 'S/ 150.50' (redondea a 2 decimales)
   /// ```
   static String formatCurrency(
     double amount, {
@@ -43,12 +43,12 @@ class CurrencyFormatter {
         : '$symbol$formattedValue';
   }
 
-  /// Formatea solo el valor numérico sin símbolo de moneda
+  /// Formatea solo el valor numÃ©rico sin sÃ­mbolo de moneda
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrencyValue(1500.5) // ’ '1,500.50'
-  /// formatCurrencyValue(1500.5, decimals: 0) // ’ '1,501' (redondea)
+  /// formatCurrencyValue(1500.5) // â†’ '1,500.50'
+  /// formatCurrencyValue(1500.5, decimals: 0) // â†’ '1,501' (redondea)
   /// ```
   static String formatCurrencyValue(
     double amount, {
@@ -58,14 +58,14 @@ class CurrencyFormatter {
     return _formatNumber(amount, decimalDigits);
   }
 
-  /// Formatea con un símbolo de moneda personalizado
+  /// Formatea con un sÃ­mbolo de moneda personalizado
   ///
-  /// Útil cuando necesitas mostrar una moneda diferente temporalmente
+  /// Ãštil cuando necesitas mostrar una moneda diferente temporalmente
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrencyWithSymbol(150.50, '\$') // ’ '\$ 150.50'
-  /// formatCurrencyWithSymbol(150.50, '¬') // ’ '¬ 150.50'
+  /// formatCurrencyWithSymbol(150.50, '\$') // â†’ '\$ 150.50'
+  /// formatCurrencyWithSymbol(150.50, 'â‚¬') // â†’ 'â‚¬ 150.50'
   /// ```
   static String formatCurrencyWithSymbol(
     double amount,
@@ -80,38 +80,38 @@ class CurrencyFormatter {
         : '$customSymbol$formattedValue';
   }
 
-  /// Formatea el número con separadores de miles y decimales
-  /// según el locale actual
+  /// Formatea el nÃºmero con separadores de miles y decimales
+  /// segÃºn el locale actual
   ///
-  /// Privado - usado internamente por las funciones públicas
+  /// Privado - usado internamente por las funciones pÃºblicas
   static String _formatNumber(double amount, int decimalDigits) {
     final locale = AppConstants.currentLocale;
     final formatter = NumberFormat.currency(
       locale: locale,
-      symbol: '', // Sin símbolo, lo agregamos manualmente
+      symbol: '', // Sin sÃ­mbolo, lo agregamos manualmente
       decimalDigits: decimalDigits,
     );
 
     return formatter.format(amount).trim();
   }
 
-  /// Obtiene el símbolo de moneda actual
+  /// Obtiene el sÃ­mbolo de moneda actual
   ///
   /// **Ejemplo:**
   /// ```dart
-  /// getCurrencySymbol() // ’ 'S/' (Perú)
-  /// getCurrencySymbol() // ’ '\$' (USA/México)
+  /// getCurrencySymbol() // â†’ 'S/' (PerÃº)
+  /// getCurrencySymbol() // â†’ '\$' (USA/MÃ©xico)
   /// ```
   static String getCurrencySymbol() {
     return AppConstants.currencySymbol;
   }
 
-  /// Obtiene el código ISO de la moneda actual
+  /// Obtiene el cÃ³digo ISO de la moneda actual
   ///
   /// **Ejemplo:**
   /// ```dart
-  /// getCurrencyCode() // ’ 'PEN' (Perú)
-  /// getCurrencyCode() // ’ 'USD' (USA)
+  /// getCurrencyCode() // â†’ 'PEN' (PerÃº)
+  /// getCurrencyCode() // â†’ 'USD' (USA)
   /// ```
   static String getCurrencyCode() {
     return AppConstants.currencyCode;
@@ -121,8 +121,8 @@ class CurrencyFormatter {
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrencyRange(100, 200) // ’ 'S/ 100.00 - S/ 200.00'
-  /// formatCurrencyRange(100, 200, compact: true) // ’ 'S/ 100 - 200'
+  /// formatCurrencyRange(100, 200) // â†’ 'S/ 100.00 - S/ 200.00'
+  /// formatCurrencyRange(100, 200, compact: true) // â†’ 'S/ 100 - 200'
   /// ```
   static String formatCurrencyRange(
     double minAmount,
@@ -143,13 +143,13 @@ class CurrencyFormatter {
 
   /// Formatea un monto con signo (+ o -)
   ///
-  /// Útil para mostrar transacciones, ganancias, pérdidas, etc.
+  /// Ãštil para mostrar transacciones, ganancias, pÃ©rdidas, etc.
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrencyWithSign(150.50) // ’ '+S/ 150.50'
-  /// formatCurrencyWithSign(-50.00) // ’ '-S/ 50.00'
-  /// formatCurrencyWithSign(150.50, showPlusSign: false) // ’ 'S/ 150.50'
+  /// formatCurrencyWithSign(150.50) // â†’ '+S/ 150.50'
+  /// formatCurrencyWithSign(-50.00) // â†’ '-S/ 50.00'
+  /// formatCurrencyWithSign(150.50, showPlusSign: false) // â†’ 'S/ 150.50'
   /// ```
   static String formatCurrencyWithSign(
     double amount, {
@@ -170,13 +170,13 @@ class CurrencyFormatter {
 
   /// Formatea un monto en formato compacto (K, M, B)
   ///
-  /// Útil para dashboards y estadísticas
+  /// Ãštil para dashboards y estadÃ­sticas
   ///
   /// **Ejemplos:**
   /// ```dart
-  /// formatCurrencyCompact(1500) // ’ 'S/ 1.5K'
-  /// formatCurrencyCompact(1500000) // ’ 'S/ 1.5M'
-  /// formatCurrencyCompact(1500000000) // ’ 'S/ 1.5B'
+  /// formatCurrencyCompact(1500) // â†’ 'S/ 1.5K'
+  /// formatCurrencyCompact(1500000) // â†’ 'S/ 1.5M'
+  /// formatCurrencyCompact(1500000000) // â†’ 'S/ 1.5B'
   /// ```
   static String formatCurrencyCompact(double amount) {
     final symbol = AppConstants.currencySymbol;
@@ -208,10 +208,10 @@ class CurrencyFormatter {
 ///
 /// **Uso:**
 /// ```dart
-/// 150.50.toCurrency() // ’ 'S/ 150.50'
-/// 150.50.toCurrencyValue() // ’ '150.50'
-/// 150.50.toCurrencyCompact() // ’ 'S/ 150.50'
-/// 1500000.0.toCurrencyCompact() // ’ 'S/ 1.5M'
+/// 150.50.toCurrency() // â†’ 'S/ 150.50'
+/// 150.50.toCurrencyValue() // â†’ '150.50'
+/// 150.50.toCurrencyCompact() // â†’ 'S/ 150.50'
+/// 1500000.0.toCurrencyCompact() // â†’ 'S/ 1.5M'
 /// ```
 extension CurrencyFormatterExtension on double {
   /// Convierte el double a formato de moneda
@@ -223,7 +223,7 @@ extension CurrencyFormatterExtension on double {
     );
   }
 
-  /// Convierte el double a formato numérico sin símbolo
+  /// Convierte el double a formato numÃ©rico sin sÃ­mbolo
   String toCurrencyValue({int? decimals}) {
     return CurrencyFormatter.formatCurrencyValue(this, decimals: decimals);
   }
