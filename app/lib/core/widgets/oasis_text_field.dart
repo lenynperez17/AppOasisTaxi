@@ -22,7 +22,8 @@ class OasisTextField extends StatelessWidget {
   final FocusNode? focusNode;
   final TextCapitalization textCapitalization;
   final TextInputAction? textInputAction;
-  
+  final ValueChanged<String>? onFieldSubmitted; // ✅ Nuevo: callback cuando se presiona Enter/Done
+
   const OasisTextField({
     super.key,
     required this.label,
@@ -44,6 +45,7 @@ class OasisTextField extends StatelessWidget {
     this.focusNode,
     this.textCapitalization = TextCapitalization.none,
     this.textInputAction,
+    this.onFieldSubmitted, // ✅ Nuevo parámetro
   });
   
   @override
@@ -63,6 +65,7 @@ class OasisTextField extends StatelessWidget {
       inputFormatters: inputFormatters,
       onChanged: onChanged,
       onTap: onTap,
+      onFieldSubmitted: onFieldSubmitted, // ✅ Configurado: cierra teclado al presionar Enter/Done
       validator: validator,
       decoration: InputDecoration(
         labelText: label,

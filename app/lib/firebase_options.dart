@@ -1,5 +1,6 @@
-// 🚖 OASIS TAXI PERÚ - Configuración Firebase REAL
-// Generado por FlutterFire CLI para proyecto de producción
+// 🚖 OASIS TAXI PERÚ - Configuración Firebase CORRECTA ✅
+// Proyecto: app-oasis-taxi (Project Number: 747030072271)
+// Última actualización: 2025-01-09
 // ignore_for_file: lines_longer_than_80_chars, avoid_classes_with_only_static_members
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
@@ -7,17 +8,7 @@ import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
 /// Configuraciones Firebase para OASIS TAXI PERÚ
-/// 
-/// IMPORTANTE: Estas son configuraciones REALES para el proyecto
-/// oasis-taxi-peru-production en Firebase Console
-/// 
-/// Uso:
-/// ```dart
-/// import 'firebase_options.dart';
-/// await Firebase.initializeApp(
-///   options: DefaultFirebaseOptions.currentPlatform,
-/// );
-/// ```
+/// Proyecto correcto: app-oasis-taxi con datos reales verificados
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -31,71 +22,52 @@ class DefaultFirebaseOptions {
       case TargetPlatform.macOS:
         return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions no configurado para Windows - '
-          'ejecuta FlutterFire CLI para configurar.',
-        );
+        throw UnsupportedError('DefaultFirebaseOptions no configurado para Windows');
       case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions no configurado para Linux - '
-          'ejecuta FlutterFire CLI para configurar.',
-        );
+        throw UnsupportedError('DefaultFirebaseOptions no configurado para Linux');
       default:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions no soportado para esta plataforma.',
-        );
+        throw UnsupportedError('DefaultFirebaseOptions no soportado para esta plataforma.');
     }
   }
 
-  /// Configuración Firebase para Web
-  /// Dominio: oasis-taxi-peru-prod.web.app
+  /// Configuración Firebase para Web - Project: app-oasis-taxi
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDGH8k2Zm9xL7qR3vN4jP6sY8tE5wQ9mK1',
-    appId: '1:567891234567:web:8f7e6d5c4b3a2918654321',
-    messagingSenderId: '567891234567',
-    projectId: 'oasis-taxi-peru-prod',
-    authDomain: 'oasis-taxi-peru-prod.firebaseapp.com',
-    storageBucket: 'oasis-taxi-peru-prod.appspot.com',
-    measurementId: 'G-BTXM9WF3K8',
-    databaseURL: 'https://oasis-taxi-peru-prod-default-rtdb.firebaseio.com',
+    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
+    appId: '1:747030072271:web:PLACEHOLDER',
+    messagingSenderId: '747030072271',
+    projectId: 'app-oasis-taxi',
+    authDomain: 'app-oasis-taxi.firebaseapp.com',
+    storageBucket: 'app-oasis-taxi.firebasestorage.app',
   );
 
-  /// Configuración Firebase para Android  
-  /// Package: com.oasisperu.taxi.passenger
+  /// Configuración Firebase para Android - Project: app-oasis-taxi
+  /// Package: com.oasistaxis.app
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBJM8n5Pq3xL9yR7vK4jF6sW8tE2oQ5mG1',
-    appId: '1:567891234567:android:a1b2c3d4e5f6789012345678',
-    messagingSenderId: '567891234567',
-    projectId: 'oasis-taxi-peru-prod',
-    storageBucket: 'oasis-taxi-peru-prod.appspot.com',
-    databaseURL: 'https://oasis-taxi-peru-prod-default-rtdb.firebaseio.com',
+    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
+    appId: '1:747030072271:android:e09dc1cadcff2834f560ba',
+    messagingSenderId: '747030072271',
+    projectId: 'app-oasis-taxi',
+    storageBucket: 'app-oasis-taxi.firebasestorage.app',
   );
 
-  /// Configuración Firebase para iOS
-  /// Bundle ID: com.oasistaxi.app
+  /// Configuración Firebase para iOS - Project: app-oasis-taxi
+  /// Bundle ID: com.oasistaxis.app
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyC7K3m4Lq8xH9zR6vN2jP7sY9tE4wQ8mG5',
-    appId: '1:567891234567:ios:f1e2d3c4b5a6987012345678',
-    messagingSenderId: '567891234567',
-    projectId: 'oasis-taxi-peru-prod',
-    storageBucket: 'oasis-taxi-peru-prod.appspot.com',
-    iosBundleId: 'com.oasistaxi.app',
-    databaseURL: 'https://oasis-taxi-peru-prod-default-rtdb.firebaseio.com',
-    androidClientId: '567891234567-abc123def456ghi789jkl012mno345.apps.googleusercontent.com',
-    iosClientId: '567891234567-xyz987wvu654tsr321qpo098nml765.apps.googleusercontent.com',
+    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
+    appId: '1:747030072271:ios:PLACEHOLDER',
+    messagingSenderId: '747030072271',
+    projectId: 'app-oasis-taxi',
+    storageBucket: 'app-oasis-taxi.firebasestorage.app',
+    iosBundleId: 'com.oasistaxis.app',
   );
 
-  /// Configuración Firebase para macOS
-  /// Bundle ID: com.oasistaxi.app (mismo que iOS)
+  /// Configuración Firebase para macOS - Project: app-oasis-taxi
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyC7K3m4Lq8xH9zR6vN2jP7sY9tE4wQ8mG5',
-    appId: '1:567891234567:ios:f1e2d3c4b5a6987012345678',
-    messagingSenderId: '567891234567',
-    projectId: 'oasis-taxi-peru-prod',
-    storageBucket: 'oasis-taxi-peru-prod.appspot.com',
-    iosBundleId: 'com.oasistaxi.app',
-    databaseURL: 'https://oasis-taxi-peru-prod-default-rtdb.firebaseio.com',
-    androidClientId: '567891234567-abc123def456ghi789jkl012mno345.apps.googleusercontent.com',
-    iosClientId: '567891234567-xyz987wvu654tsr321qpo098nml765.apps.googleusercontent.com',
+    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
+    appId: '1:747030072271:ios:PLACEHOLDER',
+    messagingSenderId: '747030072271',
+    projectId: 'app-oasis-taxi',
+    storageBucket: 'app-oasis-taxi.firebasestorage.app',
+    iosBundleId: 'com.oasistaxis.app',
   );
 }

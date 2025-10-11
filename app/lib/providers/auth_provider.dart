@@ -104,10 +104,7 @@ class AuthProvider with ChangeNotifier {
       
       if (doc.exists) {
         AppLogger.state('AuthProvider', 'Documento de usuario encontrado');
-        _currentUser = UserModel.fromJson({
-          'id': uid,
-          ...doc.data()!,
-        });
+        _currentUser = UserModel.fromFirestore(doc.data()!, uid);
         _isAuthenticated = true;
         AppLogger.state('AuthProvider', 'Usuario autenticado correctamente', {
           'userType': _currentUser?.userType,

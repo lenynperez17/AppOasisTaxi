@@ -31,7 +31,15 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emergencyNameController = TextEditingController();
   final TextEditingController _emergencyPhoneController = TextEditingController();
-  
+
+  // ✅ FocusNodes para manejo de teclado y navegación entre campos
+  final FocusNode _nameFocusNode = FocusNode();
+  final FocusNode _lastNameFocusNode = FocusNode();
+  final FocusNode _emailFocusNode = FocusNode();
+  final FocusNode _phoneFocusNode = FocusNode();
+  final FocusNode _emergencyNameFocusNode = FocusNode();
+  final FocusNode _emergencyPhoneFocusNode = FocusNode();
+
   // User data
   String _profileImagePath = '';
   String _birthDate = '';
@@ -94,9 +102,22 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
     _phoneController.dispose();
     _emergencyNameController.dispose();
     _emergencyPhoneController.dispose();
+    // ✅ Dispose de FocusNodes
+    _nameFocusNode.dispose();
+    _lastNameFocusNode.dispose();
+    _emailFocusNode.dispose();
+    _phoneFocusNode.dispose();
+    _emergencyNameFocusNode.dispose();
+    _emergencyPhoneFocusNode.dispose();
     super.dispose();
   }
-  
+
+  // ✅ Método helper para ocultar teclado de manera confiable en Android
+  void _hideKeyboard() {
+    FocusScope.of(context).unfocus(); // Quita el foco
+    SystemChannels.textInput.invokeMethod('TextInput.hide'); // Fuerza el ocultamiento en Android
+  }
+
   void _onFieldChanged() {
     if (!_hasChanges) {
       setState(() => _hasChanges = true);
@@ -200,10 +221,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
               opacity: _fadeAnimation.value,
               child: Form(
                 key: _formKey,
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.all(16),
-                  child: Column(
-                    children: [
+                child: GestureDetector(
+                  onTap: _hideKeyboard, // ✅ Cierra teclado al tocar fuera (Android compatible)
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.all(16),
+                    child: Column(
+                      children: [
                       // Profile image section
                       _buildProfileImageSection(),
                       
@@ -242,12 +265,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                   ),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
-    );
-  }
+    ), // Scaffold
+  ); // PopScope
+}
   
   Widget _buildProfileImageSection() {
     return AnimatedBuilder(
@@ -342,6 +366,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                 controller: _nameController,
                 label: 'Nombres',
                 icon: Icons.person_outline,
+                focusNode: _nameFocusNode, // ✅ FocusNode configurado
+                textInputAction: TextInputAction.next, // ✅ Botón Next para ir a apellido
+                onFieldSubmitted: (_) => _lastNameFocusNode.requestFocus(), // ✅ Avanza al campo de apellido
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Ingresa tu nombre';
@@ -356,6 +383,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                 controller: _lastNameController,
                 label: 'Apellidos',
                 icon: Icons.person_outline,
+                focusNode: _lastNameFocusNode, // ✅ FocusNode configurado
+                textInputAction: TextInputAction.next, // ✅ Botón Next para ir a email
+                onFieldSubmitted: (_) => _emailFocusNode.requestFocus(), // ✅ Avanza al campo de email
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Ingresa tus apellidos';
@@ -430,6 +460,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           controller: _emailController,
           label: 'Correo electrónico',
           icon: Icons.email_outlined,
+          focusNode: _emailFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.next, // ✅ Botón Next para ir a teléfono
+          onFieldSubmitted: (_) => _phoneFocusNode.requestFocus(), // ✅ Avanza al campo de teléfono
           keyboardType: TextInputType.emailAddress,
           validator: (value) {
             if (value == null || value.isEmpty) {
@@ -446,6 +479,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           controller: _phoneController,
           label: 'Número de teléfono',
           icon: Icons.phone_outlined,
+          focusNode: _phoneFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.next, // ✅ Botón Next para ir a contacto de emergencia
+          onFieldSubmitted: (_) => _emergencyNameFocusNode.requestFocus(), // ✅ Avanza al nombre de contacto de emergencia
           keyboardType: TextInputType.phone,
           validator: (value) {
             if (value == null || value.isEmpty) {
@@ -535,6 +571,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           controller: _emergencyNameController,
           label: 'Nombre completo',
           icon: Icons.person_pin,
+          focusNode: _emergencyNameFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.next, // ✅ Botón Next para ir a teléfono de emergencia
+          onFieldSubmitted: (_) => _emergencyPhoneFocusNode.requestFocus(), // ✅ Avanza al teléfono de emergencia
           validator: (value) {
             if (value == null || value.isEmpty) {
               return 'Ingresa el nombre del contacto';
@@ -547,6 +586,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           controller: _emergencyPhoneController,
           label: 'Teléfono de emergencia',
           icon: Icons.phone_in_talk,
+          focusNode: _emergencyPhoneFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.done, // ✅ Botón Done en teclado (último campo)
+          onFieldSubmitted: (_) => FocusScope.of(context).unfocus(), // ✅ Cierra teclado al presionar Done
           keyboardType: TextInputType.phone,
           validator: (value) {
             if (value == null || value.isEmpty) {
@@ -663,12 +705,18 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
     required TextEditingController controller,
     required String label,
     required IconData icon,
+    FocusNode? focusNode, // ✅ FocusNode para navegación
+    TextInputAction? textInputAction, // ✅ Acción del teclado (next/done)
+    ValueChanged<String>? onFieldSubmitted, // ✅ Callback al presionar Enter/Done
     TextInputType keyboardType = TextInputType.text,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode, // ✅ FocusNode configurado
+      textInputAction: textInputAction, // ✅ Botón del teclado configurado
+      onFieldSubmitted: onFieldSubmitted, // ✅ Callback configurado
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,

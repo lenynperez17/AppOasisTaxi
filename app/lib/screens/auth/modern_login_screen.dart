@@ -23,7 +23,12 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
+  // ✅ FocusNodes para manejo de teclado y navegación entre campos
+  final _phoneFocusNode = FocusNode();
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
+
   late AnimationController _backgroundController;
   late AnimationController _formController;
   late AnimationController _logoController;
@@ -95,7 +100,17 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
     _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    // ✅ Dispose de FocusNodes
+    _phoneFocusNode.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
+  }
+
+  // ✅ Método helper para ocultar teclado de manera confiable en Android
+  void _hideKeyboard() {
+    FocusScope.of(context).unfocus(); // Quita el foco
+    SystemChannels.textInput.invokeMethod('TextInput.hide'); // Fuerza el ocultamiento en Android
   }
 
   Future<void> _login() async {
@@ -415,9 +430,11 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
             );
           }),
           
-          // Contenido principal
+          // Contenido principal con GestureDetector para cerrar teclado al tocar fuera
           SafeArea(
-            child: SingleChildScrollView(
+            child: GestureDetector(
+              onTap: _hideKeyboard, // ✅ Cierra teclado al tocar fuera (Android compatible)
+              child: SingleChildScrollView(
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Column(
@@ -733,7 +750,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                   if (_usePhoneLogin)
                                     TextFormField(
                                       controller: _phoneController,
+                                      focusNode: _phoneFocusNode, // ✅ FocusNode configurado
                                       keyboardType: TextInputType.phone,
+                                      textInputAction: TextInputAction.done, // ✅ Botón Done en teclado
+                                      onFieldSubmitted: (_) => _login(), // ✅ Ejecuta login al presionar Done
                                       inputFormatters: [
                                         FilteringTextInputFormatter.digitsOnly,
                                         LengthLimitingTextInputFormatter(9),
@@ -780,7 +800,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                   else
                                     TextFormField(
                                       controller: _emailController,
+                                      focusNode: _emailFocusNode, // ✅ FocusNode configurado
                                       keyboardType: TextInputType.emailAddress,
+                                      textInputAction: TextInputAction.next, // ✅ Botón Next para ir a contraseña
+                                      onFieldSubmitted: (_) => _passwordFocusNode.requestFocus(), // ✅ Avanza al campo de contraseña
                                       autocorrect: false,
                                       decoration: InputDecoration(
                                         labelText: 'Email',
@@ -815,7 +838,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                   if (!_usePhoneLogin)
                                     TextFormField(
                                       controller: _passwordController,
+                                      focusNode: _passwordFocusNode, // ✅ FocusNode configurado
                                       obscureText: _obscurePassword,
+                                      textInputAction: TextInputAction.done, // ✅ Botón Done en teclado
+                                      onFieldSubmitted: (_) => _login(), // ✅ Ejecuta login al presionar Done
                                       decoration: InputDecoration(
                                         labelText: 'Contraseña',
                                         hintText: 'Mínimo 8 caracteres',
@@ -957,13 +983,14 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                   ],
                 ),
               ),
-            ),
+            ), // SingleScrollView
+          ), // GestureDetector
           ),
         ],
       ),
     );
   }
-  
+
   Widget _buildSocialButton({
     required IconData icon,
     required Color color,

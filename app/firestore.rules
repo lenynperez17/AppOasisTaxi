@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Función helper para verificar si es el propio usuario
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Función helper para verificar si está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // REGLA PARA USUARIOS - PERMITIR LECTURA PARA VERIFICACIÓN DE EMAIL
+    match /users/{userId} {
+      // ✅ CORREGIDO: Permitir lectura para verificar si email existe durante registro
+      allow read: if true;
+
+      // Permitir CREAR nuevos usuarios (registro)
+      allow create: if true;
+
+      // Solo el propio usuario puede actualizar su perfil
+      allow update: if isOwner(userId);
+
+      // Solo el propio usuario puede eliminar su cuenta
+      allow delete: if isOwner(userId);
+    }
+
+    // REGLA PARA VIAJES
+    match /trips/{tripId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // REGLA PARA EMERGENCIAS
+    match /emergencies/{emergencyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+    }
+
+    // REGLA PARA NOTIFICACIONES
+    match /users/{userId}/notifications/{notificationId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // REGLA PARA FAVORITOS (subcollection de users)
+    match /users/{userId}/favorites/{favoriteId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // REGLA PARA VIAJES/RIDES (historial de viajes completados)
+    match /rides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // REGLA PARA PROMOCIONES (solo lectura para usuarios autenticados)
+    match /promotions/{promotionId} {
+      allow read: if isAuthenticated();
+      // Solo administradores pueden crear/editar promociones
+      allow write: if false;
+    }
+
+    // Denegar todo lo demás por defecto
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

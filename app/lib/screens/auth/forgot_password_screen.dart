@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import '../../core/theme/modern_theme.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
@@ -18,11 +19,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   final _codeController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  
+
+  // ✅ FocusNodes para manejo de teclado y navegación entre campos
+  final _phoneFocusNode = FocusNode();
+  final _codeFocusNode = FocusNode();
+  final _newPasswordFocusNode = FocusNode();
+  final _confirmPasswordFocusNode = FocusNode();
+
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  
+
   int _currentStep = 0; // 0: phone, 1: code, 2: new password
   bool _isLoading = false;
   bool _obscureNewPassword = true;
@@ -32,12 +39,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   @override
   void initState() {
     super.initState();
-    
+
     _animationController = AnimationController(
       duration: Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -45,7 +52,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
       parent: _animationController,
       curve: Curves.easeIn,
     ));
-    
+
     _slideAnimation = Tween<Offset>(
       begin: Offset(0, 0.5),
       end: Offset.zero,
@@ -53,7 +60,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
       parent: _animationController,
       curve: Curves.easeOutBack,
     ));
-    
+
     _animationController.forward();
   }
 
@@ -64,7 +71,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     _codeController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    // ✅ Dispose de FocusNodes
+    _phoneFocusNode.dispose();
+    _codeFocusNode.dispose();
+    _newPasswordFocusNode.dispose();
+    _confirmPasswordFocusNode.dispose();
     super.dispose();
+  }
+
+  // ✅ Método helper para ocultar teclado de manera confiable en Android
+  void _hideKeyboard() {
+    FocusScope.of(context).unfocus(); // Quita el foco
+    SystemChannels.textInput.invokeMethod('TextInput.hide'); // Fuerza el ocultamiento en Android
   }
 
   void _sendVerificationCode() async {
@@ -80,20 +98,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
     }
 
     setState(() => _isLoading = true);
-    
+
     // Simular envío de código
     await Future.delayed(Duration(seconds: 2));
-    
+
     // Generar código de 6 dígitos
     _verificationCode = (100000 + math.Random().nextInt(900000)).toString();
-    
+
     if (mounted) {
       setState(() {
         _isLoading = false;
         _currentStep = 1;
       });
     }
-    
+
     // En producción, enviar SMS real
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -103,7 +121,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
         duration: Duration(seconds: 5),
       ),
     );
-    
+
     _animationController.reset();
     _animationController.forward();
   }
@@ -125,7 +143,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
         _currentStep = 2;
       });
     }
-    
+
     _animationController.reset();
     _animationController.forward();
   }
@@ -133,20 +151,21 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   void _resetPassword() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
-      
+
       // Simular reset de contraseña
       await Future.delayed(Duration(seconds: 2));
-      
+
       if (mounted) {
         setState(() => _isLoading = false);
       }
-      
+
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -241,7 +260,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
                   ],
                 ),
               ),
-              
+
               // Progress indicator
               Container(
                 margin: EdgeInsets.symmetric(horizontal: 20),
@@ -255,7 +274,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
                   ],
                 ),
               ),
-              
+
               // Content
               Expanded(
                 child: Container(
@@ -272,12 +291,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
                       ),
                     ],
                   ),
-                  child: SingleChildScrollView(
-                    child: FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _buildCurrentStepContent(),
+                  child: GestureDetector(
+                    onTap: _hideKeyboard, // ✅ Cierra teclado al tocar fuera (Android compatible)
+                    child: SingleChildScrollView(
+                      child: FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: SlideTransition(
+                          position: _slideAnimation,
+                          child: _buildCurrentStepContent(),
+                        ),
                       ),
                     ),
                   ),
@@ -293,7 +315,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   Widget _buildStepIndicator(int step, String label) {
     final isActive = _currentStep >= step;
     final isCompleted = _currentStep > step;
-    
+
     return Expanded(
       child: Column(
         children: [
@@ -310,7 +332,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
                   : Text(
                       '${step + 1}',
                       style: TextStyle(
-                        color: isActive ? Colors.white : ModernTheme.textSecondary,
+                        color:
+                            isActive ? Colors.white : ModernTheme.textSecondary,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -321,7 +344,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             label,
             style: TextStyle(
               fontSize: 12,
-              color: isActive ? ModernTheme.oasisGreen : ModernTheme.textSecondary,
+              color:
+                  isActive ? ModernTheme.oasisGreen : ModernTheme.textSecondary,
               fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
             ),
           ),
@@ -332,7 +356,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
 
   Widget _buildStepConnector(int step) {
     final isActive = _currentStep > step;
-    
+
     return Expanded(
       child: Container(
         height: 2,
@@ -380,7 +404,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 30),
-        
+
         Text(
           'Ingresa tu número de teléfono',
           style: TextStyle(
@@ -399,10 +423,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 30),
-        
+
         // Phone input
         TextFormField(
           controller: _phoneController,
+          focusNode: _phoneFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.done, // ✅ Botón Done en teclado
+          onFieldSubmitted: (_) =>
+              _sendVerificationCode(), // ✅ Ejecuta envío de código al presionar Done
           keyboardType: TextInputType.phone,
           decoration: InputDecoration(
             labelText: 'Número de teléfono',
@@ -418,7 +446,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 30),
-        
+
         // Send button
         AnimatedPulseButton(
           text: 'Enviar Código',
@@ -439,7 +467,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           color: ModernTheme.oasisGreen,
         ),
         SizedBox(height: 30),
-        
+
         Text(
           'Verificación por SMS',
           style: TextStyle(
@@ -458,10 +486,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 30),
-        
+
         // Code input
         TextFormField(
           controller: _codeController,
+          focusNode: _codeFocusNode, // ✅ FocusNode configurado
+          textInputAction: TextInputAction.done, // ✅ Botón Done en teclado
+          onFieldSubmitted: (_) =>
+              _verifyCode(), // ✅ Ejecuta verificación al presionar Done
           keyboardType: TextInputType.number,
           maxLength: 6,
           textAlign: TextAlign.center,
@@ -483,7 +515,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 20),
-        
+
         // Resend button
         TextButton(
           onPressed: _sendVerificationCode,
@@ -493,7 +525,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           ),
         ),
         SizedBox(height: 20),
-        
+
         // Verify button
         AnimatedPulseButton(
           text: 'Verificar',
@@ -515,7 +547,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             color: ModernTheme.oasisGreen,
           ),
           SizedBox(height: 30),
-          
+
           Text(
             'Crear Nueva Contraseña',
             style: TextStyle(
@@ -534,10 +566,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             ),
           ),
           SizedBox(height: 30),
-          
+
           // New password
           TextFormField(
             controller: _newPasswordController,
+            focusNode: _newPasswordFocusNode, // ✅ FocusNode configurado
+            textInputAction: TextInputAction
+                .next, // ✅ Botón Next para ir a confirmar contraseña
+            onFieldSubmitted: (_) => _confirmPasswordFocusNode
+                .requestFocus(), // ✅ Avanza al campo de confirmar contraseña
             obscureText: _obscureNewPassword,
             decoration: InputDecoration(
               labelText: 'Nueva contraseña',
@@ -570,21 +607,34 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             },
           ),
           SizedBox(height: 20),
-          
+
           // Confirm password
           TextFormField(
             controller: _confirmPasswordController,
+            focusNode: _confirmPasswordFocusNode, // ✅ FocusNode configurado
+            textInputAction:
+                TextInputAction.done, // ✅ Botón Done en teclado (último campo)
+            onFieldSubmitted: (_) {
+              // ✅ Valida y ejecuta reset al presionar Done
+              if (_formKey.currentState!.validate()) {
+                _resetPassword();
+              }
+            },
             obscureText: _obscureConfirmPassword,
             decoration: InputDecoration(
               labelText: 'Confirmar contraseña',
-              prefixIcon: Icon(Icons.lock_outline, color: ModernTheme.oasisGreen),
+              prefixIcon:
+                  Icon(Icons.lock_outline, color: ModernTheme.oasisGreen),
               suffixIcon: IconButton(
                 icon: Icon(
-                  _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                  _obscureConfirmPassword
+                      ? Icons.visibility
+                      : Icons.visibility_off,
                   color: ModernTheme.textSecondary,
                 ),
                 onPressed: () {
-                  setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
+                  setState(
+                      () => _obscureConfirmPassword = !_obscureConfirmPassword);
                 },
               ),
               border: OutlineInputBorder(
@@ -603,7 +653,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             },
           ),
           SizedBox(height: 30),
-          
+
           // Reset button
           AnimatedPulseButton(
             text: 'Actualizar Contraseña',

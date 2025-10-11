@@ -20,6 +20,8 @@ dependencies:
   google_maps_flutter_web: ^0.5.9
   geolocator: ^14.0.2
   geocoding: ^4.0.0
+  flutter_typeahead: ^5.2.0  # ✅ NUEVO: Autocomplete sin recrear TextField (resuelve problema de borrado del teclado)
+  flutter_polyline_points: ^3.1.0  # Para obtener rutas reales con Google Directions API
   
   # UI & Design
   google_fonts: ^6.2.1

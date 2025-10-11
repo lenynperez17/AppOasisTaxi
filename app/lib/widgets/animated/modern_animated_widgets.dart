@@ -54,7 +54,24 @@ class _AnimatedPulseButtonState extends State<AnimatedPulseButton>
       curve: Curves.easeInOut,
     ));
 
-    _controller.repeat(reverse: true);
+    // Solo animar si el botón está habilitado
+    if (widget.onPressed != null && !widget.isLoading) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(AnimatedPulseButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Actualizar animación cuando cambie el estado del botón
+    if (widget.onPressed != null && !widget.isLoading) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    } else {
+      _controller.stop();
+      _controller.reset();
+    }
   }
 
   @override
@@ -65,79 +82,85 @@ class _AnimatedPulseButtonState extends State<AnimatedPulseButton>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _scaleAnimation.value,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [
-                BoxShadow(
-                  color: (widget.color ?? ModernTheme.primaryOrange)
-                      .withValues(alpha: 0.3 * _pulseAnimation.value),
-                  blurRadius: 20 * _pulseAnimation.value,
-                  spreadRadius: 5,
-                ),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: widget.isLoading ? null : widget.onPressed,
-                borderRadius: BorderRadius.circular(30),
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        widget.color ?? ModernTheme.primaryOrange,
-                        (widget.color ?? ModernTheme.primaryOrange)
-                            .withValues(alpha: 0.8),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: widget.isLoading
-                      ? SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            if (widget.icon != null) ...[
-                              Icon(
-                                widget.icon,
-                                color: Colors.white,
-                                size: 22,
-                              ),
-                              SizedBox(width: 8),
-                            ],
-                            Text(
-                              widget.text,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
-              ),
-            ),
-          ),
-        );
+    // Determinar si el botón está habilitado
+    final isEnabled = widget.onPressed != null && !widget.isLoading;
+
+    return GestureDetector(
+      onTap: widget.isLoading ? null : () {
+        print('🔍🔍🔍 GESTURE DETECTOR TAP!');
+        print('🔍 onPressed != null: ${widget.onPressed != null}');
+        print('🔍 isLoading: ${widget.isLoading}');
+        if (widget.onPressed != null) {
+          print('🔍 EJECUTANDO onPressed!');
+          widget.onPressed!();
+        } else {
+          print('🔍 onPressed ES NULL!');
+        }
       },
+      child: Opacity(
+        opacity: isEnabled ? 1.0 : 0.5,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                widget.color ?? ModernTheme.primaryOrange,
+                (widget.color ?? ModernTheme.primaryOrange)
+                    .withValues(alpha: 0.8),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(
+                color: (widget.color ?? ModernTheme.primaryOrange)
+                    .withValues(alpha: 0.3),
+                blurRadius: 15,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: widget.isLoading
+              ? Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.max,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (widget.icon != null) ...[
+                      Icon(
+                        widget.icon,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      SizedBox(width: 6),
+                    ],
+                    Flexible(
+                      child: Text(
+                        widget.text,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 }

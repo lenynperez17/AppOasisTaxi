@@ -145,9 +145,17 @@ class OasisTaxiApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PriceNegotiationProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
-      child: MaterialApp(
-        title: 'Oasis Taxi',
-        debugShowCheckedModeBanner: false,
+      // ✅ DISMISS GLOBAL DEL TECLADO - Funciona en TODA la aplicación
+      child: Builder(
+        builder: (context) => GestureDetector(
+          onTap: () {
+            // Cerrar teclado al hacer tap en cualquier parte de la app
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+          behavior: HitTestBehavior.translucent, // No bloquear otros gestos
+          child: MaterialApp(
+            title: 'Oasis Taxi',
+            debugShowCheckedModeBanner: false,
         
         // Configurar localizaciones
         localizationsDelegates: [
@@ -315,7 +323,9 @@ class OasisTaxiApp extends StatelessWidget {
           ),
           '/map-picker': (context) => MapPickerScreen(),
         },
-      ),
-    );
+          ), // Cierre de MaterialApp
+        ), // Cierre de GestureDetector
+      ), // Cierre de Builder
+    ); // Cierre de MultiProvider
   }
 }
