@@ -6,16 +6,13 @@ import '../constants/app_constants.dart';
 /// USO:
 /// ```dart
 /// // Formatear con moneda actual (Perú = 'S/')
-/// formatCurrency(150.50) // → 'S/ 150.50'
+/// 150.50.toCurrency() // → 'S/ 150.50'
 ///
 /// // Formatear sin espacios
-/// formatCurrency(150.50, includeSpace: false) // → 'S/150.50'
+/// 150.50.toCurrency(includeSpace: false) // → 'S/150.50'
 ///
 /// // Solo el valor formateado
-/// formatCurrencyValue(150.50) // → '150.50'
-///
-/// // Formatear con otra moneda específica
-/// formatCurrencyWithSymbol(150.50, '\$') // → '\$ 150.50'
+/// 150.50.toCurrencyValue() // → '150.50'
 /// ```
 class CurrencyFormatter {
   /// Formatea un monto con el símbolo de moneda actual
@@ -58,28 +55,6 @@ class CurrencyFormatter {
     return _formatNumber(amount, decimalDigits);
   }
 
-  /// Formatea con un símbolo de moneda personalizado
-  ///
-  /// Útil cuando necesitas mostrar una moneda diferente temporalmente
-  ///
-  /// **Ejemplos:**
-  /// ```dart
-  /// formatCurrencyWithSymbol(150.50, '\$') // → '\$ 150.50'
-  /// formatCurrencyWithSymbol(150.50, '€') // → '€ 150.50'
-  /// ```
-  static String formatCurrencyWithSymbol(
-    double amount,
-    String customSymbol, {
-    bool includeSpace = true,
-    int decimals = 2,
-  }) {
-    final formattedValue = _formatNumber(amount, decimals);
-
-    return includeSpace
-        ? '$customSymbol $formattedValue'
-        : '$customSymbol$formattedValue';
-  }
-
   /// Formatea el número con separadores de miles y decimales
   /// según el locale actual
   ///
@@ -93,52 +68,6 @@ class CurrencyFormatter {
     );
 
     return formatter.format(amount).trim();
-  }
-
-  /// Obtiene el símbolo de moneda actual
-  ///
-  /// **Ejemplo:**
-  /// ```dart
-  /// getCurrencySymbol() // → 'S/' (Perú)
-  /// getCurrencySymbol() // → '\$' (USA/México)
-  /// ```
-  static String getCurrencySymbol() {
-    return AppConstants.currencySymbol;
-  }
-
-  /// Obtiene el código ISO de la moneda actual
-  ///
-  /// **Ejemplo:**
-  /// ```dart
-  /// getCurrencyCode() // → 'PEN' (Perú)
-  /// getCurrencyCode() // → 'USD' (USA)
-  /// ```
-  static String getCurrencyCode() {
-    return AppConstants.currencyCode;
-  }
-
-  /// Formatea un rango de precios
-  ///
-  /// **Ejemplos:**
-  /// ```dart
-  /// formatCurrencyRange(100, 200) // → 'S/ 100.00 - S/ 200.00'
-  /// formatCurrencyRange(100, 200, compact: true) // → 'S/ 100 - 200'
-  /// ```
-  static String formatCurrencyRange(
-    double minAmount,
-    double maxAmount, {
-    bool compact = false,
-  }) {
-    if (compact) {
-      final symbol = AppConstants.currencySymbol;
-      final min = _formatNumber(minAmount, 0);
-      final max = _formatNumber(maxAmount, 0);
-      return '$symbol $min - $max';
-    }
-
-    final min = formatCurrency(minAmount);
-    final max = formatCurrency(maxAmount);
-    return '$min - $max';
   }
 
   /// Formatea un monto con signo (+ o -)
