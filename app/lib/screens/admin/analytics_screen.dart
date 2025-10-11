@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -472,7 +473,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         ),
         _buildKPICard(
           'Ingresos Totales',
-          'S/ ${(_analyticsData['totalRevenue'] as double).toStringAsFixed(0)}',
+          (_analyticsData['totalRevenue'] as double).toCurrency(),
           Icons.attach_money,
           ModernTheme.success,
           '+18.5%',
@@ -512,10 +513,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         ),
         _buildKPICard(
           'Precio Promedio',
-          'S/ ${_analyticsData['avgTripPrice']}',
+          (_analyticsData['avgTripPrice'] as double).toCurrency(),
           Icons.payments,
           Colors.indigo,
-          '+S/ 2.10',
+          (2.10).toCurrencyWithSign(),
           true,
         ),
         _buildKPICard(
@@ -903,13 +904,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                   ),
                   Expanded(
                     child: Text(
-                      'S/ ${(zone['revenue'] as double).toStringAsFixed(0)}',
+                      (zone['revenue'] as double).toCurrency(decimals: 0),
                       style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   ),
                   Expanded(
                     child: Text(
-                      'S/ ${zone['avgPrice']}',
+                      (zone['avgPrice'] as double).toCurrency(),
                       style: TextStyle(color: ModernTheme.success, fontSize: 14),
                     ),
                   ),
@@ -1010,7 +1011,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        'S/ ${driver['earnings']}',
+                        (driver['earnings'] as double).toCurrency(),
                         style: TextStyle(
                           color: ModernTheme.success,
                           fontSize: 14,
@@ -1276,7 +1277,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 ),
               ),
               Text(
-                'S/ ${_analyticsData['totalRevenue']}',
+                (_analyticsData['totalRevenue'] as double).toCurrency(),
                 style: TextStyle(
                   color: ModernTheme.success,
                   fontSize: 24,
@@ -1311,7 +1312,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             ),
           ),
           Text(
-            'S/ ${amount.toStringAsFixed(2)}',
+            amount.toCurrency(),
             style: TextStyle(
               color: Colors.white70,
               fontSize: 14,

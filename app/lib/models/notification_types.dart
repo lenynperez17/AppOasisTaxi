@@ -1,3 +1,5 @@
+import '../core/utils/currency_formatter.dart';
+
 /// Tipos de notificaciones del sistema OasisTaxi
 enum NotificationType {
   // Notificaciones generales
@@ -246,7 +248,7 @@ class TaxiNotificationBuilder {
     return NotificationData(
       id: 'ride_request_$tripId',
       title: '¡Nueva solicitud de viaje!',
-      body: 'Pasajero: $passengerName\nDesde: $pickupAddress\nTarifa: S/ ${estimatedFare.toStringAsFixed(2)}',
+      body: 'Pasajero: $passengerName\nDesde: $pickupAddress\nTarifa: ${estimatedFare.toCurrency()}',
       type: NotificationType.tripRequest,
       priority: NotificationPriority.high,
       channel: NotificationChannel.rides,
@@ -295,7 +297,7 @@ class TaxiNotificationBuilder {
     return NotificationData(
       id: 'payment_success_$tripId',
       title: 'Pago procesado exitosamente',
-      body: 'S/ ${amount.toStringAsFixed(2)} pagado con $paymentMethod',
+      body: '${amount.toCurrency()} pagado con $paymentMethod',
       type: NotificationType.paymentSuccess,
       priority: NotificationPriority.normal,
       channel: NotificationChannel.payments,

@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import '../../core/theme/modern_theme.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class EarningsDetailsScreen extends StatefulWidget {
   const EarningsDetailsScreen({super.key});
@@ -372,24 +374,24 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
         children: [
           _buildSummaryCard(
             'Ganancias Totales',
-            'S/ ${_earningsData!.totalEarnings.toStringAsFixed(2)}',
+            _earningsData!.totalEarnings.toCurrency(),
             Icons.attach_money,
             ModernTheme.success,
-            'Neto: S/ ${_earningsData!.netEarnings.toStringAsFixed(2)}',
+            'Neto: ${_earningsData!.netEarnings.toCurrency()}',
           ),
           _buildSummaryCard(
             'Total de Viajes',
             '${_earningsData!.totalTrips}',
             Icons.directions_car,
             ModernTheme.primaryBlue,
-            'Promedio: S/ ${_earningsData!.avgPerTrip.toStringAsFixed(2)}',
+            'Promedio: ${_earningsData!.avgPerTrip.toCurrency()}',
           ),
           _buildSummaryCard(
             'Horas Trabajadas',
             '${_earningsData!.totalHours.toStringAsFixed(1)}h',
             Icons.schedule,
             ModernTheme.warning,
-            'Por hora: S/ ${_earningsData!.avgPerHour.toStringAsFixed(2)}',
+            'Por hora: ${_earningsData!.avgPerHour.toCurrency()}',
           ),
           _buildSummaryCard(
             'Tiempo Online',
@@ -498,7 +500,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             'Ganancias',
             goals.achievedEarnings,
             goals.earningsGoal,
-            'S/',
+            AppConstants.currencySymbol,
             ModernTheme.success,
           ),
           SizedBox(height: 16),
@@ -681,7 +683,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Tu mejor hora: ${bestHour.hour}:00 - ${bestHour.hour + 1}:00 (S/ ${bestHour.earnings.toStringAsFixed(2)})',
+              'Tu mejor hora: ${bestHour.hour}:00 - ${bestHour.hour + 1}:00 (${bestHour.earnings.toCurrency()})',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
@@ -762,7 +764,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             ),
           ),
           Text(
-            '${amount >= 0 ? '' : '-'}S/ ${amount.abs().toStringAsFixed(2)}',
+            '${amount >= 0 ? '' : '-'}${amount.abs().toCurrency()}',
             style: TextStyle(
               fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
               fontSize: isTotal ? 16 : 14,

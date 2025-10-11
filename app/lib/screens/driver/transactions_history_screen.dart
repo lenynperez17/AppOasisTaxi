@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class TransactionsHistoryScreen extends StatefulWidget {
   const TransactionsHistoryScreen({super.key});
@@ -269,14 +270,14 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
         children: [
           _buildSummaryCard(
             'Balance Pendiente',
-            'S/ ${_summary['pendingBalance']}',
+            (_summary['pendingBalance'] as double).toCurrency(),
             Icons.account_balance_wallet,
             ModernTheme.oasisGreen,
             true,
           ),
           _buildSummaryCard(
             'Total Ganado',
-            'S/ ${_summary['totalEarnings']}',
+            (_summary['totalEarnings'] as double).toCurrency(),
             Icons.attach_money,
             ModernTheme.primaryBlue,
             false,
@@ -290,7 +291,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           ),
           _buildSummaryCard(
             'Retiros',
-            'S/ ${_summary['totalWithdrawals']}',
+            (_summary['totalWithdrawals'] as double).toCurrency(),
             Icons.money_off,
             Colors.purple,
             false,
@@ -577,7 +578,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${transaction.amount >= 0 ? '+' : ''}S/ ${transaction.amount.abs().toStringAsFixed(2)}',
+                    '${transaction.amount >= 0 ? '+' : ''}${transaction.amount.abs().toCurrency()}',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -586,7 +587,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                   ),
                   if (transaction.netEarnings != null)
                     Text(
-                      'Neto: S/ ${transaction.netEarnings!.toStringAsFixed(2)}',
+                      'Neto: ${transaction.netEarnings!.toCurrency()}',
                       style: TextStyle(
                         fontSize: 11,
                         color: ModernTheme.textSecondary,
@@ -754,7 +755,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                     ),
                   ),
                   Text(
-                    '${transaction.amount >= 0 ? '+' : ''}S/ ${transaction.amount.abs().toStringAsFixed(2)}',
+                    '${transaction.amount >= 0 ? '+' : ''}${transaction.amount.abs().toCurrency()}',
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -784,12 +785,12 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                       ]),
                       SizedBox(height: 20),
                       _buildDetailSection('Detalles Financieros', [
-                        _buildDetailRow('Tarifa', 'S/ ${transaction.amount.toStringAsFixed(2)}'),
+                        _buildDetailRow('Tarifa', transaction.amount.toCurrency()),
                         if (transaction.tip != null)
-                          _buildDetailRow('Propina', 'S/ ${transaction.tip!.toStringAsFixed(2)}'),
-                        _buildDetailRow('Comisión (-20%)', 'S/ ${(transaction.commission ?? 0).toStringAsFixed(2)}'),
+                          _buildDetailRow('Propina', transaction.tip!.toCurrency()),
+                        _buildDetailRow('Comisión (-20%)', (transaction.commission ?? 0).toCurrency()),
                         Divider(),
-                        _buildDetailRow('Ganancia Neta', 'S/ ${(transaction.netEarnings ?? 0).toStringAsFixed(2)}', bold: true),
+                        _buildDetailRow('Ganancia Neta', (transaction.netEarnings ?? 0).toCurrency(), bold: true),
                       ]),
                       SizedBox(height: 20),
                       _buildDetailSection('Pago', [
@@ -800,7 +801,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                     
                     if (transaction.type == TransactionType.withdrawal) ...[
                       _buildDetailSection('Detalles del Retiro', [
-                        _buildDetailRow('Monto', 'S/ ${transaction.amount.abs().toStringAsFixed(2)}'),
+                        _buildDetailRow('Monto', transaction.amount.abs().toCurrency()),
                         _buildDetailRow('Método', transaction.withdrawalMethod ?? ''),
                         _buildDetailRow('Cuenta', transaction.bankAccount ?? ''),
                         _buildDetailRow('Estado', 'Completado'),
@@ -811,7 +812,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                       _buildDetailSection('Detalles del Bono', [
                         _buildDetailRow('Tipo', transaction.bonusType ?? ''),
                         _buildDetailRow('Descripción', transaction.description ?? ''),
-                        _buildDetailRow('Monto', 'S/ ${transaction.amount.toStringAsFixed(2)}'),
+                        _buildDetailRow('Monto', transaction.amount.toCurrency()),
                       ]),
                     ],
                     

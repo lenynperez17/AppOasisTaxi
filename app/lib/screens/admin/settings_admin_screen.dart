@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class SettingsAdminScreen extends StatefulWidget {
   const SettingsAdminScreen({super.key});
@@ -261,15 +263,15 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               padding: EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildPriceInput('Tarifa Base', _baseFareController, 'S/'),
+                  _buildPriceInput('Tarifa Base', _baseFareController, AppConstants.currencySymbol),
                   SizedBox(height: 16),
-                  _buildPriceInput('Por Kilómetro', _perKmController, 'S/'),
+                  _buildPriceInput('Por Kilómetro', _perKmController, AppConstants.currencySymbol),
                   SizedBox(height: 16),
-                  _buildPriceInput('Por Minuto', _perMinController, 'S/'),
+                  _buildPriceInput('Por Minuto', _perMinController, AppConstants.currencySymbol),
                   SizedBox(height: 16),
                   _buildPriceInput('Comisión Plataforma', _commissionController, '%'),
                   SizedBox(height: 16),
-                  _buildPriceInput('Penalidad Cancelación', _cancellationFeeController, 'S/'),
+                  _buildPriceInput('Penalidad Cancelación', _cancellationFeeController, AppConstants.currencySymbol),
                 ],
               ),
             ),
@@ -394,7 +396,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       child: ExpansionTile(
         title: Text(zone.name),
         subtitle: Text(
-          zone.restricted ? 'Zona Restringida' : 'Recargo: S/ ${zone.surcharge}',
+          zone.restricted ? 'Zona Restringida' : 'Recargo: ${zone.surcharge.toCurrency()}',
           style: TextStyle(
             color: zone.restricted ? ModernTheme.error : ModernTheme.textSecondary,
           ),
@@ -433,11 +435,11 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
                 SizedBox(height: 16),
                 TextField(
                   decoration: InputDecoration(
-                    labelText: 'Recargo (S/)',
+                    labelText: 'Recargo (${AppConstants.currencySymbol})',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    prefixText: 'S/ ',
+                    prefixText: '${AppConstants.currencySymbol} ',
                   ),
                   controller: TextEditingController(text: zone.surcharge.toString()),
                   keyboardType: TextInputType.number,
@@ -521,7 +523,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               Text(
                 promo.type == DiscountType.percentage
                     ? '${promo.discount}% OFF'
-                    : 'S/ ${promo.discount} OFF',
+                    : '${promo.discount.toCurrency()} OFF',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,

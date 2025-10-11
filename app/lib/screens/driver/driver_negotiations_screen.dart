@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/utils/currency_formatter.dart';
 import '../../providers/price_negotiation_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/price_negotiation_model.dart';
@@ -229,7 +231,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                         ),
                       ),
                       Text(
-                        'S/. ${negotiation.offeredPrice.toStringAsFixed(2)}',
+                        negotiation.offeredPrice.toCurrency(),
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -434,21 +436,21 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Precio sugerido: S/. ${negotiation.suggestedPrice.toStringAsFixed(2)}',
+              'Precio sugerido: ${negotiation.suggestedPrice.toCurrency()}',
               style: TextStyle(color: Colors.grey[600]),
             ),
             Text(
-              'Precio del pasajero: S/. ${negotiation.offeredPrice.toStringAsFixed(2)}',
+              'Precio del pasajero: ${negotiation.offeredPrice.toCurrency()}',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: priceController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Tu precio',
-                prefixText: 'S/. ',
-                border: OutlineInputBorder(),
+                prefixText: '${AppConstants.currencySymbol} ',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import '../../core/theme/modern_theme.dart';
+import '../../core/utils/currency_formatter.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({super.key});
@@ -411,7 +412,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           Expanded(
             child: _buildStatCard(
               'Ganancias',
-              'S/ ${(_profile!.totalEarnings / 1000).toStringAsFixed(1)}K',
+              _profile!.totalEarnings.toCurrencyCompact(),
               Icons.attach_money,
               ModernTheme.warning,
             ),

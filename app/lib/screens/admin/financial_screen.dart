@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/utils/currency_formatter.dart';
 
 enum TransactionType { trip, withdrawal, commission, refund }
 enum PaymentStatus { completed, pending, failed, processing }
@@ -374,11 +375,11 @@ class _FinancialScreenState extends State<FinancialScreen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildIncomeStat('Total Ingresos', 'S/ ${_financialStats['totalRevenue']!.toStringAsFixed(2)}'),
+              _buildIncomeStat('Total Ingresos', _financialStats['totalRevenue']!.toCurrency()),
               Container(width: 1, height: 40, color: Colors.grey.shade300),
-              _buildIncomeStat('Comisiones', 'S/ ${_financialStats['totalCommissions']!.toStringAsFixed(2)}'),
+              _buildIncomeStat('Comisiones', _financialStats['totalCommissions']!.toCurrency()),
               Container(width: 1, height: 40, color: Colors.grey.shade300),
-              _buildIncomeStat('Promedio', 'S/ ${_financialStats['avgTripValue']!.toStringAsFixed(2)}'),
+              _buildIncomeStat('Promedio', _financialStats['avgTripValue']!.toCurrency()),
             ],
           ),
         ),
@@ -432,7 +433,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                       ),
                     ),
                     Text(
-                      'S/ ${_financialStats['pendingPayouts']!.toStringAsFixed(2)} en ${_pendingPayouts.length} solicitudes',
+                      '${_financialStats['pendingPayouts']!.toCurrency()} en ${_pendingPayouts.length} solicitudes',
                       style: TextStyle(color: ModernTheme.textSecondary, fontSize: 14),
                     ),
                   ],
@@ -492,7 +493,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                       style: TextStyle(color: ModernTheme.textSecondary, fontSize: 14),
                     ),
                     Text(
-                      'S/ 234.50',
+                      234.50.toCurrency(),
                       style: TextStyle(
                         color: ModernTheme.textPrimary,
                         fontSize: 24,
@@ -580,42 +581,42 @@ class _FinancialScreenState extends State<FinancialScreen>
       children: [
         _buildStatCard(
           'Ingresos Totales',
-          'S/ ${_financialStats['totalRevenue']!.toStringAsFixed(2)}',
+          _financialStats['totalRevenue']!.toCurrency(),
           Icons.trending_up,
           ModernTheme.success,
           '+22.5%',
         ),
         _buildStatCard(
           'Comisiones',
-          'S/ ${_financialStats['totalCommissions']!.toStringAsFixed(2)}',
+          _financialStats['totalCommissions']!.toCurrency(),
           Icons.percent,
           ModernTheme.primaryBlue,
           '20%',
         ),
         _buildStatCard(
           'Pagos Pendientes',
-          'S/ ${_financialStats['pendingPayouts']!.toStringAsFixed(2)}',
+          _financialStats['pendingPayouts']!.toCurrency(),
           Icons.schedule,
           ModernTheme.warning,
           '${_pendingPayouts.length}',
         ),
         _buildStatCard(
           'Pagos Completados',
-          'S/ ${_financialStats['completedPayouts']!.toStringAsFixed(2)}',
+          _financialStats['completedPayouts']!.toCurrency(),
           Icons.check_circle,
           ModernTheme.oasisGreen,
           '156',
         ),
         _buildStatCard(
           'Valor Promedio',
-          'S/ ${_financialStats['avgTripValue']!.toStringAsFixed(2)}',
+          _financialStats['avgTripValue']!.toCurrency(),
           Icons.analytics,
           Colors.purple,
           '+5.2%',
         ),
         _buildStatCard(
           'Promedio Diario',
-          'S/ ${_financialStats['dailyAverage']!.toStringAsFixed(2)}',
+          _financialStats['dailyAverage']!.toCurrency(),
           Icons.calendar_today,
           Colors.orange,
           '+18.3%',
@@ -784,7 +785,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                 ),
               ),
               Text(
-                'S/ ${_financialStats['totalCommissions']!.toStringAsFixed(2)}',
+                _financialStats['totalCommissions']!.toCurrency(),
                 style: TextStyle(
                   color: ModernTheme.oasisGreen,
                   fontSize: 18,
@@ -819,7 +820,7 @@ class _FinancialScreenState extends State<FinancialScreen>
             ),
           ),
           Text(
-            'S/ ${amount.toStringAsFixed(2)}',
+            amount.toCurrency(),
             style: TextStyle(
               color: ModernTheme.textSecondary,
               fontSize: 14,
@@ -919,11 +920,11 @@ class _FinancialScreenState extends State<FinancialScreen>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${transaction.type == TransactionType.withdrawal || transaction.type == TransactionType.refund ? '-' : '+'} S/ ${transaction.amount.toStringAsFixed(2)}',
+                '${transaction.type == TransactionType.withdrawal || transaction.type == TransactionType.refund ? '-' : '+'} ${transaction.amount.toCurrency()}',
                 style: TextStyle(
-                  color: transaction.type == TransactionType.withdrawal || 
-                         transaction.type == TransactionType.refund 
-                    ? ModernTheme.error 
+                  color: transaction.type == TransactionType.withdrawal ||
+                         transaction.type == TransactionType.refund
+                    ? ModernTheme.error
                     : ModernTheme.success,
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1001,7 +1002,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        'S/ ${transaction.amount.toStringAsFixed(2)}',
+                        transaction.amount.toCurrency(),
                         style: TextStyle(
                           color: ModernTheme.textPrimary,
                           fontSize: 18,
@@ -1071,7 +1072,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                       Icon(Icons.percent, size: 14, color: ModernTheme.primaryBlue),
                       SizedBox(width: 4),
                       Text(
-                        'Comisión: S/ ${transaction.commission!.toStringAsFixed(2)}',
+                        'Comisión: ${transaction.commission!.toCurrency()}',
                         style: TextStyle(
                           color: ModernTheme.primaryBlue,
                           fontSize: 12,
@@ -1130,7 +1131,7 @@ class _FinancialScreenState extends State<FinancialScreen>
                   ),
                 ),
                 Text(
-                  'S/ ${payout['amount'].toStringAsFixed(2)}',
+                  payout['amount'].toCurrency(),
                   style: TextStyle(
                     color: ModernTheme.warning,
                     fontSize: 20,
@@ -1323,7 +1324,7 @@ class _FinancialScreenState extends State<FinancialScreen>
             
             _buildDetailRow('ID Transacción', transaction.id),
             _buildDetailRow('Tipo', _getTransactionTypeName(transaction.type)),
-            _buildDetailRow('Monto', 'S/ ${transaction.amount.toStringAsFixed(2)}'),
+            _buildDetailRow('Monto', transaction.amount.toCurrency()),
             _buildDetailRow('Estado', _getStatusText(transaction.status)),
             _buildDetailRow('Fecha', _formatDateTime(transaction.date)),
             
@@ -1332,7 +1333,7 @@ class _FinancialScreenState extends State<FinancialScreen>
             if (transaction.passengerName != null)
               _buildDetailRow('Pasajero', transaction.passengerName!),
             if (transaction.commission != null)
-              _buildDetailRow('Comisión', 'S/ ${transaction.commission!.toStringAsFixed(2)}'),
+              _buildDetailRow('Comisión', transaction.commission!.toCurrency()),
             if (transaction.invoiceNumber != null)
               _buildDetailRow('Nº Factura', transaction.invoiceNumber!),
             
@@ -1538,7 +1539,7 @@ class _FinancialScreenState extends State<FinancialScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Procesar Todos los Pagos', style: TextStyle(color: Colors.white)),
         content: Text(
-          '¿Estás seguro de procesar ${_pendingPayouts.length} pagos por un total de S/ ${_financialStats['pendingPayouts']!.toStringAsFixed(2)}?',
+          '¿Estás seguro de procesar ${_pendingPayouts.length} pagos por un total de ${_financialStats['pendingPayouts']!.toCurrency()}?',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -1569,7 +1570,7 @@ class _FinancialScreenState extends State<FinancialScreen>
   void _approvePayout(Map<String, dynamic> payout) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Pago aprobado: S/ ${payout['amount'].toStringAsFixed(2)} a ${payout['driverName']}'),
+        content: Text('Pago aprobado: ${payout['amount'].toCurrency()} a ${payout['driverName']}'),
         backgroundColor: ModernTheme.success,
       ),
     );

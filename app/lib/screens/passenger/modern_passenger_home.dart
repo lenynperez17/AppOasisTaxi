@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // ✅ Para ocultar teclado en Android
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart'; // ✅ NUEVO: Para reverse geocoding (coordenadas → dirección)
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:math'; // Para funciones matemáticas: sin, cos, sqrt, atan2 (fórmula Haversine)
@@ -112,6 +113,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   ServiceType _selectedServiceType = ServiceType.standard; // Tipo de servicio seleccionado (default: Standard)
   String _selectedPaymentMethod = 'Efectivo'; // Método de pago seleccionado (default: Efectivo)
   bool _isSelectingLocation = false; // ✅ true cuando el usuario está ingresando/seleccionando direcciones
+  bool _showContinueButton = false; // ✅ true solo cuando el teclado está cerrado y campos están llenos
+  Timer? _buttonDelayTimer; // Timer para delay del botón después de cerrar teclado
+  bool _isAdjustingPickup = false; // ✅ NUEVO: true cuando se muestra el marcador fijo para ajustar ubicación moviendo el mapa
 
   // Coordenadas de lugares seleccionados con Google Places
   LatLng? _pickupCoordinates;
@@ -315,6 +319,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     _priceController.dispose();
     _priceFocusNode.dispose();
     _negotiationTimer?.cancel();
+    _buttonDelayTimer?.cancel(); // ✅ Cancelar timer del botón
     super.dispose();
   }
 
@@ -361,6 +366,95 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     // Si ambas ubicaciones están disponibles, hacer zoom para mostrar ambas
     if (_pickupCoordinates != null && _destinationCoordinates != null) {
       await _zoomToShowBothLocations();
+    }
+  }
+
+  /// ✅ NUEVO: Activar modo de ajuste de ubicación de recogida
+  /// Muestra un marcador fijo en el centro del mapa y permite al usuario
+  /// mover el mapa debajo del marcador para ajustar la ubicación exacta
+  void _startPickupAdjustment() {
+    if (_pickupCoordinates == null) return;
+
+    if (!mounted) return;
+    setState(() {
+      _isAdjustingPickup = true;
+      // Ocultar todos los marcadores mientras se ajusta
+      _markers.clear();
+      // Ocultar la ruta mientras se ajusta
+      _polylines.clear();
+    });
+
+    // Centrar el mapa en la ubicación de pickup
+    if (_mapController != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(_pickupCoordinates!, _kZoomLevelClose),
+      );
+    }
+
+    AppLogger.info('Modo de ajuste de pickup activado - mapa centrado en: ${_pickupCoordinates!.latitude}, ${_pickupCoordinates!.longitude}');
+  }
+
+  /// ✅ NUEVO: Confirmar la ubicación de recogida ajustada
+  /// Obtiene las coordenadas del centro del mapa y las establece como punto de recogida
+  Future<void> _confirmPickupLocation() async {
+    if (_mapController == null || !mounted) return;
+
+    try {
+      // Obtener la posición central del mapa (donde está el marcador fijo)
+      final LatLngBounds bounds = await _mapController!.getVisibleRegion();
+      final LatLng center = LatLng(
+        (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
+        (bounds.northeast.longitude + bounds.southwest.longitude) / 2,
+      );
+
+      AppLogger.info('Ubicación de pickup confirmada: ${center.latitude}, ${center.longitude}');
+
+      // Actualizar coordenadas de pickup
+      setState(() {
+        _pickupCoordinates = center;
+      });
+
+      // Hacer reverse geocoding para actualizar el campo de texto
+      final newAddress = await _reverseGeocode(center);
+      if (newAddress != null && mounted) {
+        setState(() {
+          _pickupController.text = newAddress;
+        });
+        AppLogger.info('Dirección actualizada: $newAddress');
+      }
+
+      // Restaurar marcadores y ruta
+      await _addMarkerAndZoom(_pickupCoordinates!, 'pickup_marker', true);
+      if (_destinationCoordinates != null) {
+        await _addMarkerAndZoom(_destinationCoordinates!, 'destination_marker', false);
+        await _updateRoutePolyline();
+
+        // Recalcular valores con la nueva ubicación
+        final distance = _calculateDistance(_pickupCoordinates!, _destinationCoordinates!);
+        final time = _estimateTime(distance);
+        final price = _calculatePrice(distance);
+
+        if (!mounted) return;
+        setState(() {
+          _calculatedDistance = distance;
+          _estimatedTime = time;
+          _suggestedPrice = price;
+        });
+        AppLogger.info('Ruta recalculada: $distance km, $time min, S/ ${price.toStringAsFixed(2)}');
+      }
+
+      // Salir del modo de ajuste
+      if (!mounted) return;
+      setState(() {
+        _isAdjustingPickup = false;
+      });
+
+    } catch (e, stackTrace) {
+      AppLogger.error('Error confirmando ubicación de pickup', e, stackTrace);
+      if (!mounted) return;
+      setState(() {
+        _isAdjustingPickup = false;
+      });
     }
   }
 
@@ -515,7 +609,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       _estimatedTime = null;
       _suggestedPrice = null;
       _offeredPrice = 15.0; // Valor por defecto
+      _showContinueButton = false; // ✅ Resetear estado del botón
+      _isAdjustingPickup = false; // ✅ Salir del modo de ajuste
     });
+
+    // ✅ Cancelar timer del botón si existe
+    _buttonDelayTimer?.cancel();
 
     AppLogger.info('Estado reseteado completamente - usuario puede comenzar de nuevo');
   }
@@ -592,26 +691,95 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             mapToolbarEnabled: false,
             style: _cleanMapStyle, // ✅ Aplica estilo limpio que oculta POIs y etiquetas
           ),
-          
-          // Barra de búsqueda superior
-          SafeArea(
-            child: AnimatedBuilder(
-              animation: _searchBarAnimation,
-              builder: (context, child) {
-                return Transform.translate(
-                  offset: Offset(0, -100 * (1 - _searchBarAnimation.value)),
-                  child: Opacity(
-                    opacity: _searchBarAnimation.value,
-                    child: _buildSearchBar(),
+
+          // ✅ NUEVO: Marcador fijo en el centro del mapa (solo visible en modo de ajuste)
+          if (_isAdjustingPickup)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Marcador azul fijo en el centro
+                  Icon(
+                    Icons.location_on,
+                    size: 48,
+                    color: Colors.blue,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
                   ),
-                );
-              },
+                  // Texto descriptivo
+                  Container(
+                    margin: EdgeInsets.only(top: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      'Mueve el mapa para ajustar tu ubicación',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: ModernTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+
+          // ✅ NUEVO: Botón de confirmar ubicación (solo visible en modo de ajuste)
+          if (_isAdjustingPickup)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 40,
+              child: AnimatedPulseButton(
+                text: 'Confirmar ubicación',
+                icon: Icons.check,
+                onPressed: () async {
+                  await _confirmPickupLocation();
+                  // Después de confirmar, mostrar la negociación de precio
+                  if (!mounted) return;
+                  setState(() {
+                    _showPriceNegotiation = true;
+                  });
+                },
+              ),
+            ),
+
+          // Barra de búsqueda superior
+          // ✅ Ocultar cuando está ajustando pickup
+          if (!_isAdjustingPickup)
+            SafeArea(
+              child: AnimatedBuilder(
+                animation: _searchBarAnimation,
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(0, -100 * (1 - _searchBarAnimation.value)),
+                    child: Opacity(
+                      opacity: _searchBarAnimation.value,
+                      child: _buildSearchBar(),
+                    ),
+                  );
+                },
+              ),
+            ),
 
           // Selector de tipo de servicio (debajo de la barra de búsqueda)
-          // ✅ Ocultar cuando el usuario está seleccionando ubicaciones para mostrar mapa limpio
-          if (!_isSelectingLocation)
+          // ✅ Ocultar cuando el usuario está seleccionando ubicaciones o ajustando pickup
+          if (!_isSelectingLocation && !_isAdjustingPickup)
             Positioned(
               top: 160, // Debajo de la barra de búsqueda
               left: 0,
@@ -633,35 +801,39 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             ),
 
           // Bottom sheet con negociación de precio
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SizedBox(
-              height: MediaQuery.of(context).size.height * 0.7, // Limitar altura máxima a 70% de pantalla
-              child: AnimatedBuilder(
-                animation: _bottomSheetAnimation,
-                builder: (context, child) {
-                  return Transform.translate(
-                    offset: Offset(0, 400 * (1 - _bottomSheetAnimation.value)),
-                    child: _showDriverOffers
-                        ? _buildDriverOffersSheet()
-                        : _showPriceNegotiation
-                            ? _buildPriceNegotiationSheet()
-                            : _buildDestinationSheet(),
-                  );
-                },
+          // ✅ Ocultar cuando está ajustando pickup
+          if (!_isAdjustingPickup)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7, // Limitar altura máxima a 70% de pantalla
+                child: AnimatedBuilder(
+                  animation: _bottomSheetAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(0, 400 * (1 - _bottomSheetAnimation.value)),
+                      child: _showDriverOffers
+                          ? _buildDriverOffersSheet()
+                          : _showPriceNegotiation
+                              ? _buildPriceNegotiationSheet()
+                              : _buildDestinationSheet(),
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-          
-          
+
+
           // Botón de ubicación actual
-          Positioned(
-            right: 16,
-            bottom: _showPriceNegotiation ? 420 : 320,
-            child: _buildLocationButton(),
-          ),
+          // ✅ Ocultar cuando está ajustando pickup
+          if (!_isAdjustingPickup)
+            Positioned(
+              right: 16,
+              bottom: _showPriceNegotiation ? 420 : 320,
+              child: _buildLocationButton(),
+            ),
         ], // Stack children
       ), // Stack
       ), // GestureDetector
@@ -772,18 +944,34 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                     isPickup: true,
                   ),
                 ),
-                // ✅ Botón para usar ubicación actual (GPS)
+                // ✅ Botón para usar ubicación actual (GPS con reverse geocoding)
                 IconButton(
                   icon: Icon(Icons.my_location, color: ModernTheme.primaryOrange),
                   onPressed: () async {
-                    _pickupController.text = 'Mi ubicación actual';
+                    // ✅ NUEVO: Mostrar indicador de carga mientras obtiene ubicación
+                    _pickupController.text = 'Obteniendo ubicación...';
+
                     // Obtener coordenadas GPS reales
                     final currentLocation = await _getCurrentLocation();
                     if (currentLocation != null && mounted) {
+                      // ✅ NUEVO: Hacer reverse geocoding para obtener dirección legible
+                      final address = await _reverseGeocode(currentLocation);
+
+                      if (!mounted) return;
                       setState(() {
                         _pickupCoordinates = currentLocation;
+                        // Mostrar dirección real si está disponible, sino mostrar "Mi ubicación actual"
+                        _pickupController.text = address ?? 'Mi ubicación actual';
                       });
                       _addMarkerAndZoom(currentLocation, 'pickup_marker', true);
+
+                      AppLogger.info('Ubicación GPS con dirección: $address');
+                    } else {
+                      // Si no se pudo obtener ubicación, limpiar el campo
+                      if (!mounted) return;
+                      setState(() {
+                        _pickupController.text = '';
+                      });
                     }
                   },
                 ),
@@ -826,9 +1014,41 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   }
   
   Widget _buildDestinationSheet() {
-    // Verificar si ambos campos están llenos para mostrar el botón
+    // ✅ Detectar si el teclado está abierto
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
+    // Verificar si ambos campos están llenos
     final bool canContinue = _pickupController.text.isNotEmpty &&
                              _destinationController.text.isNotEmpty;
+
+    // ✅ FIX CRÍTICO: Usar WidgetsBinding.addPostFrameCallback para evitar setState durante build
+    // Si ambos campos están llenos Y el teclado está cerrado, iniciar timer
+    if (canContinue && !isKeyboardOpen && !_showContinueButton) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Cancelar timer anterior si existe
+        _buttonDelayTimer?.cancel();
+        // Esperar 300ms después de que el teclado se cierre para mostrar botón
+        _buttonDelayTimer = Timer(Duration(milliseconds: 300), () {
+          if (mounted && canContinue && !isKeyboardOpen) {
+            setState(() {
+              _showContinueButton = true;
+            });
+          }
+        });
+      });
+    } else if (!canContinue || isKeyboardOpen) {
+      // Si los campos no están llenos o el teclado está abierto, ocultar botón
+      if (_showContinueButton) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _buttonDelayTimer?.cancel();
+          if (mounted) {
+            setState(() {
+              _showContinueButton = false;
+            });
+          }
+        });
+      }
+    }
 
     // DraggableScrollableSheet para permitir arrastrar con el dedo
     // ✅ Tamaños condicionales:
@@ -836,7 +1056,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     // - Con botón "Continuar": 50% (expandido para mostrar botón completo)
     // - Sin botón "Continuar": 35% (tamaño normal)
     return DraggableScrollableSheet(
-      initialChildSize: _isSelectingLocation ? 0.08 : (canContinue ? 0.50 : 0.35), // ✅ 50% cuando hay botón
+      initialChildSize: _isSelectingLocation ? 0.08 : (_showContinueButton ? 0.50 : 0.35), // ✅ 50% cuando hay botón VISIBLE
       minChildSize: _isSelectingLocation ? 0.08 : 0.2,      // 8% cuando selecciona, 20% normal
       maxChildSize: 0.65,     // Máximo 65% (sin cubrir todo el mapa)
       builder: (BuildContext context, ScrollController scrollController) {
@@ -922,8 +1142,8 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                         ),
                       ],
 
-                      // ✅ FIX OVERFLOW: Botón Continuar DENTRO del scrollable (solo si ambos campos están llenos)
-                      if (canContinue)
+                      // ✅ FIX OVERFLOW + DELAY: Botón Continuar DENTRO del scrollable (solo visible después de cerrar teclado)
+                      if (_showContinueButton)
                         Padding(
                           padding: EdgeInsets.fromLTRB(20, 16, 20, 20),
                           child: AnimatedPulseButton(
@@ -931,6 +1151,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                             icon: Icons.arrow_forward,
                             onPressed: () async {
                               if (!mounted) return;
+
+                              // ✅ Resetear estado del botón inmediatamente al presionar
+                              setState(() {
+                                _showContinueButton = false;
+                              });
+                              _buttonDelayTimer?.cancel();
 
                               // ✅ Capturar ScaffoldMessenger ANTES de cualquier await para evitar warnings
                               final scaffoldMessenger = ScaffoldMessenger.of(context);
@@ -966,7 +1192,6 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                   _estimatedTime = time;
                                   _suggestedPrice = price;
                                   _offeredPrice = price; // Inicializar precio ofertado con el sugerido
-                                  _showPriceNegotiation = true;
                                   _isSelectingLocation = false; // ✅ Desactivar modo de selección para mostrar UI normal
                                 });
 
@@ -975,6 +1200,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 if (!mounted) return;
 
                                 AppLogger.info('Ruta calculada con coordenadas REALES: $distance km, $time min, S/ ${price.toStringAsFixed(2)}');
+
+                                // ✅ NUEVO: Activar modo de ajuste de pickup en lugar de ir directo a negociación
+                                _startPickupAdjustment();
                               } else {
                                 // Si aún no hay destino, mostrar advertencia
                                 AppLogger.warning('Falta seleccionar destino');
@@ -2002,7 +2230,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   Future<LatLng?> _getCurrentLocation() async {
     try {
       AppLogger.info('Obteniendo ubicación GPS real del dispositivo');
-      
+
       // Verificar permisos de ubicación
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -2012,7 +2240,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
           return null;
         }
       }
-      
+
       if (permission == LocationPermission.deniedForever) {
         AppLogger.error('Permisos de ubicación denegados permanentemente');
         return null;
@@ -2028,11 +2256,61 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
 
       final LatLng currentLocation = LatLng(position.latitude, position.longitude);
       AppLogger.info('Ubicación GPS real obtenida: ${position.latitude}, ${position.longitude}');
-      
+
       return currentLocation;
-      
+
     } catch (e, stackTrace) {
       AppLogger.error('Error obteniendo ubicación GPS real', e, stackTrace);
+      return null;
+    }
+  }
+
+  /// ✅ NUEVO: Obtener dirección legible desde coordenadas GPS (Reverse Geocoding)
+  /// Convierte LatLng a dirección de calle legible para el usuario
+  Future<String?> _reverseGeocode(LatLng coordinates) async {
+    try {
+      AppLogger.info('Realizando reverse geocoding para: ${coordinates.latitude}, ${coordinates.longitude}');
+
+      // Obtener placemarks (lugares) desde las coordenadas
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        coordinates.latitude,
+        coordinates.longitude,
+      );
+
+      if (placemarks.isEmpty) {
+        AppLogger.warning('No se encontraron resultados de reverse geocoding');
+        return null;
+      }
+
+      // Tomar el primer resultado (el más relevante)
+      final Placemark place = placemarks.first;
+
+      // Construir dirección legible
+      // Formato: "Calle, Número, Distrito, Ciudad"
+      List<String> addressParts = [];
+
+      if (place.street != null && place.street!.isNotEmpty) {
+        addressParts.add(place.street!);
+      }
+      if (place.subLocality != null && place.subLocality!.isNotEmpty) {
+        addressParts.add(place.subLocality!);
+      }
+      if (place.locality != null && place.locality!.isNotEmpty) {
+        addressParts.add(place.locality!);
+      }
+
+      final String address = addressParts.join(', ');
+
+      if (address.isEmpty) {
+        AppLogger.warning('Dirección vacía después de reverse geocoding');
+        return 'Ubicación encontrada (${coordinates.latitude.toStringAsFixed(4)}, ${coordinates.longitude.toStringAsFixed(4)})';
+      }
+
+      AppLogger.info('Reverse geocoding exitoso: $address');
+      return address;
+
+    } catch (e, stackTrace) {
+      AppLogger.error('Error en reverse geocoding', e, stackTrace);
       return null;
     }
   }
