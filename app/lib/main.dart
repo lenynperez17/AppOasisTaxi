@@ -6,11 +6,14 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_analytics/firebase_analytics.dart'; // ✅ NUEVO: Analytics
+import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ NUEVO: App Check
 import 'firebase_options.dart';
 import 'firebase_messaging_handler.dart';
 
 // Core
 import 'core/theme/modern_theme.dart';
+import 'core/widgets/notification_handler_widget.dart'; // ✅ NUEVO: Handler de clicks en notificaciones
 
 // Services
 import 'services/firebase_service.dart';
@@ -106,7 +109,20 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     AppLogger.info('✅ Firebase inicializado correctamente');
-    
+
+    // ✅ NUEVO: Inicializar Firebase Analytics
+    AppLogger.info('Inicializando Firebase Analytics...');
+    final analytics = FirebaseAnalytics.instance;
+    await analytics.logAppOpen(); // Log de apertura de app
+    AppLogger.info('✅ Firebase Analytics inicializado');
+
+    // ✅ NUEVO: Activar Firebase App Check con Debug Provider (cambiar a Play Integrity en producción)
+    AppLogger.info('Activando Firebase App Check...');
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug, // Para desarrollo - cambiar a playIntegrity en producción
+    );
+    AppLogger.info('✅ Firebase App Check activado (modo debug)');
+
     // Inicializar servicio Firebase
     AppLogger.info('Inicializando servicios de Firebase...');
     await FirebaseService().initialize();
@@ -145,15 +161,17 @@ class OasisTaxiApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PriceNegotiationProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
-      // ✅ DISMISS GLOBAL DEL TECLADO - Funciona en TODA la aplicación
-      child: Builder(
-        builder: (context) => GestureDetector(
-          onTap: () {
-            // Cerrar teclado al hacer tap en cualquier parte de la app
-            FocusManager.instance.primaryFocus?.unfocus();
-          },
-          behavior: HitTestBehavior.translucent, // No bloquear otros gestos
-          child: MaterialApp(
+      // ✅ HANDLER DE NOTIFICACIONES - Procesa clicks en notificaciones
+      child: NotificationHandlerWidget(
+        // ✅ DISMISS GLOBAL DEL TECLADO - Funciona en TODA la aplicación
+        child: Builder(
+          builder: (context) => GestureDetector(
+            onTap: () {
+              // Cerrar teclado al hacer tap en cualquier parte de la app
+              FocusManager.instance.primaryFocus?.unfocus();
+            },
+            behavior: HitTestBehavior.translucent, // No bloquear otros gestos
+            child: MaterialApp(
             title: 'Oasis Taxi',
             debugShowCheckedModeBanner: false,
         
@@ -323,9 +341,10 @@ class OasisTaxiApp extends StatelessWidget {
           ),
           '/map-picker': (context) => MapPickerScreen(),
         },
-          ), // Cierre de MaterialApp
-        ), // Cierre de GestureDetector
-      ), // Cierre de Builder
+            ), // Cierre de MaterialApp
+          ), // Cierre de GestureDetector
+        ), // Cierre de Builder
+      ), // Cierre de NotificationHandlerWidget
     ); // Cierre de MultiProvider
   }
 }

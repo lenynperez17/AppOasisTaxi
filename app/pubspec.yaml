@@ -38,7 +38,8 @@ dependencies:
   cloud_firestore: ^6.0.1
   firebase_storage: ^13.0.1
   firebase_messaging: ^16.0.1
-  firebase_analytics: ^12.0.1  
+  firebase_analytics: ^12.0.1
+  firebase_app_check: ^0.4.1  # ✅ NUEVO: App Check para seguridad adicional
   firebase_crashlytics: ^5.0.1
   firebase_database: ^12.0.1
   
@@ -102,10 +103,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
+
   assets:
     - assets/images/
     - assets/icons/
     - assets/animations/
-    # Service account credentials no van en assets por seguridad
-    # - assets/oasis-taxi-peru-service-account.json
+    - assets/service-account.json

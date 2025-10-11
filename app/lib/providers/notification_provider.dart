@@ -32,7 +32,11 @@ class NotificationProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   Map<String, bool> get subscribedTopics => Map.unmodifiable(_subscribedTopics);
   Map<String, bool> get topicSubscriptions => subscribedTopics;
-  String? get fcmToken => _firebaseService.currentUser?.uid; // Token basado en Firebase
+
+  /// ✅ CORREGIDO: Obtener el token FCM real del dispositivo, NO el UID del usuario
+  String? _cachedFcmToken;
+  String? get fcmToken => _cachedFcmToken;
+
   bool get isInitialized => _firebaseService.isInitialized;
 
   NotificationProvider() {
@@ -42,6 +46,13 @@ class NotificationProvider extends ChangeNotifier {
   /// Inicializar notificaciones
   Future<void> _initializeNotifications() async {
     await _notificationService.initialize();
+
+    // ✅ NUEVO: Obtener y cachear el token FCM real del dispositivo
+    _cachedFcmToken = await FCMService.getDeviceFCMToken();
+    if (_cachedFcmToken != null) {
+      debugPrint('✅ Token FCM obtenido: ${_cachedFcmToken!.substring(0, 20)}...');
+    }
+
     await _loadNotificationsFromFirebase();
   }
 
@@ -206,14 +217,32 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
   }
   
-  void subscribeToTopic(String topic) {
+  Future<void> subscribeToTopic(String topic) async {
     _subscribedTopics[topic] = true;
     notifyListeners();
+
+    // Suscribirse realmente al topic en Firebase
+    final success = await FCMService.subscribeToTopic(topic);
+    if (!success) {
+      // Si falla, revertir el estado
+      _subscribedTopics[topic] = false;
+      notifyListeners();
+      debugPrint('❌ Error suscribiendo a topic: $topic');
+    }
   }
-  
-  void unsubscribeFromTopic(String topic) {
+
+  Future<void> unsubscribeFromTopic(String topic) async {
     _subscribedTopics[topic] = false;
     notifyListeners();
+
+    // Desuscribirse realmente del topic en Firebase
+    final success = await FCMService.unsubscribeFromTopic(topic);
+    if (!success) {
+      // Si falla, revertir el estado
+      _subscribedTopics[topic] = true;
+      notifyListeners();
+      debugPrint('❌ Error desuscribiendo de topic: $topic');
+    }
   }
   
   void sendTestNotification() {

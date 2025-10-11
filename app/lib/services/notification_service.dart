@@ -85,14 +85,14 @@ class NotificationService {
     FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageOpenedApp);
 
     // Obtener mensaje inicial si la app se abrió desde una notificación
-    RemoteMessage? initialMessage = 
+    RemoteMessage? initialMessage =
         await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
       _handleMessageOpenedApp(initialMessage);
     }
 
-    // Configurar handler para mensajes en segundo plano
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // ✅ NOTA: El background handler se registra en main.dart con firebaseMessagingBackgroundHandler
+    // No registrar aquí para evitar duplicación
   }
 
   /// Handler para mensajes en primer plano
@@ -312,9 +312,5 @@ class NotificationService {
   }
 }
 
-/// Handler para mensajes en segundo plano (debe ser top-level)
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  debugPrint('📱 Mensaje en segundo plano: ${message.messageId}');
-  // Procesar mensaje en segundo plano si es necesario
-}
+// ✅ NOTA: El background handler está definido en firebase_messaging_handler.dart
+// No duplicar aquí para evitar conflictos

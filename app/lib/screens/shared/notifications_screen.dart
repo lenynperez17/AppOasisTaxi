@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../providers/notification_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../models/notification_types.dart';
 
 /// Pantalla de notificaciones completa
@@ -253,17 +254,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               ],
             ),
             SizedBox(height: 24),
-            _buildSettingsSection(
-              'Suscripciones',
-              [
-                _buildTopicTile('Usuarios generales', 'all_users', provider),
-                _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
-                _buildTopicTile('Pasajeros', 'passengers', provider),
-                _buildTopicTile('Conductores', 'drivers', provider),
-                _buildTopicTile('Administradores', 'admins', provider),
-                _buildTopicTile('Promociones', 'passenger_promotions', provider),
-                _buildTopicTile('Alertas del sistema', 'system_alerts', provider),
-              ],
+            Consumer<AuthProvider>(
+              builder: (context, authProvider, child) {
+                final userType = authProvider.currentUser?.userType ?? 'passenger';
+                return _buildSettingsSection(
+                  'Suscripciones',
+                  _getTopicsForUserType(userType, provider),
+                );
+              },
             ),
             SizedBox(height: 24),
             _buildSettingsSection(
@@ -443,11 +441,45 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     );
   }
 
+  List<Widget> _getTopicsForUserType(String userType, NotificationProvider provider) {
+    switch (userType) {
+      case 'passenger':
+        return [
+          _buildTopicTile('Notificaciones generales', 'all_users', provider),
+          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
+          _buildTopicTile('Notificaciones de pasajero', 'passengers', provider),
+          _buildTopicTile('Promociones especiales', 'passenger_promotions', provider),
+        ];
+      case 'driver':
+        return [
+          _buildTopicTile('Notificaciones generales', 'all_users', provider),
+          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
+          _buildTopicTile('Notificaciones de conductor', 'drivers', provider),
+          _buildTopicTile('Actualizaciones para conductores', 'driver_updates', provider),
+        ];
+      case 'admin':
+        return [
+          _buildTopicTile('Notificaciones generales', 'all_users', provider),
+          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
+          _buildTopicTile('Notificaciones de administrador', 'admins', provider),
+          _buildTopicTile('Alertas del sistema', 'system_alerts', provider),
+        ];
+      default:
+        // Caso por defecto: usuario sin tipo definido recibe solo lo básico
+        return [
+          _buildTopicTile('Notificaciones generales', 'all_users', provider),
+          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
+        ];
+    }
+  }
+
   Widget _buildTopicTile(String title, String topic, NotificationProvider provider) {
     final isSubscribed = provider.topicSubscriptions[topic] ?? false;
     return SwitchListTile(
       title: Text(title),
-      subtitle: Text('Suscripción a $topic'),
+      subtitle: Text(isSubscribed
+          ? 'Recibiendo notificaciones'
+          : 'Notificaciones desactivadas'),
       value: isSubscribed,
       onChanged: (value) {
         if (value) {

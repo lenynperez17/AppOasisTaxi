@@ -47,6 +47,8 @@ app.*.map.json
 # Firebase Admin SDK credentials (NEVER commit these!)
 **/firebase-adminsdk-*.json
 *-adminsdk-*.json
+**/service-account.json
+assets/service-account.json
 
 # Sensitive credentials and keys
 *.keystore

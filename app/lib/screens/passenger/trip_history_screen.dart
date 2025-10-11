@@ -265,7 +265,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
               ),
               _buildStatItem(
                 icon: Icons.attach_money,
-                value: '\$${_stats['totalSpent'].toStringAsFixed(2)}',
+                value: 'S/ ${_stats['totalSpent'].toStringAsFixed(2)}',
                 label: 'Gastado',
               ),
               _buildStatItem(
@@ -450,7 +450,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
                     ],
                   ),
                   Text(
-                    '\$${(trip.finalFare ?? trip.estimatedFare).toStringAsFixed(2)}',
+                    'S/ ${(trip.finalFare ?? trip.estimatedFare).toStringAsFixed(2)}',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -518,69 +518,82 @@ class _TripHistoryScreenState extends State<TripHistoryScreen>
               
               // Info adicional
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 16,
-                        backgroundColor: ModernTheme.oasisGreen.withValues(alpha: 0.1),
-                        child: Icon(
-                          Icons.person,
-                          size: 16,
-                          color: ModernTheme.oasisGreen,
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Conductor',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                          child: Icon(
+                            Icons.person,
+                            size: 16,
+                            color: ModernTheme.oasisGreen,
                           ),
-                          Row(
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.star, size: 12, color: Colors.amber),
                               Text(
-                                ' ${(trip.driverRating ?? 5.0).toStringAsFixed(1)}',
+                                'Conductor',
                                 style: TextStyle(
-                                  fontSize: 11,
-                                  color: ModernTheme.textSecondary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.star, size: 12, color: Colors.amber),
+                                  Text(
+                                    ' ${(trip.driverRating ?? 5.0).toStringAsFixed(1)}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: ModernTheme.textSecondary,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
-                  
-                  if (trip.status == 'completed' && trip.passengerRating != null)
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.star, size: 14, color: Colors.amber),
-                          SizedBox(width: 4),
-                          Text(
-                            'Tu calificación: ${trip.passengerRating?.toStringAsFixed(1)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.amber.shade800,
-                              fontWeight: FontWeight.w600,
+
+                  if (trip.status == 'completed' && trip.passengerRating != null) ...[
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.star, size: 14, color: Colors.amber),
+                            SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                'Tu calificación: ${trip.passengerRating?.toStringAsFixed(1)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.amber.shade800,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
+                  ],
                 ],
               ),
             ],
@@ -759,27 +772,9 @@ class _TripDetailsModalState extends State<TripDetailsModal> {
                       ),
                     ],
                   ),
-                  
+
                   SizedBox(height: 24),
-                  
-                  // Mapa simulado
-                  Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.map,
-                        size: 60,
-                        color: Colors.grey.shade400,
-                      ),
-                    ),
-                  ),
-                  
-                  SizedBox(height: 24),
-                  
+
                   // Información del viaje
                   _buildDetailSection(
                     'Ruta del Viaje',
@@ -809,8 +804,8 @@ class _TripDetailsModalState extends State<TripDetailsModal> {
                   _buildDetailSection(
                     'Pago',
                     [
-                      _buildDetailRow(Icons.attach_money, 'Monto', '\$${(widget.trip.finalFare ?? widget.trip.estimatedFare).toStringAsFixed(2)}'),
-                      _buildDetailRow(Icons.payment, 'Método', 'Efectivo'), // Default payment method
+                      _buildDetailRow(Icons.attach_money, 'Monto', 'S/ ${(widget.trip.finalFare ?? widget.trip.estimatedFare).toStringAsFixed(2)}'),
+                      _buildDetailRow(Icons.payment, 'Método', 'Efectivo (predeterminado)'),
                     ],
                   ),
                   
@@ -946,14 +941,23 @@ class _TripDetailsModalState extends State<TripDetailsModal> {
         children: [
           Icon(icon, size: 20, color: ModernTheme.textSecondary),
           SizedBox(width: 12),
-          Text(
-            label,
-            style: TextStyle(color: ModernTheme.textSecondary),
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(color: ModernTheme.textSecondary),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          Spacer(),
-          Text(
-            value,
-            style: TextStyle(fontWeight: FontWeight.w600),
+          SizedBox(width: 8),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
           ),
         ],
       ),
