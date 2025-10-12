@@ -1,76 +1,285 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Función helper para verificar si es el propio usuario
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
-    }
+    // ===== FUNCIONES HELPER DE AUTENTICACIÓN Y AUTORIZACIÓN =====
 
-    // Función helper para verificar si está autenticado
+    // Verificar si el usuario está autenticado
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // REGLA PARA USUARIOS - PERMITIR LECTURA PARA VERIFICACIÓN DE EMAIL
+    // Verificar si es el propietario del documento
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ✅ CORREGIDO: Verificar si es administrador (usar 'userType' en vez de 'role')
+    function isAdmin() {
+      return isAuthenticated() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'admin';
+    }
+
+    // Verificar si es conductor (incluye dual)
+    function isDriver() {
+      return isAuthenticated() &&
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'driver' ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'dual');
+    }
+
+    // ✅ CRÍTICO: Detectar si se intenta modificar campos protegidos
+    // Estos campos SOLO pueden ser modificados por administradores
+    function hasProtectedFieldChanges() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['userType', 'availableRoles', 'isAdmin', 'isVerified', 'email', 'id', 'createdAt', 'rating', 'totalTrips']);
+    }
+
+    // ===== REGLAS PARA COLECCIÓN DE USUARIOS =====
+
     match /users/{userId} {
-      // ✅ CORREGIDO: Permitir lectura para verificar si email existe durante registro
+      // ✅ SEPARADO: get (documento individual) vs list (queries de colección)
+      // GET: El usuario puede leer su propio documento o admin puede leer cualquiera
+      allow get: if isOwner(userId) || isAdmin();
+
+      // LIST: Solo administradores pueden hacer queries que retornen múltiples usuarios
+      // Esto previene que usuarios normales hagan Query(users) y vean todos los documentos
+      allow list: if isAdmin();
+
+      // Creación: Cualquier usuario autenticado (registro)
+      allow create: if isAuthenticated();
+
+      // ✅ CORREGIDO: Actualización con protección contra escalación de privilegios
+      // Usuario normal: NO puede cambiar userType, availableRoles, rating, etc.
+      allow update: if isOwner(userId) && !hasProtectedFieldChanges();
+
+      // Administrador: PUEDE actualizar cualquier campo
+      allow update: if isAdmin();
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA CONDUCTORES =====
+
+    match /drivers/{driverId} {
+      // Lectura: Cualquier usuario autenticado (para ver conductores disponibles)
+      allow read: if isAuthenticated();
+
+      // Creación: Usuario creando su propio perfil de conductor
+      allow create: if isAuthenticated() && request.auth.uid == driverId;
+
+      // Actualización: El conductor mismo o un administrador
+      allow update: if isOwner(driverId) || isAdmin();
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA PASAJEROS =====
+
+    match /passengers/{passengerId} {
+      // Lectura: El pasajero mismo, conductores, o admin
+      allow read: if isOwner(passengerId) || isDriver() || isAdmin();
+
+      // Creación: El pasajero mismo al registrarse
+      allow create: if isAuthenticated() && request.auth.uid == passengerId;
+
+      // Actualización: El pasajero mismo o un administrador
+      allow update: if isOwner(passengerId) || isAdmin();
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA VIAJES =====
+
+    match /trips/{tripId} {
+      // Lectura: Participantes del viaje o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.passengerId == request.auth.uid ||
+                      resource.data.driverId == request.auth.uid ||
+                      isAdmin());
+
+      // Creación: Cualquier usuario autenticado
+      allow create: if isAuthenticated();
+
+      // Actualización: Participantes del viaje o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.passengerId == request.auth.uid ||
+                       resource.data.driverId == request.auth.uid ||
+                       isAdmin());
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA CALIFICACIONES (RATINGS) =====
+
+    match /ratings/{ratingId} {
+      // Lectura: Usuarios involucrados o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.fromUserId == request.auth.uid ||
+                      resource.data.toUserId == request.auth.uid ||
+                      isAdmin());
+
+      // Creación: Usuario autenticado
+      allow create: if isAuthenticated();
+
+      // ✅ SEGURIDAD: Las calificaciones NO se pueden editar (evitar manipulación)
+      allow update: if false;
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA MENSAJES DE CHAT =====
+
+    match /chats/{chatId}/messages/{messageId} {
+      // Lectura: Solo participantes del chat o admin
+      allow read: if isAuthenticated() &&
+                     (get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]) ||
+                      isAdmin());
+
+      // Creación: Solo participantes del chat
+      allow create: if isAuthenticated() &&
+                      get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]);
+
+      // Los mensajes NO se pueden editar (integridad del historial)
+      allow update: if false;
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA CHATS =====
+
+    match /chats/{chatId} {
+      // Lectura: Solo participantes del chat o admin
+      allow read: if isAuthenticated() &&
+                     (resource.data.participants.hasAny([request.auth.uid]) || isAdmin());
+
+      // Creación: Usuarios autenticados
+      allow create: if isAuthenticated();
+
+      // Actualización: Solo participantes o admin
+      allow update: if isAuthenticated() &&
+                      (resource.data.participants.hasAny([request.auth.uid]) || isAdmin());
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA NOTIFICACIONES =====
+
+    match /notifications/{notificationId} {
+      // Lectura: Solo el destinatario o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Creación: Solo administrador (sistema)
+      allow create: if isAdmin();
+
+      // Actualización: El destinatario o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Eliminación: El destinatario o administrador
+      allow delete: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // ===== REGLAS PARA FAVORITOS =====
+
+    match /favorites/{favoriteId} {
+      // Lectura: Solo el propietario
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      // Creación: El usuario creando su favorito
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+
+      // Actualización: El propietario
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+
+      // Eliminación: El propietario
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // ===== REGLAS PARA TICKETS DE SOPORTE =====
+
+    match /supportTickets/{ticketId} {
+      // Lectura: El creador del ticket o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Creación: Cualquier usuario autenticado
+      allow create: if isAuthenticated();
+
+      // Actualización: El creador o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA CONFIGURACIÓN (Públicas) =====
+
+    match /config/{document} {
+      // Lectura: Público
       allow read: if true;
 
-      // Permitir CREAR nuevos usuarios (registro)
-      allow create: if true;
-
-      // Solo el propio usuario puede actualizar su perfil
-      allow update: if isOwner(userId);
-
-      // Solo el propio usuario puede eliminar su cuenta
-      allow delete: if isOwner(userId);
+      // Escritura: Solo administradores
+      allow write: if isAdmin();
     }
 
-    // REGLA PARA VIAJES
-    match /trips/{tripId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+    // ===== REGLAS PARA TARIFAS (Públicas) =====
+
+    match /rates/{rateId} {
+      // Lectura: Público
+      allow read: if true;
+
+      // Escritura: Solo administradores
+      allow write: if isAdmin();
     }
 
-    // REGLA PARA EMERGENCIAS
-    match /emergencies/{emergencyId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+    // ===== REGLAS PARA PROMOCIONES (Públicas) =====
+
+    match /promotions/{promoId} {
+      // Lectura: Público
+      allow read: if true;
+
+      // Escritura: Solo administradores
+      allow write: if isAdmin();
     }
 
-    // REGLA PARA NOTIFICACIONES
-    match /users/{userId}/notifications/{notificationId} {
-      allow read, write: if isOwner(userId);
+    // ===== REGLAS PARA MÉTODO DE PAGO =====
+
+    match /paymentMethods/{methodId} {
+      // Lectura: Solo el propietario o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Creación: El usuario creando su método de pago
+      allow create: if isAuthenticated() &&
+                      request.resource.data.userId == request.auth.uid;
+
+      // Actualización: El propietario o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Eliminación: El propietario o administrador
+      allow delete: if isAuthenticated() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
     }
 
-    // REGLA PARA FAVORITOS (subcollection de users)
-    match /users/{userId}/favorites/{favoriteId} {
-      allow read, write: if isOwner(userId);
-    }
+    // ===== REGLAS PARA AUDITORÍA (Solo Lectura para Admins) =====
 
-    // REGLA PARA VIAJES/RIDES (historial de viajes completados)
-    match /rides/{rideId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
-    }
+    match /auditLogs/{logId} {
+      // Lectura: Solo administradores
+      allow read: if isAdmin();
 
-    // REGLA PARA PROMOCIONES (solo lectura para usuarios autenticados)
-    match /promotions/{promotionId} {
-      allow read: if isAuthenticated();
-      // Solo administradores pueden crear/editar promociones
+      // Escritura: Solo sistema (Cloud Functions)
       allow write: if false;
-    }
-
-    // Denegar todo lo demás por defecto
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

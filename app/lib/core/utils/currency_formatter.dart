@@ -170,3 +170,34 @@ extension CurrencyFormatterExtension on double {
     );
   }
 }
+
+/// ✅ Extension para num (cubre int y double literales)
+/// Previene NoSuchMethodError cuando se usan literales numéricos o ints
+extension CurrencyFormatterNumExtension on num {
+  /// Convierte el num a formato de moneda (convierte a double internamente)
+  String toCurrency({bool includeSpace = true, int? decimals}) {
+    return CurrencyFormatter.formatCurrency(
+      toDouble(),
+      includeSpace: includeSpace,
+      decimals: decimals,
+    );
+  }
+
+  /// Convierte el num a formato numérico sin símbolo
+  String toCurrencyValue({int? decimals}) {
+    return CurrencyFormatter.formatCurrencyValue(toDouble(), decimals: decimals);
+  }
+
+  /// Convierte el num a formato compacto con K, M, B
+  String toCurrencyCompact() {
+    return CurrencyFormatter.formatCurrencyCompact(toDouble());
+  }
+
+  /// Convierte el num a formato con signo
+  String toCurrencyWithSign({bool showPlusSign = true}) {
+    return CurrencyFormatter.formatCurrencyWithSign(
+      toDouble(),
+      showPlusSign: showPlusSign,
+    );
+  }
+}

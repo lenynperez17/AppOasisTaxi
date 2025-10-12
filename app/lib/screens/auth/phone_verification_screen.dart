@@ -36,11 +36,14 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
   bool _isLoading = false;
   bool _hasError = false;
   String _currentOTP = "";
-  
+
   // Timer para reenvío
   Timer? _timer;
   int _resendTimer = 60;
   bool _canResend = false;
+
+  // ✅ Flag para prevenir setState después de dispose
+  bool _isDisposed = false;
   
   @override
   void initState() {
@@ -84,11 +87,21 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
   
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
+    // Cancelar timer INMEDIATAMENTE para prevenir callbacks pendientes
+    _timer?.cancel();
+    _timer = null;
+
+    // Cerrar y limpiar todos los recursos
     _errorController?.close();
+    _errorController = null;
+
     _otpController.dispose();
     _animationController.dispose();
     _timerAnimationController.dispose();
-    _timer?.cancel();
+
     super.dispose();
   }
   
@@ -96,8 +109,22 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
     _canResend = false;
     _resendTimer = 60;
     _timer?.cancel();
-    
+
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir setState después de dispose
+      // 1. Verificar flag de disposed
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+
+      // 2. Verificar si el widget sigue montado
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      // 3. Solo ahora es seguro llamar a setState
       setState(() {
         if (_resendTimer > 0) {
           _resendTimer--;

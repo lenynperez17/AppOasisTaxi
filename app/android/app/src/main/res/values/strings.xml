@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Oasis Taxi</string>
+
+    <!-- ✅ FACEBOOK SDK: Configura tus credenciales reales aquí -->
+    <!-- INSTRUCCIONES COMPLETAS: Ver archivo INSTRUCCIONES_FACEBOOK_SDK.md en la raíz del proyecto -->
+
+    <!-- 1. Crea una app en https://developers.facebook.com/apps -->
+    <!-- 2. Obtén el App ID de "Settings" > "Basic" -->
+    <!-- 3. Reemplaza 'YOUR_FACEBOOK_APP_ID' con tu App ID real -->
+    <string name="facebook_app_id">YOUR_FACEBOOK_APP_ID</string>
+
+    <!-- 4. Obtén el Client Token de "Settings" > "Advanced" > "Security" -->
+    <!-- 5. Reemplaza 'YOUR_FACEBOOK_CLIENT_TOKEN' con tu Client Token real -->
+    <string name="facebook_client_token">YOUR_FACEBOOK_CLIENT_TOKEN</string>
+
+    <!-- 6. Protocolo para deep links de Facebook (automático basado en App ID) -->
+    <!-- Reemplaza 'YOUR_FACEBOOK_APP_ID' con tu App ID real (mismo que arriba) -->
+    <string name="fb_login_protocol_scheme">fbYOUR_FACEBOOK_APP_ID</string>
+
+    <!-- ⚠️ IMPORTANTE:
+         - NO subas este archivo a repositorios públicos con credenciales reales
+         - Considera usar flavors de Android para separar dev/prod
+         - Para producción, usa variables de entorno o sistemas de secrets
+    -->
+
+    <!-- EJEMPLO DE VALORES REALES (NO USAR ESTOS):
+    <string name="facebook_app_id">123456789012345</string>
+    <string name="facebook_client_token">abc123xyz789def456</string>
+    <string name="fb_login_protocol_scheme">fb123456789012345</string>
+    -->
+</resources>
