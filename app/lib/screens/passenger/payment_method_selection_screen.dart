@@ -55,14 +55,18 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
   // Variables para el proceso de pago
   String? _currentPaymentId;
   Timer? _paymentStatusTimer;
-  
+  Timer? _paymentTimeoutTimer;
+
   // Variables para mostrar QR de Yape/Plin
   String? _qrCodeUrl;
   String? _qrInstructions;
-  
+
   // Cálculos de costos
   late double _platformCommission;
   late double _driverEarnings;
+
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -79,7 +83,13 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
 
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
     _paymentStatusTimer?.cancel();
+    _paymentStatusTimer = null;
+    _paymentTimeoutTimer?.cancel();
+    _paymentTimeoutTimer = null;
     _phoneController.dispose();
     super.dispose();
   }
@@ -224,22 +234,38 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
     if (_currentPaymentId == null) return;
 
     _paymentStatusTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir verificaciones después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
       try {
         final statusResult = await _paymentService.checkPaymentStatus(_currentPaymentId!);
-        
+
+        // ✅ Verificar mounted después de operación asíncrona
+        if (!mounted || _isDisposed) {
+          timer.cancel();
+          return;
+        }
+
         if (statusResult.success) {
           switch (statusResult.status) {
             case 'approved':
               timer.cancel();
-              _showPaymentSuccessDialog();
+              if (mounted) _showPaymentSuccessDialog();
               break;
             case 'rejected':
               timer.cancel();
-              _showPaymentRejectedDialog();
+              if (mounted) _showPaymentRejectedDialog();
               break;
             case 'cancelled':
               timer.cancel();
-              _showPaymentCancelledDialog();
+              if (mounted) _showPaymentCancelledDialog();
               break;
             // 'pending' continúa monitoreando
           }
@@ -250,11 +276,13 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
     });
 
     // Timeout después de 10 minutos
-    Timer(const Duration(minutes: 10), () {
+    _paymentTimeoutTimer = Timer(const Duration(minutes: 10), () {
+      // ✅ Verificar disposed y mounted antes de mostrar diálogo
+      if (_isDisposed || !mounted) return;
+
       _paymentStatusTimer?.cancel();
-      if (mounted) {
-        _showPaymentTimeoutDialog();
-      }
+      _paymentStatusTimer = null;
+      _showPaymentTimeoutDialog();
     });
   }
 

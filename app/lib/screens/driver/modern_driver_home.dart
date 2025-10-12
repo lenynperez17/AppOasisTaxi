@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:async';
 import '../../core/theme/modern_theme.dart';
+import '../../core/widgets/mode_switch_button.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../models/price_negotiation_model.dart';
@@ -34,7 +35,10 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
   List<PriceNegotiation> _availableRequests = [];
   PriceNegotiation? _selectedRequest;
   Timer? _requestsTimer;
-  
+
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
+
   // Estadísticas del día
   double _todayEarnings = 0.0;
   int _todayTrips = 0;
@@ -136,9 +140,13 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
     _pulseController.dispose();
     _slideController.dispose();
     _requestsTimer?.cancel();
+    _requestsTimer = null;
     super.dispose();
   }
   
@@ -165,6 +173,16 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       // Configurar timer para actualizaciones periódicas
       _requestsTimer?.cancel();
       _requestsTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+        // ✅ TRIPLE VERIFICACIÓN para prevenir polling después de dispose
+        if (_isDisposed) {
+          timer.cancel();
+          return;
+        }
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+
         if (_isOnline) {
           _loadRequestsFromFirebase();
         }
@@ -252,6 +270,8 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
         title: 'Conductor - ${_isOnline ? "EN LÍNEA" : "DESCONECTADO"}',
         showBackButton: false,
         actions: [
+          ModeSwitchButton(compact: true),
+          SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.account_balance_wallet, color: Colors.white),
             onPressed: () => Navigator.pushNamed(context, '/driver/wallet'),

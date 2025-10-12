@@ -47,6 +47,9 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   Timer? _driverLocationTimer;
   Timer? _etaTimer;
 
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
+
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   late AnimationController _slideController;
@@ -84,11 +87,19 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
 
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
+    // Cancelar timers y suscripciones INMEDIATAMENTE
+    _driverLocationTimer?.cancel();
+    _driverLocationTimer = null;
+    _etaTimer?.cancel();
+    _etaTimer = null;
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+
     _pulseController.dispose();
     _slideController.dispose();
-    _positionSubscription?.cancel();
-    _driverLocationTimer?.cancel();
-    _etaTimer?.cancel();
     super.dispose();
   }
 
@@ -230,6 +241,16 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
     _driverLocationTimer = Timer.periodic(
       const Duration(seconds: 5),
       (timer) {
+        // ✅ TRIPLE VERIFICACIÓN para prevenir operaciones después de dispose
+        if (_isDisposed) {
+          timer.cancel();
+          return;
+        }
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+
         _updateDriverLocation();
       },
     );
@@ -239,6 +260,16 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
     _etaTimer = Timer.periodic(
       const Duration(seconds: 30),
       (timer) {
+        // ✅ TRIPLE VERIFICACIÓN para prevenir operaciones después de dispose
+        if (_isDisposed) {
+          timer.cancel();
+          return;
+        }
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+
         _calculateETA();
       },
     );

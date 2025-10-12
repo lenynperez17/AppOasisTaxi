@@ -24,6 +24,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   Timer? _timer;
   Timer? _verificationTimer;
 
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
+
   @override
   void initState() {
     super.initState();
@@ -33,8 +36,13 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
     _timer?.cancel();
+    _timer = null;
     _verificationTimer?.cancel();
+    _verificationTimer = null;
     super.dispose();
   }
 
@@ -45,6 +53,16 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
     _timer?.cancel();
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir setState después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
       setState(() {
         if (_resendCountdown > 0) {
           _resendCountdown--;
@@ -59,21 +77,40 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   /// Verificar periódicamente si el email fue verificado
   void _startVerificationCheck() {
     _verificationTimer = Timer.periodic(Duration(seconds: 3), (timer) async {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir verificaciones después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
       await _checkEmailVerified();
     });
   }
 
   /// Verificar si el email fue verificado
   Future<void> _checkEmailVerified() async {
+    // ✅ Verificar mounted antes de operación asíncrona
+    if (!mounted || _isDisposed) return;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       await user.reload();
+
+      // ✅ Verificar mounted después de operación asíncrona
+      if (!mounted || _isDisposed) return;
+
       final updatedUser = FirebaseAuth.instance.currentUser;
 
       if (updatedUser?.emailVerified ?? false) {
         _verificationTimer?.cancel();
+        _verificationTimer = null;
 
         // Email verificado exitosamente
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('✅ Email verificado exitosamente'),

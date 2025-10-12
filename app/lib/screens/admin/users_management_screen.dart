@@ -22,14 +22,29 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUsersFromFirebase();
+    // ✅ CORREGIDO: Usar addPostFrameCallback para cargar después del primer frame
+    // Esto garantiza que el widget tree esté completamente construido
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUsersFromFirebase();
+    });
+  }
+
+  @override
+  void dispose() {
+    // ✅ Liberar el TextEditingController para prevenir memory leak
+    _searchController.dispose();
+    super.dispose();
   }
 
   // Cargar usuarios reales desde Firebase
   Future<void> _loadUsersFromFirebase() async {
+    // ✅ CORREGIDO: Verificar mounted antes de obtener messenger
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
 
     try {
+      // ✅ CORREGIDO: Verificar mounted antes de setState
+      if (!mounted) return;
       setState(() => _isLoading = true);
 
       // Obtener usuarios desde Firebase
@@ -95,6 +110,8 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
         ));
       }
 
+      // ✅ CORREGIDO: Verificar mounted antes de setState
+      if (!mounted) return;
       setState(() {
         _users = loadedUsers;
         _filteredUsers = loadedUsers;
@@ -115,19 +132,21 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
   }
 
   void _filterUsers(String query) {
+    // ✅ CORREGIDO: Verificar mounted antes de setState
+    if (!mounted) return;
     setState(() {
       _filteredUsers = _users.where((user) {
         final matchesSearch = user.name.toLowerCase().contains(query.toLowerCase()) ||
             user.email.toLowerCase().contains(query.toLowerCase()) ||
             user.phone.contains(query);
-        
+
         final matchesFilter = _selectedFilter == 'Todos' ||
             (_selectedFilter == 'Activos' && user.status == 'Activo') ||
             (_selectedFilter == 'Suspendidos' && user.status == 'Suspendido') ||
             (_selectedFilter == 'Inactivos' && user.status == 'Inactivo') ||
             (_selectedFilter == 'Pasajeros' && user.type == 'Pasajero') ||
             (_selectedFilter == 'Conductores' && user.type == 'Conductor');
-        
+
         return matchesSearch && matchesFilter;
       }).toList();
     });

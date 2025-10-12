@@ -31,7 +31,10 @@ class _CommunicationScreenState extends State<CommunicationScreen>
   int _callDuration = 0;
   Timer? _callTimer;
   Timer? _typingTimer;
-  
+
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
+
   // Messages
   final List<ChatMessage> _messages = [];
   
@@ -91,12 +94,17 @@ class _CommunicationScreenState extends State<CommunicationScreen>
   
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
     _messageController.dispose();
     _scrollController.dispose();
     _fadeController.dispose();
     _pulseController.dispose();
     _callTimer?.cancel();
+    _callTimer = null;
     _typingTimer?.cancel();
+    _typingTimer = null;
     super.dispose();
   }
   
@@ -217,6 +225,16 @@ class _CommunicationScreenState extends State<CommunicationScreen>
     });
     
     _callTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir setState después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
       setState(() {
         _callDuration++;
       });

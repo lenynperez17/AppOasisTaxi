@@ -35,6 +35,10 @@ class TrackingService {
   Timer? _etaRecalcTimer;
   late String _apiBaseUrl;
   io.Socket? _socket;
+
+  // ✅ RESOURCE MANAGEMENT: Map de StreamControllers para tracking updates
+  // Cada rideId tiene su propio controller para prevenir memory leaks
+  final Map<String, StreamController<TrackingUpdate>> _trackingUpdateControllers = {};
   
   // URLs de la API backend
   static const String _localApi = 'http://localhost:3000/api/v1';
@@ -196,10 +200,20 @@ class TrackingService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
+
         if (data['success']) {
           // 3. SALIR DE LA SALA DE SOCKET.IO
           _socket?.emit('leave_ride', rideId);
+
+          // 4. ✅ RESOURCE CLEANUP: Cerrar y remover el StreamController para este rideId
+          if (_trackingUpdateControllers.containsKey(rideId)) {
+            final controller = _trackingUpdateControllers[rideId];
+            if (!controller!.isClosed) {
+              await controller.close();
+            }
+            _trackingUpdateControllers.remove(rideId);
+            debugPrint('📍 TrackingService: StreamController cerrado para ride $rideId');
+          }
 
           _trackingActive = false;
           _activeSessionId = null;
@@ -452,37 +466,61 @@ class TrackingService {
   // ============================================================================
 
   /// Stream de actualizaciones de ubicación
+  /// ✅ RESOURCE MANAGEMENT: Reutiliza controllers existentes para prevenir memory leaks
   Stream<TrackingUpdate> getTrackingUpdates(String rideId) {
-    final controller = StreamController<TrackingUpdate>.broadcast();
+    // Si ya existe un controller para este rideId, retornar su stream
+    if (_trackingUpdateControllers.containsKey(rideId)) {
+      debugPrint('📍 TrackingService: Reutilizando stream existente para ride $rideId');
+      return _trackingUpdateControllers[rideId]!.stream;
+    }
+
+    // Crear nuevo controller solo si no existe
+    final controller = StreamController<TrackingUpdate>.broadcast(
+      onCancel: () {
+        debugPrint('📍 TrackingService: Stream cancelado para ride $rideId');
+        // El controller se mantiene en el map para permitir re-suscripciones
+        // Se limpiará explícitamente en stopTracking() o dispose()
+      },
+    );
+
+    // Guardar en el map
+    _trackingUpdateControllers[rideId] = controller;
 
     if (_socket != null) {
       _socket!.on('tracking_update', (data) {
         try {
-          final update = TrackingUpdate(
-            type: data['type'],
-            sessionId: data['sessionId'],
-            rideId: data['rideId'],
-            currentLocation: data['currentLocation'] != null 
-              ? LatLng(
-                  data['currentLocation']['latitude'],
-                  data['currentLocation']['longitude'],
-                )
-              : null,
-            estimatedArrival: data['estimatedArrival'] != null 
-              ? DateTime.parse(data['estimatedArrival']) 
-              : null,
-            hasDeviated: data['deviation']?['hasDeviated'] ?? false,
-            deviationDistance: data['deviation']?['deviationDistance']?.toDouble(),
-            timestamp: DateTime.parse(data['timestamp']),
-          );
+          // Solo procesar si el update es para este rideId
+          if (data['rideId'] == rideId) {
+            final update = TrackingUpdate(
+              type: data['type'],
+              sessionId: data['sessionId'],
+              rideId: data['rideId'],
+              currentLocation: data['currentLocation'] != null
+                ? LatLng(
+                    data['currentLocation']['latitude'],
+                    data['currentLocation']['longitude'],
+                  )
+                : null,
+              estimatedArrival: data['estimatedArrival'] != null
+                ? DateTime.parse(data['estimatedArrival'])
+                : null,
+              hasDeviated: data['deviation']?['hasDeviated'] ?? false,
+              deviationDistance: data['deviation']?['deviationDistance']?.toDouble(),
+              timestamp: DateTime.parse(data['timestamp']),
+            );
 
-          controller.add(update);
+            // Solo agregar si el controller no está cerrado
+            if (!controller.isClosed) {
+              controller.add(update);
+            }
+          }
         } catch (e) {
           debugPrint('📍 TrackingService: Error procesando actualización - $e');
         }
       });
     }
 
+    debugPrint('📍 TrackingService: Nuevo stream creado para ride $rideId');
     return controller.stream;
   }
 
@@ -522,8 +560,21 @@ class TrackingService {
     _locationUpdateTimer = Timer.periodic(
       Duration(seconds: _updateIntervalSeconds),
       (timer) async {
+        // ✅ Verificar que el tracking siga activo antes de actualizar
+        if (!_trackingActive) {
+          timer.cancel();
+          return;
+        }
+
         try {
           final position = await _locationService.getCurrentLocation();
+
+          // ✅ Verificar nuevamente después de operación asíncrona
+          if (!_trackingActive) {
+            timer.cancel();
+            return;
+          }
+
           if (position != null) {
             await _updateDriverLocation(
               driverId: driverId,
@@ -572,11 +623,30 @@ class TrackingService {
   }
 
   // Dispose resources
+  /// ✅ RESOURCE CLEANUP: Limpia todos los recursos para prevenir memory leaks
   void dispose() {
+    debugPrint('📍 TrackingService: Iniciando limpieza de recursos...');
+
+    // 1. Cancelar timers
     _locationUpdateTimer?.cancel();
     _etaRecalcTimer?.cancel();
+
+    // 2. ✅ Cerrar todos los StreamControllers de tracking
+    for (final entry in _trackingUpdateControllers.entries) {
+      final rideId = entry.key;
+      final controller = entry.value;
+      if (!controller.isClosed) {
+        controller.close();
+        debugPrint('📍 TrackingService: StreamController cerrado para ride $rideId');
+      }
+    }
+    _trackingUpdateControllers.clear();
+
+    // 3. Desconectar Socket.IO
     _socket?.disconnect();
     _socket?.dispose();
+
+    debugPrint('📍 TrackingService: Recursos limpiados exitosamente');
   }
 
   // Getters

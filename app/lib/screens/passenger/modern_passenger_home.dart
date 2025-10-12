@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:math'; // Para funciones matemáticas: sin, cos, sqrt, atan2 (fórmula Haversine)
 import '../../core/theme/modern_theme.dart';
 import '../../core/widgets/custom_place_text_field.dart'; // ✅ NUEVO: Widget custom que resuelve problema del teclado
+import '../../core/widgets/mode_switch_button.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../models/price_negotiation_model.dart' as models;
@@ -96,7 +97,10 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
 
   // FocusNode para controlar el teclado del campo de precio
   final FocusNode _priceFocusNode = FocusNode();
-  
+
+  // ✅ Flag para prevenir uso de controllers después de dispose
+  bool _isDisposed = false;
+
   // Animation controllers
   late AnimationController _bottomSheetController;
   late AnimationController _searchBarController;
@@ -301,6 +305,15 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
 
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar cualquier recurso
+    _isDisposed = true;
+
+    // Cancelar timers INMEDIATAMENTE para prevenir callbacks pendientes
+    _negotiationTimer?.cancel();
+    _negotiationTimer = null;
+    _buttonDelayTimer?.cancel();
+    _buttonDelayTimer = null;
+
     // Remover listener antes de dispose para evitar "widget deactivated" error
     try {
       if (mounted) {
@@ -318,8 +331,6 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     _destinationController.dispose();
     _priceController.dispose();
     _priceFocusNode.dispose();
-    _negotiationTimer?.cancel();
-    _buttonDelayTimer?.cancel(); // ✅ Cancelar timer del botón
     super.dispose();
   }
 
@@ -621,9 +632,18 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
 
   void _simulateDriverOffers() {
     _negotiationTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (_currentNegotiation != null && 
+      // ✅ TRIPLE VERIFICACIÓN para prevenir uso después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_currentNegotiation != null &&
           _currentNegotiation!.driverOffers.length < 5) {
-        if (!mounted) return;
         setState(() {
           final newOffer = models.DriverOffer(
             driverId: 'driver${_currentNegotiation!.driverOffers.length}',
@@ -665,6 +685,8 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
         title: 'Oasis Taxi',
         showBackButton: false,
         actions: [
+          ModeSwitchButton(compact: true),
+          SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.notifications, color: Colors.white),
             onPressed: () => Navigator.pushNamed(context, '/shared/notifications'),
@@ -1187,6 +1209,8 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 final time = _estimateTime(distance);
                                 final price = _calculatePrice(distance);
 
+                                // ✅ Verificar mounted antes de setState
+                                if (!mounted) return;
                                 setState(() {
                                   _calculatedDistance = distance;
                                   _estimatedTime = time;

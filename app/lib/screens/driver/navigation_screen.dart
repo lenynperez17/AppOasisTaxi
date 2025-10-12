@@ -40,7 +40,10 @@ class _NavigationScreenState extends State<NavigationScreen>
   LatLng _currentLocation = LatLng(-12.0851, -76.9770);
   final LatLng _destination = LatLng(-12.0951, -76.9870);
   Timer? _locationTimer;
-  
+
+  // ✅ Flag para prevenir operaciones después de dispose
+  bool _isDisposed = false;
+
   // Route instructions
   List<RouteInstruction> _instructions = [];
   int _currentInstructionIndex = 0;
@@ -78,9 +81,13 @@ class _NavigationScreenState extends State<NavigationScreen>
   
   @override
   void dispose() {
+    // ✅ Marcar como disposed ANTES de cancelar recursos
+    _isDisposed = true;
+
     _pulseController.dispose();
     _slideController.dispose();
     _locationTimer?.cancel();
+    _locationTimer = null;
     _mapController?.dispose();
     super.dispose();
   }
@@ -198,11 +205,24 @@ class _NavigationScreenState extends State<NavigationScreen>
     
     // Simulate location updates
     _locationTimer = Timer.periodic(Duration(seconds: 2), (timer) {
+      // ✅ TRIPLE VERIFICACIÓN para prevenir simulación después de dispose
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
       _simulateMovement();
     });
   }
   
   void _simulateMovement() {
+    // ✅ Verificar mounted antes de setState
+    if (!mounted || _isDisposed) return;
+
     if (_currentInstructionIndex < _instructions.length - 1) {
       setState(() {
         _distanceToNext -= 50; // Reduce 50 meters
