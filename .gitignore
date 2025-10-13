@@ -110,6 +110,8 @@ terraform.rc
 !package-lock.json
 !tsconfig.json
 !app.json
+!**/firestore.indexes.json
+!**/firestore.rules
 service-account-*.json
 gcp-key.json
 
