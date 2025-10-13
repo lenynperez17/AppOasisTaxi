@@ -57,6 +57,21 @@ service cloud.firestore {
 
       // Eliminación: Solo administradores
       allow delete: if isAdmin();
+
+      // ===== SUBCOLECCIÓN: LUGARES FAVORITOS DEL USUARIO =====
+      match /favorites/{favoriteId} {
+        // Lectura: Solo el propietario del documento padre (usuario)
+        allow read: if isOwner(userId);
+
+        // Creación: Solo el propietario puede agregar favoritos a su colección
+        allow create: if isOwner(userId);
+
+        // Actualización: Solo el propietario puede editar sus favoritos
+        allow update: if isOwner(userId);
+
+        // Eliminación: Solo el propietario puede eliminar sus favoritos
+        allow delete: if isOwner(userId);
+      }
     }
 
     // ===== REGLAS PARA CONDUCTORES =====
@@ -186,22 +201,6 @@ service cloud.firestore {
       // Eliminación: El destinatario o administrador
       allow delete: if isAuthenticated() &&
                       (resource.data.userId == request.auth.uid || isAdmin());
-    }
-
-    // ===== REGLAS PARA FAVORITOS =====
-
-    match /favorites/{favoriteId} {
-      // Lectura: Solo el propietario
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-
-      // Creación: El usuario creando su favorito
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-
-      // Actualización: El propietario
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-
-      // Eliminación: El propietario
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
     // ===== REGLAS PARA TICKETS DE SOPORTE =====
