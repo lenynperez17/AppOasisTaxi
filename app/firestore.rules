@@ -106,7 +106,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ===== REGLAS PARA VIAJES =====
+    // ===== REGLAS PARA VIAJES (TRIPS) =====
 
     match /trips/{tripId} {
       // Lectura: Participantes del viaje o administrador
@@ -119,6 +119,30 @@ service cloud.firestore {
       allow create: if isAuthenticated();
 
       // Actualización: Participantes del viaje o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.passengerId == request.auth.uid ||
+                       resource.data.driverId == request.auth.uid ||
+                       isAdmin());
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA VIAJES (RIDES) =====
+
+    match /rides/{rideId} {
+      // ✅ BEST PRACTICE: Usar 'allow read' que cubre tanto get como list
+      // Firebase evalúa esta condición para CADA documento en la query
+      // Solo devuelve documentos donde el usuario es participante
+      allow read: if isAuthenticated() &&
+                     (resource.data.passengerId == request.auth.uid ||
+                      resource.data.driverId == request.auth.uid ||
+                      isAdmin());
+
+      // Creación: Cualquier usuario autenticado puede crear un viaje
+      allow create: if isAuthenticated();
+
+      // Actualización: Solo participantes del viaje o administrador
       allow update: if isAuthenticated() &&
                       (resource.data.passengerId == request.auth.uid ||
                        resource.data.driverId == request.auth.uid ||
