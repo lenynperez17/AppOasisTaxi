@@ -872,6 +872,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           ),
           ElevatedButton(
             onPressed: () async {
+              // ✅ MEJORES PRÁCTICAS: Guardar referencias ANTES de operaciones async
+              final navigator = Navigator.of(dialogContext);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
               try {
                 // ✅ Obtener valores ANTES de cualquier operación asíncrona
                 final make = makeController.text.trim();
@@ -911,15 +915,15 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                 plateController.dispose();
                 capacityController.dispose();
 
-                // ✅ Cerrar dialog usando el contexto correcto
+                // ✅ Cerrar dialog y mostrar mensaje usando referencias guardadas
                 if (mounted) {
-                  Navigator.pop(dialogContext);
+                  navigator.pop();
 
                   // ✅ Recargar datos
                   _loadProfile();
 
-                  // ✅ Mostrar mensaje de éxito
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  // ✅ Mostrar mensaje de éxito SIN usar context directamente
+                  scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text('Información del vehículo actualizada correctamente'),
                       backgroundColor: ModernTheme.oasisGreen,
@@ -936,8 +940,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                 capacityController.dispose();
 
                 if (mounted) {
-                  Navigator.pop(dialogContext);
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  navigator.pop();
+                  // ✅ Usar referencia guardada en lugar de context
+                  scaffoldMessenger.showSnackBar(
                     SnackBar(
                       content: Text('Error al actualizar: $e'),
                       backgroundColor: ModernTheme.error,
