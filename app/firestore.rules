@@ -31,7 +31,24 @@ service cloud.firestore {
     // Estos campos SOLO pueden ser modificados por administradores
     function hasProtectedFieldChanges() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny(['userType', 'availableRoles', 'isAdmin', 'isVerified', 'email', 'id', 'createdAt', 'rating', 'totalTrips']);
+        .hasAny(['isAdmin', 'isVerified', 'email', 'id', 'createdAt', 'rating', 'totalTrips']);
+    }
+
+    // ✅ NUEVO: Validar upgrade a conductor legítimo
+    // Permite cambiar userType SOLO de 'passenger' a 'dual' con driverStatus 'pending_approval'
+    function isValidDriverUpgrade() {
+      let oldType = resource.data.userType;
+      let newType = request.resource.data.userType;
+      let newStatus = request.resource.data.get('driverStatus', '');
+      let newMode = request.resource.data.get('currentMode', '');
+      let newRoles = request.resource.data.get('availableRoles', []);
+
+      return oldType == 'passenger' &&
+             newType == 'dual' &&
+             newStatus == 'pending_approval' &&
+             newMode == 'driver' &&
+             newRoles.hasAll(['passenger', 'driver']) &&
+             newRoles.size() == 2;
     }
 
     // ===== REGLAS PARA COLECCIÓN DE USUARIOS =====
@@ -49,8 +66,8 @@ service cloud.firestore {
       allow create: if isAuthenticated();
 
       // ✅ CORREGIDO: Actualización con protección contra escalación de privilegios
-      // Usuario normal: NO puede cambiar userType, availableRoles, rating, etc.
-      allow update: if isOwner(userId) && !hasProtectedFieldChanges();
+      // Usuario normal: NO puede cambiar campos protegidos EXCEPTO upgrade a conductor válido
+      allow update: if isOwner(userId) && (!hasProtectedFieldChanges() || isValidDriverUpgrade());
 
       // Administrador: PUEDE actualizar cualquier campo
       allow update: if isAdmin();
@@ -88,6 +105,21 @@ service cloud.firestore {
 
       // Eliminación: Solo administradores
       allow delete: if isAdmin();
+
+      // ===== SUBCOLECCIÓN: DOCUMENTOS DEL CONDUCTOR =====
+      match /documents/{documentId} {
+        // Lectura: El conductor propietario o administrador
+        allow read: if isOwner(driverId) || isAdmin();
+
+        // Creación: El conductor puede subir sus propios documentos
+        allow create: if isOwner(driverId);
+
+        // Actualización: El conductor o administrador (para actualizar estado de aprobación)
+        allow update: if isOwner(driverId) || isAdmin();
+
+        // Eliminación: El conductor o administrador
+        allow delete: if isOwner(driverId) || isAdmin();
+      }
     }
 
     // ===== REGLAS PARA PASAJEROS =====
@@ -131,9 +163,10 @@ service cloud.firestore {
     // ===== REGLAS PARA VIAJES (RIDES) =====
 
     match /rides/{rideId} {
-      // ✅ BEST PRACTICE: Usar 'allow read' que cubre tanto get como list
-      // Firebase evalúa esta condición para CADA documento en la query
-      // Solo devuelve documentos donde el usuario es participante
+      // ✅ READ: Permitir lectura de documentos donde el usuario es participante
+      // Firebase evalúa esta condición para cada documento retornado por la query
+      // IMPORTANTE: Para queries, esta condición se evalúa DESPUÉS de obtener documentos
+      // Por lo tanto, la query debe ser capaz de ejecutarse primero
       allow read: if isAuthenticated() &&
                      (resource.data.passengerId == request.auth.uid ||
                       resource.data.driverId == request.auth.uid ||
@@ -303,6 +336,100 @@ service cloud.firestore {
 
       // Escritura: Solo sistema (Cloud Functions)
       allow write: if false;
+    }
+
+    // ===== REGLAS PARA LOGS DE SEGURIDAD =====
+
+    match /security_logs/{logId} {
+      // Lectura: Solo administradores
+      allow read: if isAdmin();
+
+      // Creación: Usuarios autenticados pueden registrar eventos de seguridad
+      // (login, logout, cambios de contraseña, intentos fallidos, etc.)
+      allow create: if isAuthenticated();
+
+      // Actualización y eliminación: NO permitidas (integridad de logs)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ===== REGLAS PARA LOGROS/ACHIEVEMENTS =====
+
+    match /achievements/{achievementId} {
+      // Lectura: Solo el propietario del logro o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Creación: Solo sistema/Cloud Functions o administradores
+      allow create: if isAdmin();
+
+      // Actualización: Solo sistema/Cloud Functions o administradores
+      allow update: if isAdmin();
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== REGLAS PARA NEGOCIACIONES DE PRECIO =====
+
+    match /price_negotiations/{negotiationId} {
+      // Lectura: El conductor o pasajero involucrado, o administrador
+      allow read: if isAuthenticated() &&
+                     (resource.data.driverId == request.auth.uid ||
+                      resource.data.passengerId == request.auth.uid ||
+                      isAdmin());
+
+      // Creación: El pasajero puede crear una negociación
+      allow create: if isAuthenticated() &&
+                      request.resource.data.passengerId == request.auth.uid;
+
+      // Actualización: El conductor o pasajero involucrado, o administrador
+      allow update: if isAuthenticated() &&
+                      (resource.data.driverId == request.auth.uid ||
+                       resource.data.passengerId == request.auth.uid ||
+                       isAdmin());
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+    }
+
+    // ===== 💳 TRANSACCIONES DE RECARGA (MERCADOPAGO) =====
+    match /recharge_transactions/{transactionId} {
+      // Lectura: El usuario propietario, administrador, o Cloud Functions (sin auth)
+      allow read: if (isAuthenticated() &&
+                     (resource.data.userId == request.auth.uid || isAdmin()))
+                     || request.auth == null;
+
+      // Creación: Solo desde backend (Firebase Functions - sin auth)
+      allow create: if request.auth == null;
+
+      // Actualización: Solo desde backend (Firebase Functions - sin auth)
+      allow update: if request.auth == null;
+
+      // Eliminación: Solo administradores o Cloud Functions
+      allow delete: if isAdmin() || request.auth == null;
+    }
+
+    // ===== 💸 SOLICITUDES DE RETIRO (CONDUCTORES) =====
+    match /withdrawal_requests/{withdrawalId} {
+      // Lectura: El conductor propietario, administrador, o Cloud Functions
+      allow read: if (isAuthenticated() &&
+                     (resource.data.driverId == request.auth.uid || isAdmin()))
+                     || request.auth == null;
+
+      // Creación: Conductores para sí mismos o Cloud Functions
+      allow create: if (isAuthenticated() &&
+                      isDriver() &&
+                      request.resource.data.driverId == request.auth.uid &&
+                      request.resource.data.status == 'pending' &&
+                      request.resource.data.amount >= 50) // Monto mínimo S/ 50
+                      || request.auth == null;
+
+      // Actualización: Solo backend (Cloud Functions - sin auth)
+      allow update: if request.auth == null;
+
+      // Eliminación: Solo administradores o Cloud Functions
+      allow delete: if isAdmin() || request.auth == null;
     }
   }
 }
