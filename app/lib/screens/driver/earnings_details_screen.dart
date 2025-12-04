@@ -1,10 +1,14 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/currency_formatter.dart';
 
+import '../../utils/logger.dart';
 class EarningsDetailsScreen extends StatefulWidget {
   const EarningsDetailsScreen({super.key});
 
@@ -60,178 +64,277 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
     super.dispose();
   }
   
+  // ✅ Cargar datos reales desde Firebase
   void _loadEarningsData() async {
     setState(() => _isLoading = true);
-    
-    // Simulate data loading
-    await Future.delayed(Duration(seconds: 1));
-    
-    setState(() {
-      _earningsData = _generateMockData(_selectedPeriod);
-      _isLoading = false;
-    });
-    
-    _fadeController.forward();
-    _chartController.forward();
-  }
-  
-  EarningsData _generateMockData(String period) {
-    final random = math.Random();
-    
-    switch (period) {
-      case 'week':
-        return EarningsData(
-          period: 'Esta Semana',
-          totalEarnings: 456.75,
-          totalTrips: 23,
-          avgPerTrip: 19.86,
-          totalHours: 28.5,
-          avgPerHour: 16.02,
-          onlineHours: 32.0,
-          commission: 91.35,
-          netEarnings: 365.40,
-          dailyData: List.generate(7, (index) {
-            return DailyEarnings(
-              date: DateTime.now().subtract(Duration(days: 6 - index)),
-              earnings: 40 + random.nextDouble() * 80,
-              trips: 2 + random.nextInt(6),
-              hours: 3 + random.nextDouble() * 6,
+
+    try {
+      // ✅ Obtener usuario actual
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        AppLogger.warning('⚠️ No hay usuario autenticado');
+        setState(() {
+          _earningsData = _getEmptyData(_selectedPeriod);
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final userId = currentUser.uid;
+
+      // ✅ Calcular rango de fechas según el período seleccionado
+      final now = DateTime.now();
+      DateTime startDate;
+      DateTime endDate = now;
+
+      switch (_selectedPeriod) {
+        case 'week':
+          // Última semana (7 días)
+          startDate = now.subtract(Duration(days: 7));
+          break;
+        case 'month':
+          // Último mes (30 días)
+          startDate = now.subtract(Duration(days: 30));
+          break;
+        case 'year':
+          // Último año (365 días)
+          startDate = now.subtract(Duration(days: 365));
+          break;
+        default:
+          startDate = now.subtract(Duration(days: 7));
+      }
+
+      // ✅ Consultar rides completados del conductor en el período
+      final ridesSnapshot = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('driverId', isEqualTo: userId)
+          .where('status', isEqualTo: 'completed')
+          .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('completedAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+          .get();
+
+      // ✅ Calcular métricas principales
+      double totalEarnings = 0.0;
+      double totalHours = 0.0;
+      int totalTrips = ridesSnapshot.docs.length;
+
+      // Mapas para análisis por día y por hora
+      Map<String, DailyEarnings> dailyDataMap = {};
+      List<double> hourlyEarningsArray = List.filled(24, 0.0);
+      List<int> hourlyTripsArray = List.filled(24, 0);
+
+      // Desglose de ingresos
+      double baseFares = 0.0;
+      double distanceFares = 0.0;
+      double timeFares = 0.0;
+      double tips = 0.0;
+      double bonuses = 0.0;
+      double surgeEarnings = 0.0;
+
+      for (var doc in ridesSnapshot.docs) {
+        final data = doc.data();
+
+        // Calcular ganancias totales
+        final fare = (data['fare'] ?? data['estimatedFare'] ?? 0.0) as num;
+        totalEarnings += fare.toDouble();
+
+        // Duración y análisis temporal
+        if (data['startedAt'] != null && data['completedAt'] != null) {
+          final startedAt = (data['startedAt'] as Timestamp).toDate();
+          final completedAt = (data['completedAt'] as Timestamp).toDate();
+          final duration = completedAt.difference(startedAt);
+          totalHours += duration.inMinutes / 60.0;
+
+          // Análisis por hora (hora de inicio del viaje)
+          final hour = startedAt.hour;
+          hourlyEarningsArray[hour] += fare.toDouble();
+          hourlyTripsArray[hour]++;
+
+          // Análisis por día
+          final dateKey = '${completedAt.year}-${completedAt.month.toString().padLeft(2, '0')}-${completedAt.day.toString().padLeft(2, '0')}';
+          if (!dailyDataMap.containsKey(dateKey)) {
+            dailyDataMap[dateKey] = DailyEarnings(
+              date: DateTime(completedAt.year, completedAt.month, completedAt.day),
+              earnings: 0.0,
+              trips: 0,
+              hours: 0.0,
               online: true,
             );
-          }),
-          hourlyData: List.generate(24, (index) {
-            final baseEarning = index >= 6 && index <= 22 ? 15 + random.nextDouble() * 25 : random.nextDouble() * 8;
-            return HourlyEarnings(
-              hour: index,
-              earnings: baseEarning,
-              trips: baseEarning > 10 ? 1 + random.nextInt(3) : 0,
-            );
-          }),
-          breakdown: EarningsBreakdown(
-            baseFares: 228.75,
-            distanceFares: 156.40,
-            timeFares: 48.20,
-            tips: 23.40,
-            bonuses: 0.0,
-            surgeEarnings: 0.0,
-          ),
-          goals: WeeklyGoals(
-            earningsGoal: 500.0,
-            tripsGoal: 30,
-            hoursGoal: 35.0,
-            achievedEarnings: 456.75,
-            achievedTrips: 23,
-            achievedHours: 28.5,
-          ),
+          }
+          dailyDataMap[dateKey] = DailyEarnings(
+            date: dailyDataMap[dateKey]!.date,
+            earnings: dailyDataMap[dateKey]!.earnings + fare.toDouble(),
+            trips: dailyDataMap[dateKey]!.trips + 1,
+            hours: dailyDataMap[dateKey]!.hours + (duration.inMinutes / 60.0),
+            online: true,
+          );
+        }
+
+        // Desglose de tarifas (asumiendo estructura de datos)
+        baseFares += (data['baseFare'] ?? fare * 0.4) as num;
+        distanceFares += (data['distanceFare'] ?? fare * 0.4) as num;
+        timeFares += (data['timeFare'] ?? fare * 0.2) as num;
+        tips += (data['tip'] ?? 0.0) as num;
+        bonuses += (data['bonus'] ?? 0.0) as num;
+        surgeEarnings += (data['surge'] ?? 0.0) as num;
+      }
+
+      // ✅ Calcular promedios
+      final avgPerTrip = totalTrips > 0 ? totalEarnings / totalTrips : 0.0;
+      final avgPerHour = totalHours > 0 ? totalEarnings / totalHours : 0.0;
+
+      // ✅ Calcular comisión (asumiendo 20%)
+      final commission = totalEarnings * 0.20;
+      final netEarnings = totalEarnings - commission;
+
+      // ✅ Consultar tiempo online (de colección opcional driver_sessions o estimado)
+      double onlineHours = totalHours * 1.5; // Estimación: 1.5x tiempo de viaje
+
+      // ✅ Crear lista de datos diarios ordenados
+      final dailyData = dailyDataMap.values.toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      // ✅ Crear lista de datos por hora
+      final hourlyData = List.generate(24, (index) {
+        return HourlyEarnings(
+          hour: index,
+          earnings: hourlyEarningsArray[index],
+          trips: hourlyTripsArray[index],
         );
-      
-      case 'month':
-        return EarningsData(
-          period: 'Este Mes',
-          totalEarnings: 1823.40,
-          totalTrips: 142,
-          avgPerTrip: 12.84,
-          totalHours: 156.5,
-          avgPerHour: 11.65,
-          onlineHours: 180.0,
-          commission: 364.68,
-          netEarnings: 1458.72,
-          dailyData: List.generate(30, (index) {
-            return DailyEarnings(
-              date: DateTime.now().subtract(Duration(days: 29 - index)),
-              earnings: 30 + random.nextDouble() * 100,
-              trips: 3 + random.nextInt(8),
-              hours: 4 + random.nextDouble() * 8,
-              online: random.nextBool() || index % 7 != 0, // Most days online except some Sundays
-            );
-          }),
-          hourlyData: List.generate(24, (index) {
-            final baseEarning = index >= 6 && index <= 22 ? 20 + random.nextDouble() * 40 : random.nextDouble() * 15;
-            return HourlyEarnings(
-              hour: index,
-              earnings: baseEarning,
-              trips: baseEarning > 15 ? 2 + random.nextInt(5) : random.nextInt(2),
-            );
-          }),
+      });
+
+      // ✅ Metas del período (consultar o usar valores por defecto)
+      final goals = WeeklyGoals(
+        earningsGoal: _selectedPeriod == 'week' ? 500.0 : _selectedPeriod == 'month' ? 2000.0 : 20000.0,
+        tripsGoal: _selectedPeriod == 'week' ? 30 : _selectedPeriod == 'month' ? 160 : 1600,
+        hoursGoal: _selectedPeriod == 'week' ? 35.0 : _selectedPeriod == 'month' ? 160.0 : 1800.0,
+        achievedEarnings: netEarnings,
+        achievedTrips: totalTrips,
+        achievedHours: totalHours,
+      );
+
+      setState(() {
+        _earningsData = EarningsData(
+          period: _getPeriodLabelFromKey(_selectedPeriod),
+          totalEarnings: totalEarnings,
+          totalTrips: totalTrips,
+          avgPerTrip: avgPerTrip,
+          totalHours: totalHours,
+          avgPerHour: avgPerHour,
+          onlineHours: onlineHours,
+          commission: commission,
+          netEarnings: netEarnings,
+          dailyData: dailyData,
+          hourlyData: hourlyData,
           breakdown: EarningsBreakdown(
-            baseFares: 911.70,
-            distanceFares: 637.19,
-            timeFares: 182.34,
-            tips: 91.17,
-            bonuses: 1.00,
-            surgeEarnings: 0.0,
+            baseFares: baseFares,
+            distanceFares: distanceFares,
+            timeFares: timeFares,
+            tips: tips,
+            bonuses: bonuses,
+            surgeEarnings: surgeEarnings,
           ),
-          goals: WeeklyGoals(
-            earningsGoal: 2000.0,
-            tripsGoal: 160,
-            hoursGoal: 160.0,
-            achievedEarnings: 1823.40,
-            achievedTrips: 142,
-            achievedHours: 156.5,
-          ),
+          goals: goals,
         );
-      
-      default: // year
-        return EarningsData(
-          period: 'Este Año',
-          totalEarnings: 18234.50,
-          totalTrips: 1456,
-          avgPerTrip: 12.52,
-          totalHours: 1680.0,
-          avgPerHour: 10.85,
-          onlineHours: 1920.0,
-          commission: 3646.90,
-          netEarnings: 14587.60,
-          dailyData: [], // Too much data for daily view
-          hourlyData: List.generate(24, (index) {
-            final baseEarning = index >= 6 && index <= 22 ? 150 + random.nextDouble() * 300 : random.nextDouble() * 100;
-            return HourlyEarnings(
-              hour: index,
-              earnings: baseEarning,
-              trips: (baseEarning / 15).round(),
-            );
-          }),
-          breakdown: EarningsBreakdown(
-            baseFares: 9117.25,
-            distanceFares: 6371.93,
-            timeFares: 1823.45,
-            tips: 911.73,
-            bonuses: 10.14,
-            surgeEarnings: 0.0,
-          ),
-          goals: WeeklyGoals(
-            earningsGoal: 20000.0,
-            tripsGoal: 1600,
-            hoursGoal: 1800.0,
-            achievedEarnings: 18234.50,
-            achievedTrips: 1456,
-            achievedHours: 1680.0,
-          ),
-        );
+        _isLoading = false;
+      });
+
+      _fadeController.forward();
+      _chartController.forward();
+    } catch (e) {
+      AppLogger.error('❌ Error al cargar datos de ganancias: $e');
+      setState(() {
+        _earningsData = _getEmptyData(_selectedPeriod);
+        _isLoading = false;
+      });
     }
+  }
+
+  String _getPeriodLabelFromKey(String period) {
+    switch (period) {
+      case 'week':
+        return 'Esta Semana';
+      case 'month':
+        return 'Este Mes';
+      case 'year':
+        return 'Este Año';
+      default:
+        return period;
+    }
+  }
+
+  // ✅ Datos vacíos iniciales (sin mock data)
+  EarningsData _getEmptyData(String period) {
+    String periodLabel;
+    switch (period) {
+      case 'week':
+        periodLabel = 'Esta Semana';
+        break;
+      case 'month':
+        periodLabel = 'Este Mes';
+        break;
+      default:
+        periodLabel = 'Este Año';
+    }
+
+    return EarningsData(
+      period: periodLabel,
+      totalEarnings: 0.0,
+      totalTrips: 0,
+      avgPerTrip: 0.0,
+      totalHours: 0.0,
+      avgPerHour: 0.0,
+      onlineHours: 0.0,
+      commission: 0.0,
+      netEarnings: 0.0,
+      dailyData: [],
+      hourlyData: List.generate(24, (index) {
+        return HourlyEarnings(
+          hour: index,
+          earnings: 0.0,
+          trips: 0,
+        );
+      }),
+      breakdown: EarningsBreakdown(
+        baseFares: 0.0,
+        distanceFares: 0.0,
+        timeFares: 0.0,
+        tips: 0.0,
+        bonuses: 0.0,
+        surgeEarnings: 0.0,
+      ),
+      goals: WeeklyGoals(
+        earningsGoal: period == 'week' ? 500.0 : period == 'month' ? 2000.0 : 20000.0,
+        tripsGoal: period == 'week' ? 30 : period == 'month' ? 160 : 1600,
+        hoursGoal: period == 'week' ? 35.0 : period == 'month' ? 160.0 : 1800.0,
+        achievedEarnings: 0.0,
+        achievedTrips: 0,
+        achievedHours: 0.0,
+      ),
+    );
   }
   
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Análisis de Ganancias',
           style: TextStyle(
-            color: Colors.white,
+            color: context.onPrimaryText,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.download, color: Colors.white),
+            icon: Icon(Icons.download, color: context.onPrimaryText),
             onPressed: _exportData,
           ),
           IconButton(
-            icon: Icon(Icons.share, color: Colors.white),
+            icon: Icon(Icons.share, color: context.onPrimaryText),
             onPressed: _shareReport,
           ),
         ],
@@ -252,7 +355,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
           Text(
             'Analizando tus ganancias...',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -311,11 +414,11 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 5,
             offset: Offset(0, 2),
           ),
@@ -340,7 +443,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
                   _getPeriodLabel(period),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : ModernTheme.textSecondary,
+                    color: isSelected ? context.onPrimaryText : context.secondaryText,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
@@ -375,7 +478,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
           _buildSummaryCard(
             'Ganancias Totales',
             _earningsData!.totalEarnings.toCurrency(),
-            Icons.attach_money,
+            Icons.account_balance_wallet, // ✅ Cambiado de attach_money ($) a wallet
             ModernTheme.success,
             'Neto: ${_earningsData!.netEarnings.toCurrency()}',
           ),
@@ -411,11 +514,11 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
       margin: EdgeInsets.only(right: 12),
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -446,7 +549,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             title,
             style: TextStyle(
               fontSize: 12,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
           SizedBox(height: 8),
@@ -454,7 +557,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             subtitle,
             style: TextStyle(
               fontSize: 10,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -464,16 +567,16 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
   
   Widget _buildGoalsSection() {
     final goals = _earningsData!.goals;
-    
+
     return Container(
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -542,7 +645,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             Text(
               '$unit${achieved.toStringAsFixed(achieved % 1 == 0 ? 0 : 1)} / $unit${goal.toStringAsFixed(goal % 1 == 0 ? 0 : 1)}',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontSize: 12,
               ),
             ),
@@ -572,11 +675,11 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
       margin: EdgeInsets.symmetric(horizontal: 16),
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -624,11 +727,11 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -639,7 +742,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.access_time, color: Colors.purple),
+              Icon(Icons.access_time, color: ModernTheme.info),
               SizedBox(width: 8),
               Text(
                 'Análisis por Horas',
@@ -670,16 +773,16 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
   Widget _buildHourlyInsights() {
     final bestHour = _earningsData!.hourlyData
         .reduce((a, b) => a.earnings > b.earnings ? a : b);
-    
+
     return Container(
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: ModernTheme.backgroundLight,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+          Icon(Icons.lightbulb, color: ModernTheme.warning, size: 20),
           SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -697,16 +800,16 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
   
   Widget _buildEarningsBreakdown() {
     final breakdown = _earningsData!.breakdown;
-    
+
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 16),
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -717,7 +820,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.pie_chart, color: Colors.orange),
+              Icon(Icons.pie_chart, color: ModernTheme.warning),
               SizedBox(width: 8),
               Text(
                 'Desglose de Ingresos',
@@ -733,15 +836,99 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
           _buildBreakdownItem('Por distancia', breakdown.distanceFares, Icons.straighten, ModernTheme.success),
           _buildBreakdownItem('Por tiempo', breakdown.timeFares, Icons.schedule, ModernTheme.warning),
           if (breakdown.tips > 0)
-            _buildBreakdownItem('Propinas', breakdown.tips, Icons.star, Colors.amber),
+            _buildBreakdownItem('Propinas', breakdown.tips, Icons.star, ModernTheme.warning),
           if (breakdown.bonuses > 0)
             _buildBreakdownItem('Bonos', breakdown.bonuses, Icons.card_giftcard, ModernTheme.oasisGreen),
           if (breakdown.surgeEarnings > 0)
-            _buildBreakdownItem('Tarifa dinámica', breakdown.surgeEarnings, Icons.trending_up, Colors.red),
-          Divider(),
-          _buildBreakdownItem('Comisión (-20%)', -_earningsData!.commission, Icons.remove_circle, ModernTheme.error),
-          Divider(),
-          _buildBreakdownItem('Total neto', _earningsData!.netEarnings, Icons.account_balance_wallet, ModernTheme.oasisGreen, isTotal: true),
+            _buildBreakdownItem('Tarifa dinámica', breakdown.surgeEarnings, Icons.trending_up, ModernTheme.error),
+          Divider(height: 24, thickness: 1),
+
+          // ✅ VISUALIZACIÓN DETALLADA: Desglose de comisión del 20%
+          Container(
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: ModernTheme.error.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: ModernTheme.error.withValues(alpha: 0.2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.info_outline, color: ModernTheme.error, size: 18),
+                    SizedBox(width: 8),
+                    Text(
+                      'Comisión de Plataforma (20%)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: ModernTheme.error,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Total bruto de viajes:',
+                      style: TextStyle(fontSize: 13, color: context.secondaryText),
+                    ),
+                    Text(
+                      _earningsData!.totalEarnings.toCurrency(),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Comisión Oasis (20%):',
+                      style: TextStyle(fontSize: 13, color: context.secondaryText),
+                    ),
+                    Text(
+                      '-${_earningsData!.commission.toCurrency()}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: ModernTheme.error,
+                      ),
+                    ),
+                  ],
+                ),
+                Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Tu ganancia (80%):',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: ModernTheme.oasisGreen,
+                      ),
+                    ),
+                    Text(
+                      _earningsData!.netEarnings.toCurrency(),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: ModernTheme.oasisGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 12),
+          Divider(height: 24, thickness: 1),
+          _buildBreakdownItem('Total neto final', _earningsData!.netEarnings, Icons.account_balance_wallet, ModernTheme.oasisGreen, isTotal: true),
         ],
       ),
     );
@@ -768,7 +955,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
             style: TextStyle(
               fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
               fontSize: isTotal ? 16 : 14,
-              color: isTotal ? color : (amount >= 0 ? ModernTheme.textPrimary : ModernTheme.error),
+              color: isTotal ? color : (amount >= 0 ? context.primaryText : ModernTheme.error),
             ),
           ),
         ],
@@ -781,11 +968,11 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).shadowColor,
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -796,7 +983,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.insights, color: Colors.teal),
+              Icon(Icons.insights, color: ModernTheme.info),
               SizedBox(width: 8),
               Text(
                 'Insights y Recomendaciones',
@@ -868,7 +1055,7 @@ class _EarningsDetailsScreenState extends State<EarningsDetailsScreen>
                   description,
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                 ),
               ],

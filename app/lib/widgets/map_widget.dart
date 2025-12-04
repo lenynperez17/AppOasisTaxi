@@ -239,11 +239,11 @@ class _MapWidgetState extends State<MapWidget> with TickerProviderStateMixin {
             child: Container(
               padding: EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 4),
                   ),
@@ -260,7 +260,7 @@ class _MapWidgetState extends State<MapWidget> with TickerProviderStateMixin {
                     'Obteniendo tu ubicación...',
                     style: TextStyle(
                       fontSize: 14,
-                      color: AppColors.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ],
@@ -277,11 +277,11 @@ class _MapWidgetState extends State<MapWidget> with TickerProviderStateMixin {
             bottom: 0,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 20,
                     offset: Offset(0, -5),
                   ),
@@ -294,7 +294,7 @@ class _MapWidgetState extends State<MapWidget> with TickerProviderStateMixin {
                     height: 4,
                     margin: EdgeInsets.only(top: 12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -320,11 +320,11 @@ class _MapWidgetState extends State<MapWidget> with TickerProviderStateMixin {
             right: 16,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: Offset(0, 4),
                   ),
@@ -497,14 +497,14 @@ class _SearchFieldState extends State<_SearchField> {
                       )
                     : null,
             filled: true,
-            fillColor: Colors.grey.shade50,
+            fillColor: Theme.of(context).colorScheme.surface,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade200),
+              borderSide: BorderSide(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -519,12 +519,12 @@ class _SearchFieldState extends State<_SearchField> {
             margin: EdgeInsets.only(top: 8),
             constraints: BoxConstraints(maxHeight: 200),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade200),
+              border: Border.all(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                   blurRadius: 8,
                   offset: Offset(0, 4),
                 ),
@@ -566,7 +566,7 @@ class _SearchFieldState extends State<_SearchField> {
                                   suggestion.secondaryText!,
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey[600],
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                   ),
                                 ),
                             ],

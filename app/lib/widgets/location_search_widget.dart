@@ -92,7 +92,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error al buscar direcciones'),
-          backgroundColor: Colors.red,
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -142,7 +142,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('No se pudo obtener la ubicación actual'),
-          backgroundColor: Colors.red,
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     } finally {
@@ -158,7 +158,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
@@ -169,7 +169,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
             height: 4,
             margin: EdgeInsets.only(top: 12),
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -178,9 +178,9 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               border: Border(
-                bottom: BorderSide(color: Colors.grey.shade200),
+                bottom: BorderSide(color: Theme.of(context).colorScheme.surfaceContainerHighest),
               ),
             ),
             child: Row(
@@ -207,7 +207,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
                     onPressed: () {
                       _searchController.clear();
                     },
-                    icon: Icon(Icons.clear, color: Colors.grey),
+                    icon: Icon(Icons.clear, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                   ),
               ],
             ),
@@ -266,12 +266,12 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.1),
+              color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
               Icons.map,
-              color: Colors.blue,
+              color: Theme.of(context).colorScheme.secondary,
               size: 20,
             ),
           ),
@@ -279,7 +279,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
             'Seleccionar en el mapa',
             style: TextStyle(
               fontWeight: FontWeight.w600,
-              color: Colors.blue,
+              color: Theme.of(context).colorScheme.secondary,
             ),
           ),
           subtitle: Text('Elige un punto específico en el mapa'),
@@ -299,16 +299,16 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[600],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               letterSpacing: 1,
             ),
           ),
         ),
         
         ..._recentSearches.map((search) => ListTile(
-          leading: Icon(Icons.history, color: Colors.grey),
+          leading: Icon(Icons.history, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
           title: Text(search),
-          trailing: Icon(Icons.north_west, color: Colors.grey[400], size: 20),
+          trailing: Icon(Icons.north_west, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4), size: 20),
           onTap: () => _selectLocation(search),
         )),
       ],
@@ -329,7 +329,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
               'Buscando direcciones...',
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -345,14 +345,14 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
             Icon(
               Icons.search_off,
               size: 64,
-              color: Colors.grey[300],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
             ),
             SizedBox(height: 16),
             Text(
               'No se encontraron resultados',
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
             SizedBox(height: 8),
@@ -360,7 +360,7 @@ class _LocationSearchWidgetState extends State<LocationSearchWidget> {
               'Intenta con otra dirección',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[500],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
               ),
             ),
           ],

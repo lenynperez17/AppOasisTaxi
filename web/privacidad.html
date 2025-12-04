@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Privacidad - Oasis Taxi</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2E7D32;
+            --primary-dark: #1B5E20;
+            --primary-light: #4CAF50;
+            --dark: #1a1a2e;
+            --gray: #6c757d;
+            --light: #f8f9fa;
+            --white: #ffffff;
+            --gradient: linear-gradient(135deg, #1B5E20 0%, #2E7D32 50%, #43A047 100%);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: var(--light); color: var(--dark); line-height: 1.8; }
+
+        .header {
+            background: var(--gradient);
+            color: white;
+            padding: 100px 5% 60px;
+            text-align: center;
+            position: relative;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -50px;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: var(--light);
+            border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+        }
+        .header-content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 30px;
+            transition: color 0.3s;
+        }
+        .back-link:hover { color: white; }
+        .back-link svg { width: 20px; height: 20px; }
+        .header h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 700; margin-bottom: 15px; }
+        .header p { font-size: 18px; opacity: 0.9; }
+        .update-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-size: 13px;
+            margin-top: 20px;
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+            position: relative;
+            z-index: 2;
+        }
+        .card {
+            background: var(--white);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h2 .icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, rgba(46, 125, 50, 0.1) 0%, rgba(76, 175, 80, 0.15) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        h3 {
+            color: var(--dark);
+            font-size: 18px;
+            font-weight: 600;
+            margin: 25px 0 12px;
+        }
+        p { color: var(--gray); margin-bottom: 15px; }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        li {
+            color: var(--gray);
+            padding: 8px 0 8px 28px;
+            position: relative;
+        }
+        li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 16px;
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+        }
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .footer {
+            background: var(--dark);
+            color: white;
+            padding: 30px 5%;
+            text-align: center;
+        }
+        .footer p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; }
+        .footer a { color: var(--primary-light); }
+
+        @media (max-width: 600px) {
+            .header { padding: 80px 5% 40px; }
+            .card { padding: 25px; border-radius: 16px; }
+            h2 { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="index.html" class="back-link">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg>
+                Volver al inicio
+            </a>
+            <h1>Política de Privacidad</h1>
+            <p>Cómo protegemos y utilizamos tu información</p>
+            <span class="update-badge">Última actualización: Diciembre 2025</span>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="card">
+            <p>En Oasis Taxi, nos comprometemos a proteger tu privacidad. Esta política describe cómo recopilamos, usamos y protegemos tu información personal cuando utilizas nuestra aplicación.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📋</span> Información que Recopilamos</h2>
+
+            <h3>Información de Registro</h3>
+            <ul>
+                <li>Nombre completo</li>
+                <li>Número de teléfono</li>
+                <li>Dirección de correo electrónico</li>
+                <li>Foto de perfil (opcional)</li>
+            </ul>
+
+            <h3>Información de Ubicación</h3>
+            <ul>
+                <li>Ubicación GPS en tiempo real durante los viajes</li>
+                <li>Historial de direcciones de recogida y destino</li>
+                <li>Rutas de viaje completadas</li>
+            </ul>
+
+            <h3>Información de Uso</h3>
+            <ul>
+                <li>Historial de viajes</li>
+                <li>Calificaciones y comentarios</li>
+                <li>Preferencias de pago</li>
+                <li>Interacciones con la aplicación</li>
+            </ul>
+
+            <h3>Información del Dispositivo</h3>
+            <ul>
+                <li>Modelo del dispositivo</li>
+                <li>Sistema operativo</li>
+                <li>Identificadores únicos</li>
+                <li>Información de red</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🎯</span> Uso de la Información</h2>
+            <p>Utilizamos tu información para:</p>
+            <ul>
+                <li>Facilitar la conexión entre pasajeros y conductores</li>
+                <li>Procesar pagos y transacciones</li>
+                <li>Mejorar la seguridad de los viajes</li>
+                <li>Proporcionar soporte al cliente</li>
+                <li>Enviar notificaciones sobre viajes</li>
+                <li>Mejorar nuestros servicios</li>
+                <li>Cumplir con obligaciones legales</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🤝</span> Compartición de Información</h2>
+            <p>Compartimos información con:</p>
+            <ul>
+                <li><strong>Conductores/Pasajeros:</strong> Nombre, foto y ubicación durante el viaje</li>
+                <li><strong>Proveedores de pago:</strong> Para procesar transacciones</li>
+                <li><strong>Autoridades:</strong> Cuando sea requerido por ley</li>
+                <li><strong>Servicios de emergencia:</strong> En caso de incidentes</li>
+            </ul>
+            <p><strong>No vendemos tu información personal a terceros.</strong></p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🔒</span> Seguridad de Datos</h2>
+            <p>Implementamos medidas de seguridad que incluyen:</p>
+            <ul>
+                <li>Encriptación de datos en tránsito y en reposo</li>
+                <li>Acceso restringido a información personal</li>
+                <li>Monitoreo continuo de seguridad</li>
+                <li>Copias de seguridad regulares</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⏱️</span> Retención de Datos</h2>
+            <p>Conservamos tu información mientras mantengas una cuenta activa. Los datos de viajes se conservan por 3 años para fines legales y de seguridad. Puedes solicitar la eliminación de tu cuenta en cualquier momento.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">✅</span> Tus Derechos</h2>
+            <p>Tienes derecho a:</p>
+            <ul>
+                <li>Acceder a tu información personal</li>
+                <li>Corregir datos inexactos</li>
+                <li>Solicitar la eliminación de tu cuenta</li>
+                <li>Exportar tus datos</li>
+                <li>Oponerte al procesamiento de datos</li>
+                <li>Retirar el consentimiento</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">👶</span> Menores de Edad</h2>
+            <p>Nuestros servicios no están dirigidos a menores de 18 años. No recopilamos intencionalmente información de menores.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📧</span> Contacto</h2>
+            <p>Para consultas sobre privacidad:</p>
+            <ul>
+                <li>Email de privacidad: <a href="mailto:privacidad@oasistaxis.com">privacidad@oasistaxis.com</a></li>
+                <li>Email general: <a href="mailto:soporte@oasistaxis.com">soporte@oasistaxis.com</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2025 Oasis Taxi. Todos los derechos reservados. | <a href="index.html">Inicio</a> | <a href="terminos.html">Términos</a></p>
+    </footer>
+</body>
+</html>

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../widgets/animated/modern_animated_widgets.dart';
 
 class CommunicationScreen extends StatefulWidget {
@@ -277,7 +278,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
               Text(
                 'Llamando a',
                 style: TextStyle(
-                  color: Colors.white70,
+                  color: context.surfaceColor.withValues(alpha: 0.7),
                   fontSize: 14,
                 ),
               ),
@@ -285,16 +286,18 @@ class _CommunicationScreenState extends State<CommunicationScreen>
               Text(
                 _passengerInfo['name'],
                 style: TextStyle(
-                  color: Colors.white,
+                  color: context.surfaceColor,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               SizedBox(height: 8),
               Text(
                 _passengerInfo['phone'],
                 style: TextStyle(
-                  color: Colors.white70,
+                  color: context.surfaceColor.withValues(alpha: 0.7),
                   fontSize: 16,
                 ),
               ),
@@ -319,7 +322,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
               Text(
                 _formatCallDuration(_callDuration),
                 style: TextStyle(
-                  color: Colors.white,
+                  color: context.surfaceColor,
                   fontSize: 20,
                   fontWeight: FontWeight.w500,
                 ),
@@ -333,19 +336,19 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                   _buildCallAction(
                     Icons.volume_up,
                     'Altavoz',
-                    Colors.white,
+                    context.surfaceColor,
                     () {},
                   ),
                   _buildCallAction(
                     Icons.mic_off,
                     'Silenciar',
-                    Colors.white,
+                    context.surfaceColor,
                     () {},
                   ),
                   _buildCallAction(
                     Icons.dialpad,
                     'Teclado',
-                    Colors.white,
+                    context.surfaceColor,
                     () {},
                   ),
                 ],
@@ -364,7 +367,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                   ),
                   child: Icon(
                     Icons.call_end,
-                    color: Colors.white,
+                    color: context.surfaceColor,
                     size: 32,
                   ),
                 ),
@@ -416,12 +419,12 @@ class _CommunicationScreenState extends State<CommunicationScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: context.surfaceColor,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: ModernTheme.textPrimary),
+          icon: Icon(Icons.arrow_back, color: context.primaryText),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -438,7 +441,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                   Text(
                     _passengerInfo['name'],
                     style: TextStyle(
-                      color: ModernTheme.textPrimary,
+                      color: context.primaryText,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -450,7 +453,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                       Text(
                         '${_passengerInfo['rating']}',
                         style: TextStyle(
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                           fontSize: 12,
                         ),
                       ),
@@ -458,7 +461,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                       Text(
                         '${_passengerInfo['trips']} viajes',
                         style: TextStyle(
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                           fontSize: 12,
                         ),
                       ),
@@ -475,7 +478,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
             onPressed: _startCall,
           ),
           IconButton(
-            icon: Icon(Icons.more_vert, color: ModernTheme.textSecondary),
+            icon: Icon(Icons.more_vert, color: context.secondaryText),
             onPressed: () => _showOptionsMenu(),
           ),
         ],
@@ -561,10 +564,10 @@ class _CommunicationScreenState extends State<CommunicationScreen>
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.surfaceColor,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: context.primaryText.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: Offset(0, -2),
                 ),
@@ -575,7 +578,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                 children: [
                   // Attach button
                   IconButton(
-                    icon: Icon(Icons.attach_file, color: ModernTheme.textSecondary),
+                    icon: Icon(Icons.attach_file, color: context.secondaryText),
                     onPressed: () => _showAttachmentOptions(),
                   ),
                   
@@ -584,7 +587,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                     child: Container(
                       padding: EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: ModernTheme.backgroundLight,
+                        color: context.backgroundColor,
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: TextField(
@@ -608,7 +611,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
-                      icon: Icon(Icons.send, color: Colors.white),
+                      icon: Icon(Icons.send, color: context.surfaceColor),
                       onPressed: () => _sendMessage(_messageController.text),
                     ),
                   ),
@@ -637,7 +640,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
             Container(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: isDriver ? ModernTheme.oasisGreen : Colors.white,
+                color: isDriver ? ModernTheme.oasisGreen : context.surfaceColor,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -646,7 +649,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: context.primaryText.withValues(alpha: 0.05),
                     blurRadius: 5,
                     offset: Offset(0, 2),
                   ),
@@ -658,7 +661,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                   Text(
                     message.text,
                     style: TextStyle(
-                      color: isDriver ? Colors.white : ModernTheme.textPrimary,
+                      color: isDriver ? context.surfaceColor : context.primaryText,
                       fontSize: 14,
                     ),
                   ),
@@ -667,7 +670,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                       margin: EdgeInsets.only(top: 8),
                       padding: EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: context.surfaceColor.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -675,14 +678,14 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                         children: [
                           Icon(
                             _getAttachmentIcon(message.attachment!['type']),
-                            color: isDriver ? Colors.white : ModernTheme.oasisGreen,
+                            color: isDriver ? context.surfaceColor : ModernTheme.oasisGreen,
                             size: 20,
                           ),
                           SizedBox(width: 8),
                           Text(
                             message.attachment!['name'],
                             style: TextStyle(
-                              color: isDriver ? Colors.white : ModernTheme.textPrimary,
+                              color: isDriver ? context.surfaceColor : context.primaryText,
                               fontSize: 12,
                             ),
                           ),
@@ -699,7 +702,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                 Text(
                   _formatTime(message.timestamp),
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontSize: 11,
                   ),
                 ),
@@ -714,7 +717,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                     size: 14,
                     color: message.status == MessageStatus.read
                         ? ModernTheme.primaryBlue
-                        : ModernTheme.textSecondary,
+                        : context.secondaryText,
                   ),
                 ],
               ],
@@ -732,11 +735,11 @@ class _CommunicationScreenState extends State<CommunicationScreen>
         margin: EdgeInsets.only(bottom: 12),
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.surfaceColor,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: context.primaryText.withValues(alpha: 0.05),
               blurRadius: 5,
               offset: Offset(0, 2),
             ),
@@ -753,7 +756,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
             Text(
               'Escribiendo...',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontSize: 14,
                 fontStyle: FontStyle.italic,
               ),
@@ -788,7 +791,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
       builder: (context) => Container(
         padding: EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.surfaceColor,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
@@ -808,7 +811,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                 _buildAttachmentOption(
                   Icons.image,
                   'Foto',
-                  Colors.blue,
+                  ModernTheme.primaryBlue,
                   () {
                     Navigator.pop(context);
                     _sendAttachment('image', 'Foto.jpg');
@@ -826,7 +829,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
                 _buildAttachmentOption(
                   Icons.mic,
                   'Audio',
-                  Colors.orange,
+                  ModernTheme.accentYellow,
                   () {
                     Navigator.pop(context);
                     _sendAttachment('audio', 'Mensaje de voz');
@@ -902,7 +905,7 @@ class _CommunicationScreenState extends State<CommunicationScreen>
       builder: (context) => Container(
         padding: EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.surfaceColor,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(

@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../widgets/common/oasis_app_bar.dart';
 
 class HelpCenterScreen extends StatefulWidget {
@@ -38,7 +39,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: OasisAppBar(
         title: 'Centro de Ayuda',
         showBackButton: true,
@@ -47,7 +48,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
         children: [
           // Tab selector
           Container(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             child: TabBar(
               controller: TabController(length: 3, vsync: Scaffold.of(context)),
               tabs: [
@@ -56,7 +57,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
                 Tab(text: 'Guías'),
               ],
               labelColor: ModernTheme.oasisGreen,
-              unselectedLabelColor: Colors.grey,
+              unselectedLabelColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               indicatorColor: ModernTheme.oasisGreen,
               onTap: (index) => setState(() => _selectedTab = index),
             ),
@@ -77,7 +78,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
   Widget _buildSearchBar() {
     return Container(
       padding: EdgeInsets.all(16),
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: TextField(
         controller: _searchController,
         decoration: InputDecoration(
@@ -155,21 +156,21 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
           'Email',
           'soporte@oasistaxi.com',
           Icons.email,
-          Colors.blue,
+          ModernTheme.info,
           () {},
         ),
         _buildContactCard(
           'Teléfono',
           '+51 1 234-5678',
           Icons.phone,
-          Colors.orange,
+          ModernTheme.warning,
           () {},
         ),
         _buildContactCard(
           'WhatsApp',
           'Mensaje directo',
           Icons.message,
-          Colors.green,
+          ModernTheme.success,
           () {},
         ),
       ],

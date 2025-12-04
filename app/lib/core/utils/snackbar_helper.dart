@@ -50,7 +50,7 @@ class SnackBarHelper {
 
   /// Mostrar SnackBar personalizado
   static void showCustom(
-    BuildContext context, 
+    BuildContext context,
     String message, {
     Color? backgroundColor,
     Color? textColor,
@@ -58,19 +58,20 @@ class SnackBarHelper {
     int duration = 3,
     SnackBarAction? action,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
             if (icon != null) ...[
-              Icon(icon, color: textColor ?? Colors.white, size: 20),
+              Icon(icon, color: textColor ?? colorScheme.onPrimary, size: 20),
               const SizedBox(width: 8),
             ],
             Expanded(
               child: Text(
                 message,
                 style: TextStyle(
-                  color: textColor ?? Colors.white,
+                  color: textColor ?? colorScheme.onPrimary,
                   fontSize: 14,
                 ),
               ),
@@ -91,23 +92,24 @@ class SnackBarHelper {
 
   /// Helper privado para mostrar SnackBar base
   static void _showSnackBar(
-    BuildContext context, 
-    String message, 
-    Color backgroundColor, 
+    BuildContext context,
+    String message,
+    Color backgroundColor,
     IconData icon,
     int duration,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 20),
+            Icon(icon, color: colorScheme.onPrimary, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 message,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: colorScheme.onPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -140,6 +142,7 @@ class SnackBarHelper {
     Color? backgroundColor,
     int duration = 5,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     showCustom(
       context,
       message,
@@ -147,7 +150,7 @@ class SnackBarHelper {
       duration: duration,
       action: SnackBarAction(
         label: actionLabel,
-        textColor: Colors.white,
+        textColor: colorScheme.onPrimary,
         onPressed: onActionPressed,
       ),
     );

@@ -1,6 +1,10 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../utils/logger.dart';
 
 class VehicleManagementScreen extends StatefulWidget {
   const VehicleManagementScreen({super.key});
@@ -14,146 +18,37 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
   // Animation controllers
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  
-  // Vehicle data
-  final Map<String, dynamic> _vehicleData = {
-    'brand': 'Toyota',
-    'model': 'Corolla',
-    'year': 2021,
-    'plate': 'ABC-123',
-    'color': 'Blanco',
-    'vin': '1HGBH41JXMN109186',
-    'seats': 4,
-    'fuelType': 'Gasolina',
-    'transmission': 'Automático',
-    'mileage': 45678,
-    'status': 'active',
-    'photos': [
-      'https://example.com/front.jpg',
-      'https://example.com/back.jpg',
-      'https://example.com/side.jpg',
-      'https://example.com/interior.jpg',
-    ],
+
+  // ✅ Vehicle data - Cargado desde Firebase
+  Map<String, dynamic> _vehicleData = {
+    'brand': '',
+    'model': '',
+    'year': 0,
+    'plate': '',
+    'color': '',
+    'vin': '',
+    'seats': 0,
+    'fuelType': '',
+    'transmission': '',
+    'mileage': 0,
+    'status': 'inactive',
+    'photos': <String>[],
   };
-  
-  // Documents
-  final List<VehicleDocument> _documents = [
-    VehicleDocument(
-      id: '1',
-      type: 'Licencia de Conducir',
-      number: 'LC-123456789',
-      issueDate: DateTime(2020, 1, 15),
-      expiryDate: DateTime(2025, 1, 15),
-      status: DocumentStatus.valid,
-      icon: Icons.badge,
-      color: ModernTheme.primaryBlue,
-    ),
-    VehicleDocument(
-      id: '2',
-      type: 'Seguro Vehicular',
-      number: 'SV-987654321',
-      issueDate: DateTime(2024, 1, 1),
-      expiryDate: DateTime(2025, 1, 1),
-      status: DocumentStatus.valid,
-      icon: Icons.security,
-      color: ModernTheme.oasisGreen,
-    ),
-    VehicleDocument(
-      id: '3',
-      type: 'SOAT',
-      number: 'SOAT-2024-456',
-      issueDate: DateTime(2024, 3, 1),
-      expiryDate: DateTime(2025, 3, 1),
-      status: DocumentStatus.valid,
-      icon: Icons.article,
-      color: Colors.orange,
-    ),
-    VehicleDocument(
-      id: '4',
-      type: 'Revisión Técnica',
-      number: 'RT-2024-789',
-      issueDate: DateTime(2024, 6, 1),
-      expiryDate: DateTime(2024, 12, 1),
-      status: DocumentStatus.expiringSoon,
-      icon: Icons.build,
-      color: ModernTheme.warning,
-    ),
-    VehicleDocument(
-      id: '5',
-      type: 'Tarjeta de Propiedad',
-      number: 'TP-123456',
-      issueDate: DateTime(2021, 1, 1),
-      expiryDate: null, // No expira
-      status: DocumentStatus.valid,
-      icon: Icons.description,
-      color: Colors.purple,
-    ),
-  ];
-  
-  // Maintenance records
-  final List<MaintenanceRecord> _maintenanceRecords = [
-    MaintenanceRecord(
-      id: '1',
-      type: 'Cambio de Aceite',
-      date: DateTime.now().subtract(Duration(days: 30)),
-      mileage: 45000,
-      cost: 120.00,
-      workshop: 'Taller Central',
-      nextDue: DateTime.now().add(Duration(days: 60)),
-      icon: Icons.water_drop,
-    ),
-    MaintenanceRecord(
-      id: '2',
-      type: 'Rotación de Llantas',
-      date: DateTime.now().subtract(Duration(days: 45)),
-      mileage: 44500,
-      cost: 80.00,
-      workshop: 'Llantas Express',
-      nextDue: DateTime.now().add(Duration(days: 135)),
-      icon: Icons.circle_outlined,
-    ),
-    MaintenanceRecord(
-      id: '3',
-      type: 'Filtro de Aire',
-      date: DateTime.now().subtract(Duration(days: 90)),
-      mileage: 43000,
-      cost: 45.00,
-      workshop: 'AutoService',
-      nextDue: DateTime.now().add(Duration(days: 270)),
-      icon: Icons.air,
-    ),
-  ];
-  
-  // Reminders
-  final List<Reminder> _reminders = [
-    Reminder(
-      id: '1',
-      title: 'Renovar Revisión Técnica',
-      description: 'Vence el 01/12/2024',
-      date: DateTime(2024, 12, 1),
-      type: ReminderType.document,
-      priority: Priority.high,
-    ),
-    Reminder(
-      id: '2',
-      title: 'Cambio de Aceite',
-      description: 'Próximo cambio en 2,000 km',
-      date: DateTime.now().add(Duration(days: 60)),
-      type: ReminderType.maintenance,
-      priority: Priority.medium,
-    ),
-    Reminder(
-      id: '3',
-      title: 'Renovar SOAT',
-      description: 'Vence el 01/03/2025',
-      date: DateTime(2025, 3, 1),
-      type: ReminderType.document,
-      priority: Priority.low,
-    ),
-  ];
-  
+
+  // ✅ Documentos reales desde Firebase (inicialmente vacío)
+  final List<VehicleDocument> _documents = [];
+
+  // ✅ Registros de mantenimiento reales desde Firebase (inicialmente vacío)
+  final List<MaintenanceRecord> _maintenanceRecords = [];
+
+  // ✅ Recordatorios reales desde Firebase (inicialmente vacío)
+  final List<Reminder> _reminders = [];
+
   int _selectedTab = 0;
   bool _isEditing = false;
+
+  // ✅ Loading state
+  bool _isLoading = true;
   
   @override
   void initState() {
@@ -168,10 +63,155 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
       parent: _fadeController,
       curve: Curves.easeIn,
     );
-    
+
     _fadeController.forward();
+
+    // ✅ Cargar datos del vehículo desde Firebase
+    _loadVehicleDataFromFirebase();
   }
-  
+
+  // ✅ NUEVO: Cargar datos reales del vehículo desde Firebase
+  Future<void> _loadVehicleDataFromFirebase() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        AppLogger.warning('⚠️ No hay usuario autenticado en vehicle_management');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final driverId = currentUser.uid;
+
+      // ✅ Cargar información del vehículo desde el documento del conductor
+      final driverDoc = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(driverId)
+          .get();
+
+      if (driverDoc.exists) {
+        final driverData = driverDoc.data();
+        if (driverData != null && driverData.containsKey('vehicleInfo')) {
+          final vehicleInfo = driverData['vehicleInfo'] as Map<String, dynamic>;
+          setState(() {
+            _vehicleData = {
+              'brand': vehicleInfo['brand'] ?? '',
+              'model': vehicleInfo['model'] ?? '',
+              'year': vehicleInfo['year'] ?? 0,
+              'plate': vehicleInfo['plate'] ?? '',
+              'color': vehicleInfo['color'] ?? '',
+              'vin': vehicleInfo['vin'] ?? '',
+              'seats': vehicleInfo['seats'] ?? 0,
+              'fuelType': vehicleInfo['fuelType'] ?? 'Gasolina',
+              'transmission': vehicleInfo['transmission'] ?? 'Manual',
+              'mileage': vehicleInfo['mileage'] ?? 0,
+              'status': vehicleInfo['status'] ?? 'active',
+              'photos': (vehicleInfo['photos'] as List?)?.map((e) => e.toString()).toList() ?? [],
+            };
+          });
+        }
+      }
+
+      // ✅ Cargar documentos del vehículo
+      final docsSnapshot = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(driverId)
+          .collection('documents')
+          .where('category', isEqualTo: 'vehicle')
+          .get();
+
+      final List<VehicleDocument> loadedDocs = [];
+      for (var doc in docsSnapshot.docs) {
+        final data = doc.data();
+        final expiryDate = (data['expiryDate'] as Timestamp?)?.toDate();
+        final issueDate = (data['uploadedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+        // Calcular estado del documento
+        DocumentStatus status = DocumentStatus.pending;
+        if (data['status'] == 'approved') {
+          if (expiryDate != null) {
+            final now = DateTime.now();
+            final daysUntilExpiry = expiryDate.difference(now).inDays;
+            if (daysUntilExpiry < 0) {
+              status = DocumentStatus.expired;
+            } else if (daysUntilExpiry < 30) {
+              status = DocumentStatus.expiringSoon;
+            } else {
+              status = DocumentStatus.valid;
+            }
+          } else {
+            status = DocumentStatus.valid;
+          }
+        }
+
+        loadedDocs.add(VehicleDocument(
+          id: doc.id,
+          type: data['type'] ?? 'Documento',
+          number: data['documentNumber'] ?? 'N/A',
+          issueDate: issueDate,
+          expiryDate: expiryDate,
+          status: status,
+          icon: _getDocumentIcon(data['type']),
+          color: _getDocumentColor(data['type']),
+        ));
+      }
+
+      setState(() {
+        _documents.clear();
+        _documents.addAll(loadedDocs);
+        _isLoading = false;
+      });
+
+      AppLogger.info('✅ Cargados datos del vehículo y ${loadedDocs.length} documentos desde Firebase');
+    } catch (e) {
+      AppLogger.error('❌ Error cargando datos del vehículo: $e');
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error cargando datos del vehículo: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ HELPER: Obtener icono según tipo de documento
+  IconData _getDocumentIcon(String? type) {
+    switch (type) {
+      case 'vehicle_registration':
+      case 'tarjeta_propiedad':
+        return Icons.article;
+      case 'insurance':
+      case 'soat':
+        return Icons.security;
+      case 'technical_review':
+      case 'revision_tecnica':
+        return Icons.build;
+      default:
+        return Icons.description;
+    }
+  }
+
+  // ✅ HELPER: Obtener color según tipo de documento
+  Color _getDocumentColor(String? type) {
+    switch (type) {
+      case 'vehicle_registration':
+      case 'tarjeta_propiedad':
+        return ModernTheme.primaryBlue;
+      case 'insurance':
+      case 'soat':
+        return ModernTheme.success;
+      case 'technical_review':
+      case 'revision_tecnica':
+        return ModernTheme.warning;
+      default:
+        return Theme.of(context).dividerColor;
+    }
+  }
+
   @override
   void dispose() {
     _fadeController.dispose();
@@ -181,20 +221,20 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Mi Vehículo',
           style: TextStyle(
-            color: Colors.white,
+            color: context.onPrimaryText,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(_isEditing ? Icons.save : Icons.edit, color: Colors.white),
+            icon: Icon(_isEditing ? Icons.save : Icons.edit, color: context.onPrimaryText),
             onPressed: () {
               setState(() => _isEditing = !_isEditing);
               if (!_isEditing) {
@@ -234,14 +274,14 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
       floatingActionButton: _selectedTab > 0 ? FloatingActionButton(
         onPressed: _showAddDialog,
         backgroundColor: ModernTheme.oasisGreen,
-        child: Icon(Icons.add, color: Colors.white),
+        child: Icon(Icons.add, color: context.onPrimaryText),
       ) : null,
     );
   }
   
   Widget _buildTabBar() {
     return Container(
-      color: Colors.white,
+      color: context.surfaceColor,
       child: Row(
         children: [
           _buildTab('Vehículo', Icons.directions_car, 0),
@@ -273,7 +313,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
             children: [
               Icon(
                 icon,
-                color: isSelected ? ModernTheme.oasisGreen : ModernTheme.textSecondary,
+                color: isSelected ? ModernTheme.oasisGreen : context.secondaryText,
                 size: 20,
               ),
               SizedBox(height: 4),
@@ -281,7 +321,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                 label,
                 style: TextStyle(
                   fontSize: 11,
-                  color: isSelected ? ModernTheme.oasisGreen : ModernTheme.textSecondary,
+                  color: isSelected ? ModernTheme.oasisGreen : context.secondaryText,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 ),
               ),
@@ -308,7 +348,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: ModernTheme.cardShadow,
+              boxShadow: ModernTheme.getCardShadow(context),
             ),
             child: Column(
               children: [
@@ -317,12 +357,12 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                     Container(
                       padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: context.onPrimaryText.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.directions_car,
-                        color: Colors.white,
+                        color: context.onPrimaryText,
                         size: 32,
                       ),
                     ),
@@ -334,7 +374,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                           Text(
                             '${_vehicleData['brand']} ${_vehicleData['model']}',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: context.onPrimaryText,
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                             ),
@@ -342,7 +382,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                           Text(
                             '${_vehicleData['year']} • ${_vehicleData['plate']}',
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: context.onPrimaryText.withValues(alpha: 0.7),
                               fontSize: 14,
                             ),
                           ),
@@ -352,7 +392,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                     Container(
                       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: context.onPrimaryText.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -361,7 +401,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: Colors.greenAccent,
+                              color: ModernTheme.success,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -369,7 +409,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                           Text(
                             'Activo',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: context.onPrimaryText,
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                             ),
@@ -450,12 +490,12 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
   Widget _buildVehicleStat(String label, String value, IconData icon) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 24),
+        Icon(icon, color: context.onPrimaryText.withValues(alpha: 0.7), size: 24),
         SizedBox(height: 8),
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: context.onPrimaryText,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
@@ -463,7 +503,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: context.onPrimaryText.withValues(alpha: 0.7),
             fontSize: 12,
           ),
         ),
@@ -491,7 +531,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: Icon(Icons.close, color: Colors.white, size: 16),
+            icon: Icon(Icons.close, color: context.onPrimaryText, size: 16),
             onPressed: () {
               // Remove photo
             },
@@ -539,9 +579,9 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(
         children: [
@@ -561,13 +601,13 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
       padding: EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(icon, color: ModernTheme.textSecondary, size: 20),
+          Icon(icon, color: context.secondaryText, size: 20),
           SizedBox(width: 12),
           Expanded(
             child: Text(
               label,
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
             ),
           ),
@@ -598,9 +638,9 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(
         children: [
@@ -634,7 +674,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                 Text(
                   label,
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontSize: 12,
                   ),
                 ),
@@ -668,13 +708,13 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
     final daysUntilExpiry = doc.expiryDate?.difference(DateTime.now()).inDays;
     final isExpiringSoon = daysUntilExpiry != null && daysUntilExpiry < 30;
     final isExpired = daysUntilExpiry != null && daysUntilExpiry < 0;
-    
+
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ListTile(
         contentPadding: EdgeInsets.all(16),
@@ -703,7 +743,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                 style: TextStyle(
                   color: isExpired ? ModernTheme.error : 
                          isExpiringSoon ? ModernTheme.warning : 
-                         ModernTheme.textSecondary,
+                         context.secondaryText,
                 ),
               ),
           ],
@@ -759,9 +799,9 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ExpansionTile(
         tilePadding: EdgeInsets.all(16),
@@ -790,7 +830,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              'S/ ${record.cost.toStringAsFixed(2)}',
+              'S/. ${record.cost.toStringAsFixed(2)}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: ModernTheme.oasisGreen,
@@ -801,7 +841,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                 'Próximo: ${_formatDate(record.nextDue!)}',
                 style: TextStyle(
                   fontSize: 11,
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                 ),
               ),
           ],
@@ -810,14 +850,14 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
           Container(
             padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: ModernTheme.backgroundLight,
+              color: context.surfaceColor,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
               children: [
                 _buildMaintenanceDetail('Taller', record.workshop, Icons.store),
                 _buildMaintenanceDetail('Kilometraje', '${record.mileage} km', Icons.speed),
-                _buildMaintenanceDetail('Costo', 'S/ ${record.cost.toStringAsFixed(2)}', Icons.attach_money),
+                _buildMaintenanceDetail('Costo', 'S/. ${record.cost.toStringAsFixed(2)}', Icons.account_balance_wallet), // ✅ Cambiado de attach_money ($) a wallet
                 if (record.notes != null)
                   _buildMaintenanceDetail('Notas', record.notes!, Icons.note),
               ],
@@ -833,12 +873,12 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
       padding: EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: ModernTheme.textSecondary),
+          Icon(icon, size: 16, color: context.secondaryText),
           SizedBox(width: 8),
           Text(
             '$label:',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 12,
             ),
           ),
@@ -872,7 +912,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
         border: Border(
           left: BorderSide(
@@ -880,7 +920,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
             width: 4,
           ),
         ),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ListTile(
         contentPadding: EdgeInsets.all(16),
@@ -909,13 +949,13 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
             SizedBox(height: 4),
             Row(
               children: [
-                Icon(Icons.calendar_today, size: 14, color: ModernTheme.textSecondary),
+                Icon(Icons.calendar_today, size: 14, color: context.secondaryText),
                 SizedBox(width: 4),
                 Text(
                   _formatDate(reminder.date),
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                 ),
               ],
@@ -985,13 +1025,13 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
   Color _getReminderColor(ReminderType type) {
     switch (type) {
       case ReminderType.document:
-        return Colors.purple;
+        return ModernTheme.info;
       case ReminderType.maintenance:
         return ModernTheme.primaryBlue;
       case ReminderType.payment:
         return ModernTheme.oasisGreen;
       case ReminderType.other:
-        return Colors.grey;
+        return Theme.of(context).dividerColor;
     }
   }
   
@@ -1038,7 +1078,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
       builder: (context) => Container(
         padding: EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.surfaceColor,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
@@ -1077,7 +1117,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                     label: Text('Ver Documento'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: ModernTheme.primaryBlue,
-                      foregroundColor: Colors.white,
+                      foregroundColor: context.onPrimaryText,
                       padding: EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1096,7 +1136,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
                     label: Text('Actualizar'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: ModernTheme.oasisGreen,
-                      foregroundColor: Colors.white,
+                      foregroundColor: context.onPrimaryText,
                       padding: EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1121,7 +1161,7 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen>
           Text(
             label,
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
           Text(

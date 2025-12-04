@@ -1,7 +1,18 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart'; // ✅ Para seleccionar archivos PDF/documentos
+import 'package:url_launcher/url_launcher.dart'; // ✅ AGREGADO: Para abrir/descargar documentos
+import 'package:share_plus/share_plus.dart'; // ✅ AGREGADO: Para compartir/guardar archivos
+import 'package:path_provider/path_provider.dart'; // ✅ AGREGADO: Para obtener directorio temporal
+import 'dart:io';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
+import '../../utils/logger.dart';
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
 
@@ -20,6 +31,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<DocumentInfo> _documents = [];
   bool _isLoading = true;
   String _overallStatus = 'pending';
+
+  // Firebase instances
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
+  final ImagePicker _picker = ImagePicker();
+  String? _userId;
   
   @override
   void initState() {
@@ -55,104 +72,139 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     super.dispose();
   }
   
-  void _loadDocuments() async {
-    // Simulate loading documents
-    await Future.delayed(Duration(seconds: 1));
-    
-    setState(() {
-      _documents = [
-        DocumentInfo(
-          id: 'license',
-          name: 'Licencia de Conducir',
-          description: 'Licencia de conducir profesional vigente',
-          status: DocumentStatus.approved,
-          expiryDate: DateTime.now().add(Duration(days: 730)),
-          uploadDate: DateTime.now().subtract(Duration(days: 45)),
-          fileUrl: '/mock/license.jpg',
-          isRequired: true,
-          category: DocumentCategory.license,
-          rejectionReason: null,
-        ),
-        DocumentInfo(
-          id: 'id_card',
-          name: 'Documento de Identidad',
-          description: 'DNI o Pasaporte vigente',
-          status: DocumentStatus.approved,
-          expiryDate: DateTime.now().add(Duration(days: 1095)),
-          uploadDate: DateTime.now().subtract(Duration(days: 30)),
-          fileUrl: '/mock/dni.jpg',
-          isRequired: true,
-          category: DocumentCategory.identity,
-          rejectionReason: null,
-        ),
-        DocumentInfo(
-          id: 'vehicle_registration',
-          name: 'Tarjeta de Propiedad',
-          description: 'Registro vehicular vigente',
-          status: DocumentStatus.pending,
-          expiryDate: DateTime.now().add(Duration(days: 365)),
-          uploadDate: DateTime.now().subtract(Duration(days: 2)),
-          fileUrl: '/mock/tarjeta_propiedad.jpg',
-          isRequired: true,
-          category: DocumentCategory.vehicle,
-          rejectionReason: null,
-        ),
-        DocumentInfo(
-          id: 'insurance',
-          name: 'SOAT',
-          description: 'Seguro Obligatorio de Accidentes de Tránsito',
-          status: DocumentStatus.expiring,
-          expiryDate: DateTime.now().add(Duration(days: 25)),
-          uploadDate: DateTime.now().subtract(Duration(days: 340)),
-          fileUrl: '/mock/soat.jpg',
-          isRequired: true,
-          category: DocumentCategory.insurance,
-          rejectionReason: null,
-        ),
-        DocumentInfo(
-          id: 'technical_review',
-          name: 'Revisión Técnica',
-          description: 'Certificado de revisión técnica vehicular',
-          status: DocumentStatus.rejected,
-          expiryDate: DateTime.now().subtract(Duration(days: 10)),
-          uploadDate: DateTime.now().subtract(Duration(days: 5)),
-          fileUrl: '/mock/revision_tecnica.jpg',
-          isRequired: true,
-          category: DocumentCategory.vehicle,
-          rejectionReason: 'El documento se encuentra vencido. Por favor, renueve su revisión técnica.',
-        ),
-        DocumentInfo(
-          id: 'background_check',
-          name: 'Antecedentes Policiales',
-          description: 'Certificado de antecedentes policiales',
-          status: DocumentStatus.approved,
-          expiryDate: DateTime.now().add(Duration(days: 270)),
-          uploadDate: DateTime.now().subtract(Duration(days: 60)),
-          fileUrl: '/mock/antecedentes.jpg',
-          isRequired: true,
-          category: DocumentCategory.background,
-          rejectionReason: null,
-        ),
-        DocumentInfo(
-          id: 'bank_account',
-          name: 'Certificación Bancaria',
-          description: 'Certificado de cuenta bancaria para depósitos',
-          status: DocumentStatus.missing,
-          expiryDate: null,
-          uploadDate: null,
-          fileUrl: null,
-          isRequired: false,
-          category: DocumentCategory.financial,
-          rejectionReason: null,
-        ),
-      ];
-      
-      _overallStatus = _calculateOverallStatus();
-      _isLoading = false;
-    });
-    
-    _fadeController.forward();
-    _slideController.forward();
+  Future<void> _loadDocuments() async {
+    try {
+      setState(() => _isLoading = true);
+
+      // ✅ Obtener el ID del usuario autenticado desde Firebase Auth
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Usuario no autenticado. Por favor, inicia sesión.'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+          Navigator.pop(context);
+        }
+        return;
+      }
+      _userId = currentUser.uid;
+
+      // ✅ Cargar documentos reales desde Firebase Firestore
+      // Primero definimos los tipos de documentos requeridos con sus categorías
+      final requiredDocTypes = {
+        'license': {'name': 'Licencia de Conducir', 'description': 'Licencia de conducir profesional vigente', 'category': DocumentCategory.license, 'required': true},
+        'id_card': {'name': 'Documento de Identidad', 'description': 'DNI o Pasaporte vigente', 'category': DocumentCategory.identity, 'required': true},
+        'vehicle_registration': {'name': 'Tarjeta de Propiedad', 'description': 'Registro vehicular vigente', 'category': DocumentCategory.vehicle, 'required': true},
+        'insurance': {'name': 'SOAT', 'description': 'Seguro Obligatorio de Accidentes de Tránsito', 'category': DocumentCategory.insurance, 'required': true},
+        'technical_review': {'name': 'Revisión Técnica', 'description': 'Certificado de revisión técnica vehicular', 'category': DocumentCategory.vehicle, 'required': true},
+        'background_check': {'name': 'Antecedentes Policiales', 'description': 'Certificado de antecedentes policiales', 'category': DocumentCategory.background, 'required': true},
+        'bank_account': {'name': 'Certificación Bancaria', 'description': 'Certificado de cuenta bancaria para depósitos', 'category': DocumentCategory.financial, 'required': false},
+      };
+
+      // Cargar documentos subidos desde la subcolección
+      final docsSnapshot = await _firestore
+          .collection('drivers')
+          .doc(_userId)
+          .collection('documents')
+          .get();
+
+      // Mapear documentos subidos por su ID
+      final uploadedDocs = <String, QueryDocumentSnapshot>{};
+      for (var doc in docsSnapshot.docs) {
+        uploadedDocs[doc.id] = doc;
+      }
+
+      // Crear lista de documentos con estado actual
+      List<DocumentInfo> loadedDocs = [];
+      for (var entry in requiredDocTypes.entries) {
+        final docId = entry.key;
+        final docInfo = entry.value;
+
+        if (uploadedDocs.containsKey(docId)) {
+          // Documento existe en Firebase
+          final data = uploadedDocs[docId]!.data() as Map<String, dynamic>;
+
+          // Calcular estado basado en fechas y aprobación
+          DocumentStatus status = DocumentStatus.pending;
+          if (data['status'] != null) {
+            switch (data['status']) {
+              case 'approved':
+                status = DocumentStatus.approved;
+                // Verificar si está por vencer
+                if (data['expiryDate'] != null) {
+                  final expiryDate = (data['expiryDate'] as Timestamp).toDate();
+                  final daysUntilExpiry = expiryDate.difference(DateTime.now()).inDays;
+                  if (daysUntilExpiry <= 30 && daysUntilExpiry > 0) {
+                    status = DocumentStatus.expiring;
+                  } else if (daysUntilExpiry <= 0) {
+                    status = DocumentStatus.rejected;
+                  }
+                }
+                break;
+              case 'pending':
+                status = DocumentStatus.pending;
+                break;
+              case 'rejected':
+                status = DocumentStatus.rejected;
+                break;
+            }
+          }
+
+          loadedDocs.add(DocumentInfo(
+            id: docId,
+            name: docInfo['name'] as String,
+            description: docInfo['description'] as String,
+            status: status,
+            expiryDate: data['expiryDate'] != null ? (data['expiryDate'] as Timestamp).toDate() : null,
+            uploadDate: data['uploadDate'] != null ? (data['uploadDate'] as Timestamp).toDate() : null,
+            fileUrl: data['fileUrl'] as String?,
+            isRequired: docInfo['required'] as bool,
+            category: docInfo['category'] as DocumentCategory,
+            rejectionReason: data['rejectionReason'] as String?,
+          ));
+        } else {
+          // Documento no existe - marcarlo como faltante
+          loadedDocs.add(DocumentInfo(
+            id: docId,
+            name: docInfo['name'] as String,
+            description: docInfo['description'] as String,
+            status: DocumentStatus.missing,
+            expiryDate: null,
+            uploadDate: null,
+            fileUrl: null,
+            isRequired: docInfo['required'] as bool,
+            category: docInfo['category'] as DocumentCategory,
+            rejectionReason: null,
+          ));
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _documents = loadedDocs;
+          _overallStatus = _calculateOverallStatus();
+          _isLoading = false;
+        });
+
+        _fadeController.forward();
+        _slideController.forward();
+      }
+    } catch (e) {
+      AppLogger.error('Error al cargar documentos: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cargar documentos: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
   }
   
   String _calculateOverallStatus() {
@@ -180,24 +232,24 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Mis Documentos',
           style: TextStyle(
-            color: Colors.white,
+            color: context.surfaceColor,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.info_outline, color: Colors.white),
+            icon: Icon(Icons.info_outline, color: context.surfaceColor),
             onPressed: _showDocumentInfo,
           ),
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
+            icon: Icon(Icons.refresh, color: context.surfaceColor),
             onPressed: _refreshDocuments,
           ),
         ],
@@ -218,7 +270,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           Text(
             'Cargando documentos...',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -280,12 +332,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     Container(
                       padding: EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: context.surfaceColor.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         _getStatusIcon(),
-                        color: Colors.white,
+                        color: context.surfaceColor,
                         size: 28,
                       ),
                     ),
@@ -297,17 +349,21 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           Text(
                             _getStatusTitle(),
                             style: TextStyle(
-                              color: Colors.white,
+                              color: context.surfaceColor,
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Text(
                             _getStatusDescription(),
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: context.surfaceColor.withValues(alpha: 0.7),
                               fontSize: 14,
                             ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
@@ -351,12 +407,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   Widget _buildStatItem(String label, String value, IconData icon) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 16),
+        Icon(icon, color: context.surfaceColor.withValues(alpha: 0.7), size: 16),
         SizedBox(height: 4),
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: context.surfaceColor,
             fontWeight: FontWeight.bold,
             fontSize: 16,
           ),
@@ -364,7 +420,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: context.surfaceColor.withValues(alpha: 0.7),
             fontSize: 12,
           ),
         ),
@@ -385,15 +441,20 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
           ),
           ..._documents.asMap().entries.map((entry) {
             final index = entry.key;
             final document = entry.value;
-            final delay = index * 0.1;
-            
+
+            // ✅ CORRECCIÓN: Limitar delay para que Interval no exceda 1.0
+            // Dividir el rango de animación entre todos los documentos
+            final totalDocs = _documents.length;
+            final animationStart = (index / totalDocs).clamp(0.0, 0.7);
+            final animationEnd = ((index + 1) / totalDocs).clamp(0.0, 1.0);
+
             final animation = Tween<double>(
               begin: 0,
               end: 1,
@@ -401,20 +462,20 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               CurvedAnimation(
                 parent: _slideController,
                 curve: Interval(
-                  delay,
-                  delay + 0.5,
+                  animationStart,  // ✅ Garantizado entre 0.0 y 0.7
+                  animationEnd,    // ✅ Garantizado entre 0.0 y 1.0
                   curve: Curves.easeOutBack,
                 ),
               ),
             );
-            
+
             return AnimatedBuilder(
               animation: animation,
               builder: (context, child) {
                 return Transform.translate(
-                  offset: Offset(50 * (1 - animation.value), 0),
+                  offset: Offset(50 * (1 - animation.value.clamp(0.0, 1.0)), 0),
                   child: Opacity(
-                    opacity: animation.value,
+                    opacity: animation.value.clamp(0.0, 1.0),  // ✅ Garantizar opacity válido
                     child: _buildDocumentCard(document),
                   ),
                 );
@@ -430,9 +491,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
         border: Border.all(
           color: _getDocumentStatusColor(document.status).withValues(alpha: 0.3),
           width: 1,
@@ -473,7 +534,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
-                                  color: ModernTheme.textPrimary,
+                                  color: context.primaryText,
                                 ),
                               ),
                             ),
@@ -503,7 +564,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           document.description,
                           style: TextStyle(
                             fontSize: 12,
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                           ),
                         ),
                       ],
@@ -532,13 +593,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 Row(
                   children: [
                     if (document.uploadDate != null) ...[
-                      Icon(Icons.upload, size: 14, color: ModernTheme.textSecondary),
+                      Icon(Icons.upload, size: 14, color: context.secondaryText),
                       SizedBox(width: 4),
                       Text(
                         'Subido: ${_formatDate(document.uploadDate!)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                       ),
                     ],
@@ -549,7 +610,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                         size: 14,
                         color: document.status == DocumentStatus.expiring
                             ? ModernTheme.warning
-                            : ModernTheme.textSecondary,
+                            : context.secondaryText,
                       ),
                       SizedBox(width: 4),
                       Text(
@@ -558,7 +619,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           fontSize: 12,
                           color: document.status == DocumentStatus.expiring
                               ? ModernTheme.warning
-                              : ModernTheme.textSecondary,
+                              : context.secondaryText,
                         ),
                       ),
                     ],
@@ -612,7 +673,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: ModernTheme.oasisGreen,
-                        foregroundColor: Colors.white,
+                        foregroundColor: context.surfaceColor,
                         elevation: 0,
                         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
@@ -651,7 +712,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               label: Text('Subir Documentos Faltantes'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: ModernTheme.oasisGreen,
-                foregroundColor: Colors.white,
+                foregroundColor: context.surfaceColor,
                 padding: EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -690,9 +751,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       case 'incomplete':
         return ModernTheme.error;
       case 'expiring':
-        return Colors.orange;
+        return ModernTheme.warning;
       default:
-        return ModernTheme.textSecondary;
+        return context.secondaryText;
     }
   }
   
@@ -764,9 +825,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       case DocumentStatus.rejected:
         return ModernTheme.error;
       case DocumentStatus.expiring:
-        return Colors.orange;
+        return ModernTheme.warning;
       case DocumentStatus.missing:
-        return ModernTheme.textSecondary;
+        return context.secondaryText;
     }
   }
   
@@ -850,9 +911,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 height: 200,
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: ModernTheme.backgroundLight,
+                  color: context.surfaceColor,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
+                  border: Border.all(color: context.secondaryText.withValues(alpha: 0.3)),
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -860,19 +921,19 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     Icon(
                       Icons.image,
                       size: 64,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                     SizedBox(height: 8),
                     Text(
                       'Vista previa del documento',
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                       ),
                     ),
                     Text(
                       '(Simulación)',
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                         fontSize: 12,
                       ),
                     ),
@@ -992,12 +1053,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
+                          color: ModernTheme.warning.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
                           Icons.folder,
-                          color: Colors.orange,
+                          color: ModernTheme.warning,
                           size: 32,
                         ),
                       ),
@@ -1015,106 +1076,373 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     );
   }
   
-  void _pickFromCamera(DocumentInfo document) {
-    // Simulate camera upload
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Documento capturado y subido exitosamente'),
-        backgroundColor: ModernTheme.success,
-      ),
-    );
-    
-    setState(() {
-      final index = _documents.indexWhere((d) => d.id == document.id);
-      if (index != -1) {
-        _documents[index] = DocumentInfo(
-          id: document.id,
-          name: document.name,
-          description: document.description,
-          status: DocumentStatus.pending,
-          expiryDate: document.expiryDate,
-          uploadDate: DateTime.now(),
-          fileUrl: '/mock/camera/${document.id}.jpg',
-          isRequired: document.isRequired,
-          category: document.category,
-          rejectionReason: null,
+  Future<void> _pickFromCamera(DocumentInfo document) async {
+    try {
+      // ✅ Capturar imagen desde la cámara usando image_picker
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
+      if (image == null) {
+        // Usuario canceló
+        return;
+      }
+
+      // Mostrar indicador de carga
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: context.surfaceColor)),
+                SizedBox(width: 16),
+                Text('Subiendo documento...'),
+              ],
+            ),
+            duration: Duration(minutes: 2),
+            backgroundColor: ModernTheme.info,
+          ),
         );
       }
-      _overallStatus = _calculateOverallStatus();
-    });
-  }
-  
-  void _pickFromGallery(DocumentInfo document) {
-    // Simulate gallery upload
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Documento seleccionado y subido exitosamente'),
-        backgroundColor: ModernTheme.success,
-      ),
-    );
-    
-    setState(() {
-      final index = _documents.indexWhere((d) => d.id == document.id);
-      if (index != -1) {
-        _documents[index] = DocumentInfo(
-          id: document.id,
-          name: document.name,
-          description: document.description,
-          status: DocumentStatus.pending,
-          expiryDate: document.expiryDate,
-          uploadDate: DateTime.now(),
-          fileUrl: '/mock/gallery/${document.id}.jpg',
-          isRequired: document.isRequired,
-          category: document.category,
-          rejectionReason: null,
+
+      // ✅ Subir imagen a Firebase Storage
+      final file = File(image.path);
+      final storageRef = _storage
+          .ref()
+          .child('drivers')
+          .child(_userId!)
+          .child('documents')
+          .child('${document.id}_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      // ✅ Guardar metadata en Firestore
+      await _firestore
+          .collection('drivers')
+          .doc(_userId!)
+          .collection('documents')
+          .doc(document.id)
+          .set({
+        'name': document.name,
+        'description': document.description,
+        'status': 'pending', // Pendiente de aprobación
+        'uploadDate': FieldValue.serverTimestamp(),
+        'fileUrl': downloadUrl,
+        'category': document.category.toString(),
+        'isRequired': document.isRequired,
+      }, SetOptions(merge: true));
+
+      // Recargar documentos desde Firebase
+      await _loadDocuments();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Documento capturado y subido exitosamente'),
+            backgroundColor: ModernTheme.success,
+          ),
         );
       }
-      _overallStatus = _calculateOverallStatus();
-    });
-  }
-  
-  void _pickFromFiles(DocumentInfo document) {
-    // Simulate file upload
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Archivo seleccionado y subido exitosamente'),
-        backgroundColor: ModernTheme.success,
-      ),
-    );
-    
-    setState(() {
-      final index = _documents.indexWhere((d) => d.id == document.id);
-      if (index != -1) {
-        _documents[index] = DocumentInfo(
-          id: document.id,
-          name: document.name,
-          description: document.description,
-          status: DocumentStatus.pending,
-          expiryDate: document.expiryDate,
-          uploadDate: DateTime.now(),
-          fileUrl: '/mock/files/${document.id}.pdf',
-          isRequired: document.isRequired,
-          category: document.category,
-          rejectionReason: null,
+    } catch (e) {
+      AppLogger.error('Error al capturar desde cámara: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al subir documento: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
         );
       }
-      _overallStatus = _calculateOverallStatus();
-    });
+    }
   }
   
-  void _downloadDocument(DocumentInfo document) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Descargando ${document.name}...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+  Future<void> _pickFromGallery(DocumentInfo document) async {
+    try {
+      // ✅ Seleccionar imagen desde la galería usando image_picker
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
+      if (image == null) {
+        // Usuario canceló
+        return;
+      }
+
+      // Mostrar indicador de carga
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: context.surfaceColor)),
+                SizedBox(width: 16),
+                Text('Subiendo documento...'),
+              ],
+            ),
+            duration: Duration(minutes: 2),
+            backgroundColor: ModernTheme.info,
+          ),
+        );
+      }
+
+      // ✅ Subir imagen a Firebase Storage
+      final file = File(image.path);
+      final storageRef = _storage
+          .ref()
+          .child('drivers')
+          .child(_userId!)
+          .child('documents')
+          .child('${document.id}_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      // ✅ Guardar metadata en Firestore
+      await _firestore
+          .collection('drivers')
+          .doc(_userId!)
+          .collection('documents')
+          .doc(document.id)
+          .set({
+        'name': document.name,
+        'description': document.description,
+        'status': 'pending', // Pendiente de aprobación
+        'uploadDate': FieldValue.serverTimestamp(),
+        'fileUrl': downloadUrl,
+        'category': document.category.toString(),
+        'isRequired': document.isRequired,
+      }, SetOptions(merge: true));
+
+      // Recargar documentos desde Firebase
+      await _loadDocuments();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Documento seleccionado y subido exitosamente'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('Error al seleccionar desde galería: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al subir documento: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _pickFromFiles(DocumentInfo document) async {
+    try {
+      // ✅ Seleccionar archivo usando file_picker (soporta PDF, imágenes, documentos)
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'], // Permitir PDFs e imágenes
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        // Usuario canceló
+        return;
+      }
+
+      final pickedFile = result.files.first;
+      if (pickedFile.path == null) {
+        throw Exception('No se pudo acceder al archivo seleccionado');
+      }
+
+      // Validar tamaño del archivo (máximo 10MB)
+      if (pickedFile.size > 10 * 1024 * 1024) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('El archivo es demasiado grande. Máximo 10MB'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Mostrar indicador de carga
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: context.surfaceColor)),
+                SizedBox(width: 16),
+                Text('Subiendo documento...'),
+              ],
+            ),
+            duration: Duration(minutes: 2),
+            backgroundColor: ModernTheme.info,
+          ),
+        );
+      }
+
+      // ✅ Subir archivo a Firebase Storage con extensión correcta
+      final file = File(pickedFile.path!);
+      final fileExtension = pickedFile.extension ?? 'pdf';
+      final storageRef = _storage
+          .ref()
+          .child('drivers')
+          .child(_userId!)
+          .child('documents')
+          .child('${document.id}_${DateTime.now().millisecondsSinceEpoch}.$fileExtension');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      // ✅ Guardar metadata en Firestore
+      await _firestore
+          .collection('drivers')
+          .doc(_userId!)
+          .collection('documents')
+          .doc(document.id)
+          .set({
+        'name': document.name,
+        'description': document.description,
+        'status': 'pending', // Pendiente de aprobación
+        'uploadDate': FieldValue.serverTimestamp(),
+        'fileUrl': downloadUrl,
+        'fileName': pickedFile.name,
+        'fileExtension': fileExtension,
+        'fileSize': pickedFile.size,
+        'category': document.category.toString(),
+        'isRequired': document.isRequired,
+      }, SetOptions(merge: true));
+
+      // Recargar documentos desde Firebase
+      await _loadDocuments();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Archivo seleccionado y subido exitosamente'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('Error al seleccionar archivo: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al subir documento: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _downloadDocument(DocumentInfo document) async {
+    // ✅ Verificar que el widget esté montado antes de usar context
+    if (!mounted) return;
+
+    if (document.fileUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No hay archivo disponible para descargar'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+      return;
+    }
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(context.surfaceColor),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Text('Descargando ${document.name}...'),
+              ),
+            ],
+          ),
+          backgroundColor: ModernTheme.info,
+          duration: Duration(minutes: 5),
+        ),
+      );
+
+      // ✅ IMPLEMENTACIÓN REAL: Descargar el archivo usando url_launcher
+      // Esto abrirá el documento en el navegador/visor predeterminado del dispositivo
+      final Uri fileUri = Uri.parse(document.fileUrl!);
+
+      // En Android, esto abrirá el archivo en el navegador o app predeterminada
+      // El usuario puede elegir descargar desde allí
+      if (!await launchUrl(fileUri, mode: LaunchMode.externalApplication)) {
+        throw Exception('No se pudo abrir el documento');
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: context.surfaceColor),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Documento abierto. Puedes descargarlo desde el visor.'),
+              ),
+            ],
+          ),
+          backgroundColor: ModernTheme.success,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      AppLogger.error('Error al abrir documento: $e');
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al abrir el documento: ${e.toString()}'),
+          backgroundColor: ModernTheme.error,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
   }
   
   void _uploadAllDocuments() {
-    final missingDocs = _documents.where((d) => 
+    // ✅ Verificar que el widget esté montado antes de usar context
+    if (!mounted) return;
+
+    final missingDocs = _documents.where((d) =>
         d.isRequired && (d.status == DocumentStatus.missing || d.status == DocumentStatus.rejected));
-    
+
     if (missingDocs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1165,6 +1493,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
   
   void _bulkUploadDocuments(List<DocumentInfo> documents) {
+    // ✅ Verificar que el widget esté montado antes de usar context
+    if (!mounted) return;
+
     // Simulate bulk upload
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1172,25 +1503,157 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         backgroundColor: ModernTheme.info,
       ),
     );
-    
+
     // Show upload for each document with a delay
     for (int i = 0; i < documents.length; i++) {
       Future.delayed(Duration(seconds: i * 2), () {
+        // ✅ Verificar mounted antes de llamar a _uploadDocument
+        if (!mounted) return;
         _uploadDocument(documents[i]);
       });
     }
   }
   
-  void _downloadTemplate() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Descargando lista de documentos requeridos...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+  Future<void> _downloadTemplate() async {
+    // ✅ Verificar que el widget esté montado antes de usar context
+    if (!mounted) return;
+
+    try {
+      // Mostrar indicador de carga
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: context.surfaceColor,
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Text('Generando lista de documentos...'),
+              ),
+            ],
+          ),
+          backgroundColor: ModernTheme.info,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // Generar contenido de la lista de documentos
+      final StringBuffer content = StringBuffer();
+      content.writeln('═══════════════════════════════════════════');
+      content.writeln('    LISTA DE DOCUMENTOS REQUERIDOS');
+      content.writeln('         CONDUCTORES OASIS TAXI');
+      content.writeln('═══════════════════════════════════════════');
+      content.writeln('');
+      content.writeln('Fecha de generación: ${DateTime.now().toString().substring(0, 16)}');
+      content.writeln('');
+      content.writeln('DOCUMENTOS OBLIGATORIOS:');
+      content.writeln('');
+
+      int index = 1;
+      for (var doc in _documents) {
+        content.writeln('$index. ${doc.name}');
+        content.writeln('   Estado: ${_getStatusTextForDownload(doc.status)}');
+        if (doc.expiryDate != null) {
+          content.writeln('   Vencimiento: ${doc.expiryDate!.toString().substring(0, 10)}');
+        }
+        if (doc.uploadDate != null) {
+          content.writeln('   Subido: ${doc.uploadDate!.toString().substring(0, 10)}');
+        }
+        content.writeln('');
+        index++;
+      }
+
+      content.writeln('═══════════════════════════════════════════');
+      content.writeln('INFORMACIÓN IMPORTANTE:');
+      content.writeln('');
+      content.writeln('• Todos los documentos deben estar vigentes');
+      content.writeln('• Las fotos deben ser claras y legibles');
+      content.writeln('• Evitar documentos con reflejos o borrosos');
+      content.writeln('• Usar buena iluminación al fotografiar');
+      content.writeln('• Actualizar antes de que venzan');
+      content.writeln('');
+      content.writeln('═══════════════════════════════════════════');
+      content.writeln('');
+      content.writeln('Para más información, contacta a soporte.');
+      content.writeln('');
+      content.writeln('Oasis Taxi - Tu aliado en el camino');
+      content.writeln('═══════════════════════════════════════════');
+
+      // Crear archivo temporal
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}/documentos_requeridos_oasistaxi.txt');
+      await file.writeAsString(content.toString());
+
+      if (!mounted) return;
+
+      // Compartir/guardar archivo
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: 'Lista de Documentos - Oasis Taxi',
+        text: 'Lista de documentos requeridos para conductores de Oasis Taxi',
+      );
+
+      if (!mounted) return;
+
+      // Limpiar SnackBar anterior
+      ScaffoldMessenger.of(context).clearSnackBars();
+
+      // Mostrar confirmación
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: context.surfaceColor),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Lista generada. Puedes guardarla en tu dispositivo.'),
+              ),
+            ],
+          ),
+          backgroundColor: ModernTheme.success,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      AppLogger.error('Error al generar lista de documentos: $e');
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al generar la lista: ${e.toString()}'),
+          backgroundColor: ModernTheme.error,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  String _getStatusTextForDownload(DocumentStatus status) {
+    switch (status) {
+      case DocumentStatus.approved:
+        return 'Aprobado ✓';
+      case DocumentStatus.pending:
+        return 'Pendiente de revisión';
+      case DocumentStatus.rejected:
+        return 'Rechazado - Requiere actualización';
+      case DocumentStatus.expiring:
+        return 'Por vencer - Actualizar pronto';
+      case DocumentStatus.missing:
+        return 'Faltante - Debe subirse';
+    }
   }
   
   void _showDocumentInfo() {
+    // ✅ Verificar que el widget esté montado antes de usar context
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1201,7 +1664,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           children: [
             Icon(Icons.info, color: ModernTheme.oasisGreen),
             SizedBox(width: 8),
-            Text('Información de Documentos'),
+            Expanded(
+              child: Text(
+                'Información de Documentos',
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
           ],
         ),
         content: SingleChildScrollView(
@@ -1217,8 +1686,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               _buildInfoItem(Icons.check_circle, 'Aprobado', 'El documento fue verificado y aceptado', ModernTheme.success),
               _buildInfoItem(Icons.schedule, 'Pendiente', 'El documento está siendo revisado', ModernTheme.warning),
               _buildInfoItem(Icons.error, 'Rechazado', 'El documento fue rechazado y debe ser actualizado', ModernTheme.error),
-              _buildInfoItem(Icons.warning, 'Por vencer', 'El documento está próximo a vencer', Colors.orange),
-              _buildInfoItem(Icons.description, 'Faltante', 'El documento no ha sido subido', ModernTheme.textSecondary),
+              _buildInfoItem(Icons.warning, 'Por vencer', 'El documento está próximo a vencer', ModernTheme.warning),
+              _buildInfoItem(Icons.description, 'Faltante', 'El documento no ha sido subido', context.secondaryText),
               SizedBox(height: 16),
               Text(
                 'Consejos:',
@@ -1268,7 +1737,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   description,
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                 ),
               ],
@@ -1280,6 +1749,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
   
   void _refreshDocuments() {
+    // ✅ Verificar que el widget esté montado antes de usar setState
+    if (!mounted) return;
+
     setState(() => _isLoading = true);
     _loadDocuments();
   }

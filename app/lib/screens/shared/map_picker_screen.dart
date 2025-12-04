@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
+import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../utils/logger.dart';
 
@@ -170,7 +172,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00C800)),
+                valueColor: AlwaysStoppedAnimation<Color>(ModernTheme.oasisGreen),
               ),
               SizedBox(height: 16),
               Text(
@@ -190,10 +192,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           if (_selectedLocation != null)
             TextButton(
               onPressed: _confirmSelection,
-              child: const Text(
+              child: Text(
                 'CONFIRMAR',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onPrimary,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -237,16 +239,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             right: 0,
             bottom: 0,
             child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    offset: Offset(0, -2),
-                    blurRadius: 10,
-                  ),
-                ],
+                boxShadow: ModernTheme.getCardShadow(context),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -260,7 +256,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.grey[300],
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -280,9 +276,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     // Dirección
                     Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.location_on,
-                          color: Color(0xFF00C800),
+                          color: ModernTheme.oasisGreen,
                           size: 20,
                         ),
                         const SizedBox(width: 8),
@@ -296,7 +292,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                         valueColor: AlwaysStoppedAnimation<Color>(
-                                          Color(0xFF00C800),
+                                          ModernTheme.oasisGreen,
                                         ),
                                       ),
                                     ),
@@ -306,9 +302,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                                 )
                               : Text(
                                   _selectedAddress,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 14,
-                                    color: Colors.grey,
+                                    color: context.secondaryText,
                                   ),
                                 ),
                         ),
@@ -326,8 +322,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                             label: const Text('Mi ubicación'),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 12),
-                              side: const BorderSide(color: Color(0xFF00C800)),
-                              foregroundColor: const Color(0xFF00C800),
+                              side: BorderSide(color: ModernTheme.oasisGreen),
+                              foregroundColor: ModernTheme.oasisGreen,
                             ),
                           ),
                         ),
@@ -336,8 +332,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                           child: ElevatedButton(
                             onPressed: _confirmSelection,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF00C800),
-                              foregroundColor: Colors.white,
+                              backgroundColor: ModernTheme.oasisGreen,
+                              foregroundColor: Theme.of(context).colorScheme.onPrimary,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -366,22 +362,22 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               children: [
                 FloatingActionButton(
                   mini: true,
-                  backgroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
                   onPressed: () {
                     _controller?.animateCamera(CameraUpdate.zoomIn());
                   },
                   heroTag: 'zoom_in_picker',
-                  child: const Icon(Icons.add, color: Colors.black87),
+                  child: Icon(Icons.add, color: context.primaryText),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
                   mini: true,
-                  backgroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
                   onPressed: () {
                     _controller?.animateCamera(CameraUpdate.zoomOut());
                   },
                   heroTag: 'zoom_out_picker',
-                  child: const Icon(Icons.remove, color: Colors.black87),
+                  child: Icon(Icons.remove, color: context.primaryText),
                 ),
               ],
             ),

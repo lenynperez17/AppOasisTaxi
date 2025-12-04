@@ -1,6 +1,6 @@
 name: oasis_taxi
 description: Oasis Taxi - Aplicación de transporte
-version: 1.0.0+1
+version: 1.2.7+29
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -28,6 +28,7 @@ dependencies:
   fl_chart: ^1.1.0
   flutter_rating_bar: ^4.0.1
   percent_indicator: ^4.2.3
+  confetti: ^0.8.0  # Animaciones de confeti para celebraciones
   
   # Storage
   shared_preferences: ^2.3.4
@@ -42,6 +43,7 @@ dependencies:
   firebase_app_check: ^0.4.1  # ✅ NUEVO: App Check para seguridad adicional
   firebase_crashlytics: ^5.0.1
   firebase_database: ^12.0.1
+  cloud_functions: ^6.0.3  # ✅ NUEVO: Para llamar Cloud Functions (notificaciones seguras)
   
   # OAuth y Autenticación Social
   google_sign_in: ^7.2.0
@@ -71,9 +73,11 @@ dependencies:
   uuid: ^4.5.1
   logger: ^2.5.0
   http: ^1.2.2
+  webview_flutter: ^4.10.0  # ✅ NUEVO: WebView para MercadoPago Checkout Bricks in-app
+  flutter_dotenv: ^5.2.1  # ✅ NUEVO: Gestión segura de variables de entorno desde .env
   
-  # FCM Real Implementation
-  googleapis_auth: ^2.0.0
+  # ❌ REMOVIDO POR SEGURIDAD: googleapis_auth ya no es necesario
+  # Las notificaciones ahora se envían desde Cloud Functions
   dio: ^5.6.0
   
   # OTP y Verificación
@@ -84,15 +88,21 @@ dependencies:
   # Permissions
   permission_handler: ^12.0.1
   
-  # Image
-  image_picker: ^1.1.2
+  # Image - Usa Android Photo Picker en Android 13+ (sin permisos)
+  image_picker: ^1.2.1
   
   # File Handling
   file_picker: ^10.3.3
   device_info_plus: ^12.1.0
   cached_network_image: ^3.4.1
   path_provider: ^2.1.5
-  
+
+  # Export & Document Generation
+  share_plus: ^10.1.4
+  pdf: ^3.11.3
+  printing: ^5.13.4
+  csv: ^6.0.0
+
   # Socket.IO para tracking en tiempo real
   socket_io_client: ^3.1.2
 
@@ -100,12 +110,51 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.2
+  flutter_native_splash: ^2.4.3
 
 flutter:
   uses-material-design: true
+  generate: true  # ✅ Habilita generación automática de código de localización
 
   assets:
     - assets/images/
     - assets/icons/
     - assets/animations/
-    - assets/service-account.json
+    # ❌ REMOVIDO POR SEGURIDAD: service-account.json NO debe estar en el APK
+    # Las notificaciones ahora se envían desde Cloud Functions
+    - assets/fonts/  # ✅ Fuentes para generación de PDF
+    - assets/mercadopago_checkout.html  # ✅ HTML para MercadoPago Checkout Bricks
+    - .env  # 🔐 Variables de entorno (API Keys, etc.) - Este archivo está en .gitignore
+
+  # ✅ Configuración de fuentes custom para PDF (Roboto con soporte Unicode completo)
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
+
+# Configuración de íconos de la app
+flutter_launcher_icons:
+  android: true
+  ios: false  # Deshabilitado porque el proyecto no tiene estructura iOS
+  image_path: "assets/images/logo_oasis_taxi.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/logo_oasis_taxi.png"
+
+# Configuración de splash screen
+# ✅ SOLUCIÓN CORRECTA: Imagen 1152x1152 con espacio alrededor para Android 12+
+# Android 12+ recorta el ícono en círculo de 768px de diámetro
+flutter_native_splash:
+  color: "#FFFFFF"  # Color de fondo blanco
+  image: assets/images/1152x1152-oasis.png  # Ícono 1152x1152 (especificación oficial)
+  android: true
+  ios: false  # Deshabilitado porque el proyecto no tiene estructura iOS
+  fullscreen: true
+  android_12:
+    # Android 12+ (API 31+): Recorta en círculo de 768px
+    color: "#FFFFFF"
+    image: assets/images/1152x1152-oasis.png  # 1152x1152 sin fondo de ícono
+    icon_background_color: "#FFFFFF"

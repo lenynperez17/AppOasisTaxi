@@ -23,7 +23,7 @@ class OasisAppBar extends StatelessWidget implements PreferredSizeWidget {
       centerTitle: true,
       leading: showBackButton
           ? IconButton(
-              icon: Icon(Icons.arrow_back, color: Colors.white),
+              icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
               onPressed: () => Navigator.pop(context),
             )
           : null,
@@ -35,11 +35,11 @@ class OasisAppBar extends StatelessWidget implements PreferredSizeWidget {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 4,
                     spreadRadius: 1,
                   ),
@@ -67,7 +67,7 @@ class OasisAppBar extends StatelessWidget implements PreferredSizeWidget {
             child: Text(
               title,
               style: TextStyle(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.onPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -115,10 +115,10 @@ class OasisDrawerHeader extends StatelessWidget {
                     height: 60,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.2),
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
                           blurRadius: 8,
                           spreadRadius: 2,
                         ),
@@ -147,7 +147,7 @@ class OasisDrawerHeader extends StatelessWidget {
                       Text(
                         'OASIS TAXI',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.onPrimary,
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.5,
@@ -156,7 +156,7 @@ class OasisDrawerHeader extends StatelessWidget {
                       Text(
                         'Tu viaje, tu precio',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
+                          color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                           fontSize: 12,
                         ),
                       ),
@@ -169,10 +169,10 @@ class OasisDrawerHeader extends StatelessWidget {
               Row(
                 children: [
                   CircleAvatar(
-                    backgroundColor: Colors.white.withValues(alpha: 0.2),
+                    backgroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                     child: Icon(
                       _getUserIcon(userType),
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onPrimary,
                     ),
                   ),
                   SizedBox(width: 12),
@@ -182,7 +182,7 @@ class OasisDrawerHeader extends StatelessWidget {
                       Text(
                         userName,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.onPrimary,
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                         ),
@@ -190,7 +190,7 @@ class OasisDrawerHeader extends StatelessWidget {
                       Text(
                         _getUserTypeLabel(userType),
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.8),
+                          color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.8),
                           fontSize: 12,
                         ),
                       ),

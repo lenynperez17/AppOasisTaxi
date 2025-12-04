@@ -1,11 +1,88 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- ✅ PERMISOS DE UBICACIÓN GPS - Requerido para Google Maps y tracking de viajes -->
+    <!-- ==================== PERMISOS DE UBICACIÓN ==================== -->
+    <!-- Ubicación precisa para Google Maps y seguimiento de viajes -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Ubicación aproximada -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Ubicación en segundo plano (para conductores activos) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Ubicación en primer plano (Android 10+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
-    <!-- ✅ PERMISO DE NOTIFICACIONES PARA ANDROID 13+ (API 33 Tiramisu) -->
+    <!-- ==================== PERMISOS DE RED ==================== -->
+    <!-- Acceso a internet -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Estado de la red -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Estado de WiFi -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Cambiar estado de WiFi -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- ==================== PERMISOS DE CÁMARA Y FOTOS ==================== -->
+    <!-- Tomar fotos (documentos, selfies, vehículo) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Leer almacenamiento externo (Android < 13) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Escribir en almacenamiento externo (Android < 13) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- NOTA: NO usar READ_MEDIA_IMAGES - Google Play lo rechaza desde 2025
+         image_picker usa Android Photo Picker automáticamente en Android 13+
+         que NO requiere permisos -->
+
+    <!-- ==================== PERMISOS DE AUDIO ==================== -->
+    <!-- Grabar audio (para llamadas VoIP en el futuro) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Modificar configuración de audio -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- ==================== PERMISOS DE LLAMADAS ==================== -->
+    <!-- Realizar llamadas telefónicas (contactar conductor/pasajero) -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Leer estado del teléfono -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- ==================== PERMISOS DE SMS ==================== -->
+    <!-- NOTA: No usamos RECEIVE_SMS ni READ_SMS. Firebase Auth usa el SMS Retriever API
+         que NO requiere estos permisos y es la forma recomendada por Google.
+         El código de verificación se obtiene automáticamente sin acceder a los SMS del usuario. -->
+
+    <!-- ==================== PERMISOS DE NOTIFICACIONES ==================== -->
+    <!-- Mostrar notificaciones (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Vibrar el dispositivo -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Despertar dispositivo -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Recibir mensajes de Firebase Cloud Messaging -->
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+
+    <!-- ==================== PERMISOS DE COMPARTIR Y DESCARGAR ==================== -->
+    <!-- Las actualizaciones se manejan automáticamente por Google Play -->
+
+    <!-- ==================== PERMISOS DE SISTEMA ==================== -->
+    <!-- Iniciar al arranque (para notificaciones persistentes) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Ejecutar al iniciar -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Bluetooth (para dispositivos de manos libres) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!-- ==================== CARACTERÍSTICAS OPCIONALES ==================== -->
+    <!-- Cámara es opcional pero recomendada -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <!-- GPS es requerido -->
+    <uses-feature android:name="android.hardware.location.gps" android:required="true" />
+    <!-- Micrófono es opcional -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- Teléfono es opcional -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:label="Oasis Taxi"
@@ -20,10 +97,6 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
@@ -34,39 +107,69 @@
             </intent-filter>
         </activity>
 
-        <!-- ✅ GOOGLE MAPS API KEY - REEMPLAZA CON TU CLAVE REAL -->
-        <!-- Obtén tu clave en: https://console.cloud.google.com/apis/credentials -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyDhivA5K3FD5Qeom96dkJ-NsdmWVrqFWmo" />
+        <!-- ==================== FACEBOOK LOGIN ACTIVITY ==================== -->
+        <!-- Activity para manejar el callback de Facebook Login -->
+        <activity
+            android:name="com.facebook.FacebookActivity"
+            android:configChanges="keyboard|keyboardHidden|screenLayout|screenSize|orientation"
+            android:label="@string/app_name" />
 
-        <!-- ✅ GOOGLE MAPS MAP ID - Opcional pero recomendado para reducir warnings de logging -->
-        <!-- Crea tu Map ID en: https://console.cloud.google.com/google/maps-apis/studio/maps -->
-        <!-- NOTA: Por ahora comentado - descomentar cuando tengas un Map ID configurado -->
-        <!-- <meta-data
-            android:name="com.google.android.geo.MAP_ID"
-            android:value="TU_MAP_ID_AQUI" /> -->
-
-        <!-- ✅ ANDROID 13+ BACK BUTTON CALLBACK - Habilita el nuevo sistema de back button -->
-        <meta-data
-            android:name="android.window.ENABLE_ON_BACK_INVOKED_CALLBACK"
-            android:value="true" />
-
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <!-- Intent filter para deep linking de Facebook -->
+        <activity
+            android:name="com.facebook.CustomTabActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="@string/fb_login_protocol_scheme" />
+            </intent-filter>
+        </activity>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-    </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U" />
 
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+        <!-- ==================== CONFIGURACIÓN FACEBOOK LOGIN ==================== -->
+        <!-- Facebook App ID -->
+        <meta-data
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="@string/facebook_app_id" />
+
+        <!-- Facebook Client Token -->
+        <meta-data
+            android:name="com.facebook.sdk.ClientToken"
+            android:value="@string/facebook_client_token" />
+    </application>
+    <!-- Queries requeridas para url_launcher en Android 11+ (API 30+) -->
+    <!-- Referencia: https://pub.dev/packages/url_launcher -->
     <queries>
+        <!-- Para abrir URLs https (PDFs, links externos) -->
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <!-- Para abrir URLs http -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <!-- Para llamadas telefónicas -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tel" />
+        </intent>
+        <!-- Para SMS -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
+        </intent>
+        <!-- Para email -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mailto" />
         </intent>
     </queries>
 </manifest>

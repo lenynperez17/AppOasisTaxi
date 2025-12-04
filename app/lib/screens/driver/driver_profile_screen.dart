@@ -1,13 +1,17 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
-// ✅ FIX: Removido dart:io - ya no necesario (usamos NetworkImage, no FileImage)
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../core/utils/currency_formatter.dart';
 import 'documents_screen.dart';
 import 'earnings_withdrawal_screen.dart';
 
+import '../../utils/logger.dart';
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({super.key});
 
@@ -21,24 +25,66 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
   late AnimationController _slideController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _slideAnimation;
-  
+
   // Profile data
   DriverProfile? _profile;
   bool _isLoading = true;
-  bool _isEditing = false;
+
+  // ImagePicker y Firebase Storage para foto de perfil
+  final ImagePicker _picker = ImagePicker();
+  final FirebaseStorage _storage = FirebaseStorage.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ✅ FLAGS DE EDICIÓN INLINE PARA CADA SECCIÓN
+  bool _isEditingPersonal = false;  // Información Personal
+  bool _isEditingVehicle = false;   // Información del Vehículo
+  bool _isEditingPreferences = false; // Preferencias
+  bool _isEditingSchedule = false;  // Horario de Trabajo
 
   // ✅ NUEVO: Documentos del conductor
   Map<String, String>? _documents;
-  
-  // Form controllers
-  final _formKey = GlobalKey<FormState>();
+
+  // ✅ FORM KEYS PARA CADA SECCIÓN
+  final _personalFormKey = GlobalKey<FormState>();
+  final _vehicleFormKey = GlobalKey<FormState>();
+  final _preferencesFormKey = GlobalKey<FormState>();
+  final _scheduleFormKey = GlobalKey<FormState>();
+
+  // ✅ CONTROLADORES - INFORMACIÓN PERSONAL
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _emergencyContactController = TextEditingController();
   final TextEditingController _emergencyPhoneController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
-  
+
+  // ✅ CONTROLADORES - INFORMACIÓN DEL VEHÍCULO
+  final TextEditingController _makeController = TextEditingController();
+  final TextEditingController _modelController = TextEditingController();
+  final TextEditingController _yearController = TextEditingController();
+  final TextEditingController _colorController = TextEditingController();
+  final TextEditingController _plateController = TextEditingController();
+  final TextEditingController _capacityController = TextEditingController();
+
+  // ✅ VARIABLES DE ESTADO - PREFERENCIAS (sin controllers, usan estado directo)
+  bool _acceptPets = false;
+  bool _acceptSmoking = false;
+  String _musicPreference = 'Ninguna';
+  List<String> _languages = ['Español'];
+  double _maxTripDistance = 50.0;
+  List<String> _preferredZones = [];
+
+  // ✅ VARIABLES DE ESTADO - HORARIO DE TRABAJO
+  Map<String, Map<String, dynamic>> _weekSchedule = {
+    'Lunes': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': true},
+    'Martes': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': true},
+    'Miércoles': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': true},
+    'Jueves': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': true},
+    'Viernes': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': true},
+    'Sábado': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': false},
+    'Domingo': {'start': TimeOfDay(hour: 8, minute: 0), 'end': TimeOfDay(hour: 18, minute: 0), 'active': false},
+  };
+
   @override
   void initState() {
     super.initState();
@@ -68,14 +114,26 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
   
   @override
   void dispose() {
+    // Animación
     _fadeController.dispose();
     _slideController.dispose();
+
+    // Información Personal
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _emergencyContactController.dispose();
     _emergencyPhoneController.dispose();
     _bioController.dispose();
+
+    // Información del Vehículo
+    _makeController.dispose();
+    _modelController.dispose();
+    _yearController.dispose();
+    _colorController.dispose();
+    _plateController.dispose();
+    _capacityController.dispose();
+
     super.dispose();
   }
   
@@ -85,7 +143,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       // ✅ Obtener usuario actual de Firebase Auth
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) {
-        print('⚠️ No hay usuario autenticado');
+        AppLogger.warning('⚠️ No hay usuario autenticado');
         if (mounted) {
           setState(() => _isLoading = false);
         }
@@ -101,7 +159,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           .get();
 
       if (!userDoc.exists) {
-        print('⚠️ Documento de usuario no existe: $userId');
+        AppLogger.warning('⚠️ Documento de usuario no existe: $userId');
         if (mounted) {
           setState(() => _isLoading = false);
         }
@@ -110,31 +168,41 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
 
       final userData = userDoc.data()!;
 
-      // ✅ Calcular estadísticas desde la colección rides
-      final ridesSnapshot = await FirebaseFirestore.instance
-          .collection('rides')
-          .where('driverId', isEqualTo: userId)
-          .where('status', isEqualTo: 'completed')
-          .get();
-
+      // ✅ Calcular estadísticas desde la colección rides (con manejo de errores)
       double totalDistance = 0.0;
       double totalEarnings = 0.0;
       double totalHours = 0.0;
+      int totalTripsCount = 0;
 
-      for (var doc in ridesSnapshot.docs) {
-        final data = doc.data();
-        if (data['distance'] != null) {
-          totalDistance += (data['distance'] as num).toDouble();
+      try {
+        final ridesSnapshot = await FirebaseFirestore.instance
+            .collection('rides')
+            .where('driverId', isEqualTo: userId)
+            .where('status', isEqualTo: 'completed')
+            .get();
+
+        totalTripsCount = ridesSnapshot.docs.length;
+
+        for (var doc in ridesSnapshot.docs) {
+          final data = doc.data();
+          if (data['distance'] != null) {
+            totalDistance += (data['distance'] as num).toDouble();
+          }
+          if (data['fare'] != null) {
+            totalEarnings += (data['fare'] as num).toDouble();
+          }
+          if (data['startedAt'] != null && data['completedAt'] != null) {
+            final startedAt = (data['startedAt'] as Timestamp).toDate();
+            final completedAt = (data['completedAt'] as Timestamp).toDate();
+            final duration = completedAt.difference(startedAt);
+            totalHours += duration.inMinutes / 60.0;
+          }
         }
-        if (data['fare'] != null) {
-          totalEarnings += (data['fare'] as num).toDouble();
-        }
-        if (data['startedAt'] != null && data['completedAt'] != null) {
-          final startedAt = (data['startedAt'] as Timestamp).toDate();
-          final completedAt = (data['completedAt'] as Timestamp).toDate();
-          final duration = completedAt.difference(startedAt);
-          totalHours += duration.inMinutes / 60.0;
-        }
+      } catch (e) {
+        // ✅ Si hay error con rides (índice faltante, permisos, etc.), usar datos del usuario
+        AppLogger.warning('⚠️ No se pudieron cargar estadísticas de rides: $e');
+        totalTripsCount = (userData['totalTrips'] as num?)?.toInt() ?? 0;
+        totalEarnings = (userData['totalEarnings'] as num?)?.toDouble() ?? 0.0;
       }
 
       // ✅ Extraer datos del perfil con valores por defecto seguros
@@ -144,17 +212,17 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       final workScheduleData = userData['workSchedule'] as Map<String, dynamic>?;
 
       // 🔍 DEBUG: Verificar si vehicleInfo existe en Firebase
-      print('📊 DEBUG - Datos de vehículo desde Firebase:');
-      print('   vehicleInfoData existe: ${vehicleInfoData != null}');
+      AppLogger.debug('📊 DEBUG - Datos de vehículo desde Firebase:');
+      AppLogger.debug('   vehicleInfoData existe: ${vehicleInfoData != null}');
       if (vehicleInfoData != null) {
-        print('   Marca: ${vehicleInfoData['make']}');
-        print('   Modelo: ${vehicleInfoData['model']}');
-        print('   Año: ${vehicleInfoData['year']}');
-        print('   Color: ${vehicleInfoData['color']}');
-        print('   Placa: ${vehicleInfoData['plate']}');
-        print('   Capacidad: ${vehicleInfoData['capacity']}');
+        AppLogger.debug('   Marca: ${vehicleInfoData['make']}');
+        AppLogger.debug('   Modelo: ${vehicleInfoData['model']}');
+        AppLogger.debug('   Año: ${vehicleInfoData['year']}');
+        AppLogger.debug('   Color: ${vehicleInfoData['color']}');
+        AppLogger.debug('   Placa: ${vehicleInfoData['plate']}');
+        AppLogger.debug('   Capacidad: ${vehicleInfoData['capacity']}');
       } else {
-        print('   ⚠️ vehicleInfo NO ENCONTRADO en Firebase para usuario: $userId');
+        AppLogger.debug('   ⚠️ vehicleInfo NO ENCONTRADO en Firebase para usuario: $userId');
       }
 
       // ✅ NUEVO: Cargar documentos del conductor
@@ -162,33 +230,38 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       _documents = documentsData?.map((key, value) => MapEntry(key, value.toString()));
 
       // 🔍 DEBUG: Verificar si documentos existen en Firebase
-      print('📄 DEBUG - Datos de documentos desde Firebase:');
-      print('   documentsData existe: ${documentsData != null}');
+      AppLogger.debug('📄 DEBUG - Datos de documentos desde Firebase:');
+      AppLogger.debug('   documentsData existe: ${documentsData != null}');
       if (documentsData != null) {
-        print('   Documentos encontrados: ${documentsData.keys.join(', ')}');
+        AppLogger.debug('   Documentos encontrados: ${documentsData.keys.join(', ')}');
         documentsData.forEach((key, value) {
-          print('   - $key: $value');
+          AppLogger.debug('   - $key: $value');
         });
       } else {
-        print('   ⚠️ documents NO ENCONTRADO en Firebase para usuario: $userId');
+        AppLogger.debug('   ⚠️ documents NO ENCONTRADO en Firebase para usuario: $userId');
       }
 
-      // ✅ Cargar logros desde colección achievements si existe
+      // ✅ Cargar logros desde colección achievements si existe (con manejo de errores)
       List<Achievement> achievementsList = [];
-      final achievementsSnapshot = await FirebaseFirestore.instance
-          .collection('achievements')
-          .where('userId', isEqualTo: userId)
-          .get();
+      try {
+        final achievementsSnapshot = await FirebaseFirestore.instance
+            .collection('achievements')
+            .where('userId', isEqualTo: userId)
+            .get();
 
-      for (var doc in achievementsSnapshot.docs) {
-        final data = doc.data();
-        achievementsList.add(Achievement(
-          id: doc.id,
-          name: data['name'] ?? '',
-          description: data['description'] ?? '',
-          iconUrl: data['iconUrl'] ?? '',
-          unlockedDate: (data['unlockedDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-        ));
+        for (var doc in achievementsSnapshot.docs) {
+          final data = doc.data();
+          achievementsList.add(Achievement(
+            id: doc.id,
+            name: data['name'] ?? '',
+            description: data['description'] ?? '',
+            iconUrl: data['iconUrl'] ?? '',
+            unlockedDate: (data['unlockedDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          ));
+        }
+      } catch (e) {
+        // ✅ Si hay error con achievements (índice faltante, etc.), continuar sin logros
+        AppLogger.warning('⚠️ No se pudieron cargar logros: $e');
       }
 
       if (mounted) {
@@ -200,7 +273,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           phone: userData['phone'] ?? '',
           profileImageUrl: userData['profilePhotoUrl'] ?? currentUser.photoURL ?? '',
           rating: (userData['rating'] ?? 5.0).toDouble(),
-          totalTrips: ridesSnapshot.docs.length,
+          totalTrips: totalTripsCount,
           totalDistance: totalDistance,
           totalHours: totalHours,
           totalEarnings: totalEarnings,
@@ -248,13 +321,113 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         );
         _isLoading = false;
 
-        // Inicializar controladores del formulario con datos reales
+        // ✅ Inicializar controladores - Información Personal
         _nameController.text = _profile!.name;
         _phoneController.text = _profile!.phone;
         _emailController.text = _profile!.email;
         _emergencyContactController.text = _profile!.emergencyContact.name;
         _emergencyPhoneController.text = _profile!.emergencyContact.phone;
         _bioController.text = _profile!.bio;
+
+        // ✅ Inicializar controladores - Información del Vehículo
+        _makeController.text = _profile!.vehicleInfo.make;
+        _modelController.text = _profile!.vehicleInfo.model;
+        _yearController.text = '${_profile!.vehicleInfo.year}';
+        _colorController.text = _profile!.vehicleInfo.color;
+        _plateController.text = _profile!.vehicleInfo.plate;
+        _capacityController.text = '${_profile!.vehicleInfo.capacity}';
+
+        // ✅ Inicializar variables de estado - Preferencias
+        _acceptPets = _profile!.preferences.acceptPets;
+        _acceptSmoking = _profile!.preferences.acceptSmoking;
+        _musicPreference = _profile!.preferences.musicPreference.isEmpty
+            ? 'Ninguna'
+            : _profile!.preferences.musicPreference;
+        _languages = List<String>.from(_profile!.preferences.languages);
+        _maxTripDistance = (_profile!.preferences.maxTripDistance).clamp(5.0, 100.0);
+        _preferredZones = List<String>.from(_profile!.preferences.preferredZones);
+
+        // ✅ Inicializar variables de estado - Horario de Trabajo
+        final schedule = _profile!.workSchedule;
+        _weekSchedule = {
+          'Lunes': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.mondayStart.split(':')[0]),
+              minute: int.parse(schedule.mondayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.mondayEnd.split(':')[0]),
+              minute: int.parse(schedule.mondayEnd.split(':')[1])
+            ),
+            'active': schedule.mondayStart != '00:00' || schedule.mondayEnd != '00:00',
+          },
+          'Martes': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.tuesdayStart.split(':')[0]),
+              minute: int.parse(schedule.tuesdayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.tuesdayEnd.split(':')[0]),
+              minute: int.parse(schedule.tuesdayEnd.split(':')[1])
+            ),
+            'active': schedule.tuesdayStart != '00:00' || schedule.tuesdayEnd != '00:00',
+          },
+          'Miércoles': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.wednesdayStart.split(':')[0]),
+              minute: int.parse(schedule.wednesdayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.wednesdayEnd.split(':')[0]),
+              minute: int.parse(schedule.wednesdayEnd.split(':')[1])
+            ),
+            'active': schedule.wednesdayStart != '00:00' || schedule.wednesdayEnd != '00:00',
+          },
+          'Jueves': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.thursdayStart.split(':')[0]),
+              minute: int.parse(schedule.thursdayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.thursdayEnd.split(':')[0]),
+              minute: int.parse(schedule.thursdayEnd.split(':')[1])
+            ),
+            'active': schedule.thursdayStart != '00:00' || schedule.thursdayEnd != '00:00',
+          },
+          'Viernes': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.fridayStart.split(':')[0]),
+              minute: int.parse(schedule.fridayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.fridayEnd.split(':')[0]),
+              minute: int.parse(schedule.fridayEnd.split(':')[1])
+            ),
+            'active': schedule.fridayStart != '00:00' || schedule.fridayEnd != '00:00',
+          },
+          'Sábado': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.saturdayStart.split(':')[0]),
+              minute: int.parse(schedule.saturdayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.saturdayEnd.split(':')[0]),
+              minute: int.parse(schedule.saturdayEnd.split(':')[1])
+            ),
+            'active': schedule.saturdayStart != '00:00' || schedule.saturdayEnd != '00:00',
+          },
+          'Domingo': {
+            'start': TimeOfDay(
+              hour: int.parse(schedule.sundayStart.split(':')[0]),
+              minute: int.parse(schedule.sundayStart.split(':')[1])
+            ),
+            'end': TimeOfDay(
+              hour: int.parse(schedule.sundayEnd.split(':')[0]),
+              minute: int.parse(schedule.sundayEnd.split(':')[1])
+            ),
+            'active': schedule.sundayStart != '00:00' || schedule.sundayEnd != '00:00',
+          },
+        };
         });
       }
 
@@ -263,7 +436,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         _slideController.forward();
       }
     } catch (e) {
-      print('❌ Error al cargar perfil: $e');
+      AppLogger.error('❌ Error al cargar perfil: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -273,14 +446,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Mi Perfil',
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.onPrimary,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -302,7 +475,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           Text(
             'Cargando perfil...',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -324,14 +497,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 8),
             Text(
               'Por favor, intenta nuevamente',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
             ),
             SizedBox(height: 24),
@@ -422,7 +595,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                         shape: BoxShape.circle,
                         gradient: _profile!.profileImageUrl.isEmpty
                             ? LinearGradient(
-                                colors: [Colors.white.withValues(alpha: 0.3), Colors.white.withValues(alpha: 0.1)],
+                                colors: [
+                                  Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.3),
+                                  Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.1)
+                                ],
                               )
                             : null,
                         // ✅ FIX: Usar NetworkImage para URLs de Firebase Storage (NO FileImage)
@@ -432,13 +608,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                                 fit: BoxFit.cover,
                               )
                             : null,
-                        border: Border.all(color: Colors.white, width: 3),
+                        border: Border.all(color: Theme.of(context).colorScheme.onPrimary, width: 3),
                       ),
                       child: _profile!.profileImageUrl.isEmpty
                           ? Icon(
                               Icons.person,
                               size: 50,
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onPrimary,
                             )
                           : null,
                     ),
@@ -451,7 +627,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                           width: 32,
                           height: 32,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.surface,
                             shape: BoxShape.circle,
                             border: Border.all(color: ModernTheme.oasisGreen, width: 2),
                           ),
@@ -469,7 +645,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                 Text(
                   _profile!.name,
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.onPrimary,
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
@@ -487,7 +663,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                           size: 16,
                           color: index < _profile!.rating.floor()
                               ? Colors.amber
-                              : Colors.white.withValues(alpha: 0.3),
+                              : Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.3),
                         );
                       }),
                     ),
@@ -496,7 +672,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                       child: Text(
                         '${_profile!.rating} (${_profile!.totalTrips} viajes)',
                         style: TextStyle(
-                          color: Colors.white70,
+                          color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.70),
                           fontSize: 14,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -508,7 +684,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                 Text(
                   'Miembro desde ${_formatMemberSince(_profile!.memberSince)}',
                   style: TextStyle(
-                    color: Colors.white70,
+                    color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.70),
                     fontSize: 12,
                   ),
                 ),
@@ -560,9 +736,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(
         children: [
@@ -587,7 +763,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
             label,
             style: TextStyle(
               fontSize: 12,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -601,9 +777,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       Icons.person,
       ModernTheme.primaryBlue,
       [
-        if (_isEditing) ...[
+        if (_isEditingPersonal) ...[
           Form(
-            key: _formKey,
+            key: _personalFormKey,
             child: Column(
               children: [
                 _buildTextFormField(
@@ -671,7 +847,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         ],
         
         SizedBox(height: 20),
-        
+
         // Emergency contact
         Text(
           'Contacto de Emergencia',
@@ -682,8 +858,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           ),
         ),
         SizedBox(height: 12),
-        
-        if (_isEditing) ...[
+
+        if (_isEditingPersonal) ...[
           _buildTextFormField(
             controller: _emergencyContactController,
             label: 'Nombre del contacto',
@@ -715,7 +891,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         ],
 
         // ✅ NUEVO: Botones de acción cuando está en modo edición
-        if (_isEditing) ...[
+        if (_isEditingPersonal) ...[
           SizedBox(height: 24),
           Row(
             children: [
@@ -723,7 +899,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                 child: OutlinedButton.icon(
                   onPressed: () {
                     setState(() {
-                      _isEditing = false;
+                      _isEditingPersonal = false;
                       // Restaurar valores originales
                       _nameController.text = _profile!.name;
                       _phoneController.text = _profile!.phone;
@@ -745,8 +921,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _saveProfile,
-                  icon: Icon(Icons.save, color: Colors.white),
-                  label: Text('Guardar', style: TextStyle(color: Colors.white)),
+                  icon: Icon(Icons.save, color: Theme.of(context).colorScheme.onPrimary),
+                  label: Text('Guardar', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ModernTheme.success,
                     padding: EdgeInsets.symmetric(vertical: 12),
@@ -757,210 +933,190 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           ),
         ],
       ],
-      onEdit: _isEditing ? null : () => _toggleEdit(),
+      onEdit: _isEditingPersonal ? null : () => _toggleEditPersonal(),
     );
   }
-  
+
+  // ✅ NUEVO: Toggle de edición para Información Personal
+  void _toggleEditPersonal() {
+    setState(() {
+      _isEditingPersonal = !_isEditingPersonal;
+    });
+  }
+
+  // ✅ CONVERTIDO A INLINE: Sección de Información del Vehículo
   Widget _buildVehicleInfoSection() {
     return _buildSection(
       'Información del Vehículo',
       Icons.directions_car,
       ModernTheme.oasisGreen,
       [
-        _buildInfoRow('Marca', _profile!.vehicleInfo.make, Icons.directions_car),
-        _buildInfoRow('Modelo', _profile!.vehicleInfo.model, Icons.drive_eta),
-        _buildInfoRow('Año', '${_profile!.vehicleInfo.year}', Icons.calendar_today),
-        _buildInfoRow('Color', _profile!.vehicleInfo.color, Icons.palette),
-        _buildInfoRow('Placa', _profile!.vehicleInfo.plate, Icons.confirmation_number),
-        _buildInfoRow('Capacidad', '${_profile!.vehicleInfo.capacity} pasajeros', Icons.people),
-      ],
-      onEdit: () => _showEditVehicleDialog(),
-    );
-  }
-
-  /// ✅ CORREGIDO: Mostrar diálogo para editar información del vehículo
-  void _showEditVehicleDialog() {
-    // ✅ Crear controllers con valores iniciales
-    final makeController = TextEditingController(text: _profile!.vehicleInfo.make);
-    final modelController = TextEditingController(text: _profile!.vehicleInfo.model);
-    final yearController = TextEditingController(text: '${_profile!.vehicleInfo.year}');
-    final colorController = TextEditingController(text: _profile!.vehicleInfo.color);
-    final plateController = TextEditingController(text: _profile!.vehicleInfo.plate);
-    final capacityController = TextEditingController(text: '${_profile!.vehicleInfo.capacity}');
-
-    showDialog(
-      context: context,
-      barrierDismissible: false, // ✅ Prevenir cierre accidental
-      builder: (dialogContext) => WillPopScope(
-        onWillPop: () async {
-          // ✅ Limpiar controllers al cerrar con back button
-          makeController.dispose();
-          modelController.dispose();
-          yearController.dispose();
-          colorController.dispose();
-          plateController.dispose();
-          capacityController.dispose();
-          return true;
-        },
-        child: AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.directions_car, color: ModernTheme.oasisGreen),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text('Editar Información del Vehículo'),
+        if (_isEditingVehicle) ...[
+          Form(
+            key: _vehicleFormKey,
+            child: Column(
+              children: [
+                _buildTextFormField(
+                  controller: _makeController,
+                  label: 'Marca',
+                  icon: Icons.business,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa la marca del vehículo';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+                _buildTextFormField(
+                  controller: _modelController,
+                  label: 'Modelo',
+                  icon: Icons.drive_eta,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa el modelo del vehículo';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+                _buildTextFormField(
+                  controller: _yearController,
+                  label: 'Año',
+                  icon: Icons.calendar_today,
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa el año del vehículo';
+                    }
+                    final year = int.tryParse(value);
+                    if (year == null || year < 1900 || year > DateTime.now().year + 1) {
+                      return 'Ingresa un año válido';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+                _buildTextFormField(
+                  controller: _colorController,
+                  label: 'Color',
+                  icon: Icons.palette,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa el color del vehículo';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+                _buildTextFormField(
+                  controller: _plateController,
+                  label: 'Placa',
+                  icon: Icons.confirmation_number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa la placa del vehículo';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+                _buildTextFormField(
+                  controller: _capacityController,
+                  label: 'Capacidad de pasajeros',
+                  icon: Icons.people,
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Ingresa la capacidad';
+                    }
+                    final capacity = int.tryParse(value);
+                    if (capacity == null || capacity < 1 || capacity > 50) {
+                      return 'Ingresa una capacidad válida (1-50)';
+                    }
+                    return null;
+                  },
+                ),
+              ],
             ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          ),
+        ] else ...[
+          _buildInfoRow('Marca', _profile!.vehicleInfo.make, Icons.directions_car),
+          _buildInfoRow('Modelo', _profile!.vehicleInfo.model, Icons.drive_eta),
+          _buildInfoRow('Año', '${_profile!.vehicleInfo.year}', Icons.calendar_today),
+          _buildInfoRow('Color', _profile!.vehicleInfo.color, Icons.palette),
+          _buildInfoRow('Placa', _profile!.vehicleInfo.plate, Icons.confirmation_number),
+          _buildInfoRow('Capacidad', '${_profile!.vehicleInfo.capacity} pasajeros', Icons.people),
+        ],
+
+        // Botones de acción
+        if (_isEditingVehicle) ...[
+          SizedBox(height: 24),
+          Row(
             children: [
-              _buildTextFormField(
-                controller: makeController,
-                label: 'Marca',
-                icon: Icons.business,
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isEditingVehicle = false;
+                      // Restaurar valores originales
+                      _makeController.text = _profile!.vehicleInfo.make;
+                      _modelController.text = _profile!.vehicleInfo.model;
+                      _yearController.text = '${_profile!.vehicleInfo.year}';
+                      _colorController.text = _profile!.vehicleInfo.color;
+                      _plateController.text = _profile!.vehicleInfo.plate;
+                      _capacityController.text = '${_profile!.vehicleInfo.capacity}';
+                    });
+                  },
+                  icon: Icon(Icons.cancel, color: ModernTheme.error),
+                  label: Text('Cancelar'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: ModernTheme.error,
+                    side: BorderSide(color: ModernTheme.error),
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
               ),
-              SizedBox(height: 16),
-              _buildTextFormField(
-                controller: modelController,
-                label: 'Modelo',
-                icon: Icons.drive_eta,
-              ),
-              SizedBox(height: 16),
-              _buildTextFormField(
-                controller: yearController,
-                label: 'Año',
-                icon: Icons.calendar_today,
-                keyboardType: TextInputType.number,
-              ),
-              SizedBox(height: 16),
-              _buildTextFormField(
-                controller: colorController,
-                label: 'Color',
-                icon: Icons.palette,
-              ),
-              SizedBox(height: 16),
-              _buildTextFormField(
-                controller: plateController,
-                label: 'Placa',
-                icon: Icons.confirmation_number,
-              ),
-              SizedBox(height: 16),
-              _buildTextFormField(
-                controller: capacityController,
-                label: 'Capacidad de pasajeros',
-                icon: Icons.people,
-                keyboardType: TextInputType.number,
+              SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _saveVehicleInfo,
+                  icon: Icon(Icons.save, color: Theme.of(context).colorScheme.onPrimary),
+                  label: Text('Guardar', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: ModernTheme.success,
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              // ✅ Limpiar controllers antes de cerrar
-              makeController.dispose();
-              modelController.dispose();
-              yearController.dispose();
-              colorController.dispose();
-              plateController.dispose();
-              capacityController.dispose();
-              Navigator.pop(dialogContext);
-            },
-            child: Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              // ✅ MEJORES PRÁCTICAS: Guardar referencias ANTES de operaciones async
-              final navigator = Navigator.of(dialogContext);
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-              try {
-                // ✅ Obtener valores ANTES de cualquier operación asíncrona
-                final make = makeController.text.trim();
-                final model = modelController.text.trim();
-                final year = int.tryParse(yearController.text.trim()) ?? 0;
-                final color = colorController.text.trim();
-                final plate = plateController.text.trim().toUpperCase();
-                final capacity = int.tryParse(capacityController.text.trim()) ?? 4;
-
-                // ✅ Obtener userId actual
-                final userId = FirebaseAuth.instance.currentUser?.uid;
-                if (userId == null) {
-                  throw Exception('Usuario no autenticado');
-                }
-
-                // ✅ Actualizar en Firebase
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(userId)
-                    .update({
-                  'vehicleInfo': {
-                    'make': make,
-                    'model': model,
-                    'year': year,
-                    'color': color,
-                    'plate': plate,
-                    'capacity': capacity,
-                  },
-                  'updatedAt': FieldValue.serverTimestamp(),
-                });
-
-                // ✅ Limpiar controllers ANTES de cerrar dialog
-                makeController.dispose();
-                modelController.dispose();
-                yearController.dispose();
-                colorController.dispose();
-                plateController.dispose();
-                capacityController.dispose();
-
-                // ✅ Cerrar dialog y mostrar mensaje usando referencias guardadas
-                if (mounted) {
-                  navigator.pop();
-
-                  // ✅ Recargar datos
-                  _loadProfile();
-
-                  // ✅ Mostrar mensaje de éxito SIN usar context directamente
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(
-                      content: Text('Información del vehículo actualizada correctamente'),
-                      backgroundColor: ModernTheme.oasisGreen,
-                    ),
-                  );
-                }
-              } catch (e) {
-                // ✅ Limpiar controllers en caso de error
-                makeController.dispose();
-                modelController.dispose();
-                yearController.dispose();
-                colorController.dispose();
-                plateController.dispose();
-                capacityController.dispose();
-
-                if (mounted) {
-                  navigator.pop();
-                  // ✅ Usar referencia guardada en lugar de context
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(
-                      content: Text('Error al actualizar: $e'),
-                      backgroundColor: ModernTheme.error,
-                    ),
-                  );
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ModernTheme.oasisGreen,
-            ),
-            child: Text('Guardar', style: TextStyle(color: Colors.white)),
-          ),
         ],
-        ),
-      ),
+      ],
+      onEdit: _isEditingVehicle ? null : () => _toggleEditVehicle(),
     );
   }
+
+  // ✅ NUEVO: Toggle de edición para Información del Vehículo
+  void _toggleEditVehicle() {
+    setState(() {
+      _isEditingVehicle = !_isEditingVehicle;
+    });
+  }
+
+  void _toggleEditPreferences() {
+    setState(() {
+      _isEditingPreferences = !_isEditingPreferences;
+    });
+  }
+
+  void _toggleEditSchedule() {
+    setState(() {
+      _isEditingSchedule = !_isEditingSchedule;
+    });
+  }
+
+  // ✅ ELIMINADO: _showEditVehicleDialog() - Ahora usa edición inline
 
   // ✅ NUEVO: Sección de documentos del conductor
   Widget _buildDocumentsSection() {
@@ -998,7 +1154,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Row(
               children: [
-                Icon(icon, size: 18, color: ModernTheme.textSecondary),
+                Icon(icon, size: 18, color: context.secondaryText),
                 SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1008,7 +1164,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                         label,
                         style: TextStyle(
                           fontSize: 12,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                           fontWeight: FontWeight.w500,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -1075,7 +1231,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
           'Configura tus métodos de retiro para recibir tus ganancias',
           style: TextStyle(
             fontSize: 14,
-            color: ModernTheme.textSecondary,
+            color: context.secondaryText,
           ),
         ),
         SizedBox(height: 16),
@@ -1163,7 +1319,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: ModernTheme.textPrimary,
+                      color: context.primaryText,
                     ),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
@@ -1173,7 +1329,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                     description,
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 2,
@@ -1267,7 +1423,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                     'Configura tu cuenta bancaria para recibir retiros en 1-2 días hábiles',
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                   SizedBox(height: 16),
@@ -1463,7 +1619,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                       );
                     }
                   } catch (e) {
-                    print('❌ Error al guardar cuenta bancaria: $e');
+                    AppLogger.error('❌ Error al guardar cuenta bancaria: $e');
                     if (mounted) {
                       // ignore: use_build_context_synchronously
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1531,7 +1687,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                     'Configura tu tarjeta de débito para retiros instantáneos',
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                   SizedBox(height: 16),
@@ -1677,7 +1833,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                       );
                     }
                   } catch (e) {
-                    print('❌ Error al guardar tarjeta: $e');
+                    AppLogger.error('❌ Error al guardar tarjeta: $e');
                     if (mounted) {
                       // ignore: use_build_context_synchronously
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1800,7 +1956,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                   );
                 }
               } catch (e) {
-                print('❌ Error al activar efectivo: $e');
+                AppLogger.error('❌ Error al activar efectivo: $e');
               }
             },
             style: ElevatedButton.styleFrom(
@@ -1818,7 +1974,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       padding: EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: ModernTheme.textSecondary),
+          Icon(icon, size: 16, color: context.secondaryText),
           SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1897,7 +2053,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
             achievement.description,
             style: TextStyle(
               fontSize: 10,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
             textAlign: TextAlign.center,
             maxLines: 3,
@@ -1914,43 +2070,282 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       Icons.settings,
       Colors.purple,
       [
-        _buildPreferenceRow('Acepta mascotas', _profile!.preferences.acceptPets),
-        _buildPreferenceRow('Permite fumar', _profile!.preferences.acceptSmoking),
-        _buildInfoRow('Música preferida', _profile!.preferences.musicPreference, Icons.music_note),
-        _buildInfoRow('Idiomas', _profile!.preferences.languages.join(', '), Icons.language),
-        _buildInfoRow('Distancia máxima', '${_profile!.preferences.maxTripDistance} km', Icons.straighten),
+        if (_isEditingPreferences) ...[
+          // ✅ MODO EDICIÓN - Formulario inline
+          Form(
+            key: _preferencesFormKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Acepta mascotas
+                SwitchListTile(
+                  title: Text('Acepta mascotas'),
+                  subtitle: Text('Permitir pasajeros con mascotas'),
+                  value: _acceptPets,
+                  activeColor: Colors.purple,
+                  onChanged: (value) {
+                    setState(() {
+                      _acceptPets = value;
+                    });
+                  },
+                ),
+                SizedBox(height: 8),
 
-        SizedBox(height: 12),
-        Text(
-          'Zonas preferidas:',
-          style: TextStyle(
-            fontWeight: FontWeight.w500,
-            color: ModernTheme.textPrimary,
+                // Acepta fumadores
+                SwitchListTile(
+                  title: Text('Permite fumar'),
+                  subtitle: Text('Permitir pasajeros que fuman'),
+                  value: _acceptSmoking,
+                  activeColor: Colors.purple,
+                  onChanged: (value) {
+                    setState(() {
+                      _acceptSmoking = value;
+                    });
+                  },
+                ),
+                SizedBox(height: 16),
+
+                // Música preferida
+                DropdownButtonFormField<String>(
+                  value: _musicPreference,
+                  decoration: InputDecoration(
+                    labelText: 'Música preferida',
+                    prefixIcon: Icon(Icons.music_note, color: Colors.purple),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  items: [
+                    'Ninguna',
+                    'Pop',
+                    'Rock',
+                    'Clásica',
+                    'Reggaetón',
+                    'Salsa',
+                    'Electrónica',
+                    'Jazz',
+                  ].map((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _musicPreference = newValue ?? 'Ninguna';
+                    });
+                  },
+                ),
+                SizedBox(height: 16),
+
+                // Idiomas
+                Text(
+                  'Idiomas que hablas',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: context.primaryText,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    'Español',
+                    'Inglés',
+                    'Francés',
+                    'Alemán',
+                    'Italiano',
+                    'Portugués',
+                  ].map((String language) {
+                    final isSelected = _languages.contains(language);
+                    return FilterChip(
+                      label: Text(language),
+                      selected: isSelected,
+                      onSelected: (bool selected) {
+                        setState(() {
+                          if (selected) {
+                            _languages.add(language);
+                          } else {
+                            if (_languages.length > 1) {
+                              _languages.remove(language);
+                            } else {
+                              // Al menos un idioma debe estar seleccionado
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Debes seleccionar al menos un idioma'),
+                                  backgroundColor: ModernTheme.warning,
+                                ),
+                              );
+                            }
+                          }
+                        });
+                      },
+                      selectedColor: Colors.purple.withValues(alpha: 0.2),
+                      checkmarkColor: Colors.purple,
+                    );
+                  }).toList(),
+                ),
+                SizedBox(height: 16),
+
+                // Distancia máxima de viaje
+                Text(
+                  'Distancia máxima de viaje: ${_maxTripDistance.toStringAsFixed(0)} km',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: context.primaryText,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Slider(
+                  value: _maxTripDistance,
+                  min: 5,
+                  max: 100,
+                  divisions: 19,
+                  label: '${_maxTripDistance.toStringAsFixed(0)} km',
+                  activeColor: Colors.purple,
+                  onChanged: (double value) {
+                    setState(() {
+                      _maxTripDistance = value;
+                    });
+                  },
+                ),
+                SizedBox(height: 16),
+
+                // Zonas preferidas
+                Text(
+                  'Zonas preferidas',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: context.primaryText,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    'Centro',
+                    'Norte',
+                    'Sur',
+                    'Este',
+                    'Oeste',
+                    'Aeropuerto',
+                    'Zona Industrial',
+                    'Zona Comercial',
+                  ].map((String zone) {
+                    final isSelected = _preferredZones.contains(zone);
+                    return FilterChip(
+                      label: Text(zone),
+                      selected: isSelected,
+                      onSelected: (bool selected) {
+                        setState(() {
+                          if (selected) {
+                            _preferredZones.add(zone);
+                          } else {
+                            _preferredZones.remove(zone);
+                          }
+                        });
+                      },
+                      selectedColor: Colors.purple.withValues(alpha: 0.2),
+                      checkmarkColor: Colors.purple,
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
-        ),
-        SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: _profile!.preferences.preferredZones.map((zone) {
-            return Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.purple.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                zone,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.purple,
+        ] else ...[
+          // ✅ MODO VISTA - Información de solo lectura
+          _buildPreferenceRow('Acepta mascotas', _profile!.preferences.acceptPets),
+          _buildPreferenceRow('Permite fumar', _profile!.preferences.acceptSmoking),
+          _buildInfoRow('Música preferida', _profile!.preferences.musicPreference, Icons.music_note),
+          _buildInfoRow('Idiomas', _profile!.preferences.languages.join(', '), Icons.language),
+          _buildInfoRow('Distancia máxima', '${_profile!.preferences.maxTripDistance} km', Icons.straighten),
+
+          SizedBox(height: 12),
+          Text(
+            'Zonas preferidas:',
+            style: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: context.primaryText,
+            ),
+          ),
+          SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: _profile!.preferences.preferredZones.map((zone) {
+              return Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  zone,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.purple,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+
+        // ✅ BOTONES DE ACCIÓN (solo en modo edición)
+        if (_isEditingPreferences) ...[
+          SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      // Restaurar valores originales
+                      _acceptPets = _profile!.preferences.acceptPets;
+                      _acceptSmoking = _profile!.preferences.acceptSmoking;
+                      _musicPreference = _profile!.preferences.musicPreference.isEmpty
+                          ? 'Ninguna'
+                          : _profile!.preferences.musicPreference;
+                      _languages = List<String>.from(_profile!.preferences.languages);
+                      _maxTripDistance = (_profile!.preferences.maxTripDistance).clamp(5.0, 100.0);
+                      _preferredZones = List<String>.from(_profile!.preferences.preferredZones);
+                      _isEditingPreferences = false;
+                    });
+                  },
+                  icon: Icon(Icons.cancel, color: ModernTheme.error),
+                  label: Text(
+                    'Cancelar',
+                    style: TextStyle(color: ModernTheme.error),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: ModernTheme.error),
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
                 ),
               ),
-            );
-          }).toList(),
-        ),
+              SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _savePreferences,
+                  icon: Icon(Icons.save, color: Theme.of(context).colorScheme.onPrimary),
+                  label: Text('Guardar', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
-      onEdit: () => _editPreferences(), // ✅ Agregar callback de edición
+      onEdit: _isEditingPreferences ? null : () => _toggleEditPreferences(),
     );
   }
   
@@ -1960,15 +2355,301 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       Icons.schedule,
       Colors.orange,
       [
-        _buildScheduleRow('Lunes', _profile!.workSchedule.mondayStart, _profile!.workSchedule.mondayEnd),
-        _buildScheduleRow('Martes', _profile!.workSchedule.tuesdayStart, _profile!.workSchedule.tuesdayEnd),
-        _buildScheduleRow('Miércoles', _profile!.workSchedule.wednesdayStart, _profile!.workSchedule.wednesdayEnd),
-        _buildScheduleRow('Jueves', _profile!.workSchedule.thursdayStart, _profile!.workSchedule.thursdayEnd),
-        _buildScheduleRow('Viernes', _profile!.workSchedule.fridayStart, _profile!.workSchedule.fridayEnd),
-        _buildScheduleRow('Sábado', _profile!.workSchedule.saturdayStart, _profile!.workSchedule.saturdayEnd),
-        _buildScheduleRow('Domingo', _profile!.workSchedule.sundayStart, _profile!.workSchedule.sundayEnd),
+        if (_isEditingSchedule) ...[
+          // ✅ MODO EDICIÓN - Formulario inline con time pickers
+          Form(
+            key: _scheduleFormKey,
+            child: Column(
+              children: _weekSchedule.entries.map((entry) {
+                final day = entry.key;
+                final dayData = entry.value;
+
+                return Card(
+                  margin: EdgeInsets.only(bottom: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Fila: Día + Switch activo/inactivo
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              day,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Switch(
+                              value: dayData['active'],
+                              activeColor: Colors.orange,
+                              onChanged: (value) {
+                                setState(() {
+                                  dayData['active'] = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+
+                        if (dayData['active']) ...[
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              // Hora de inicio
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () async {
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: dayData['start'],
+                                      builder: (context, child) {
+                                        return Theme(
+                                          data: Theme.of(context).copyWith(
+                                            colorScheme: ColorScheme.light(
+                                              primary: Colors.orange,
+                                            ),
+                                          ),
+                                          child: child!,
+                                        );
+                                      },
+                                    );
+                                    if (picked != null) {
+                                      setState(() {
+                                        dayData['start'] = picked;
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Theme.of(context).dividerColor,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.access_time,
+                                          size: 16,
+                                          color: Colors.orange,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('${dayData['start'].format(context)}'),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: Icon(Icons.arrow_forward, size: 16),
+                              ),
+
+                              // Hora de fin
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () async {
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: dayData['end'],
+                                      builder: (context, child) {
+                                        return Theme(
+                                          data: Theme.of(context).copyWith(
+                                            colorScheme: ColorScheme.light(
+                                              primary: Colors.orange,
+                                            ),
+                                          ),
+                                          child: child!,
+                                        );
+                                      },
+                                    );
+                                    if (picked != null) {
+                                      setState(() {
+                                        dayData['end'] = picked;
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Theme.of(context).dividerColor,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.access_time,
+                                          size: 16,
+                                          color: Colors.orange,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('${dayData['end'].format(context)}'),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ] else ...[
+          // ✅ MODO VISTA - Información de solo lectura
+          _buildScheduleRow('Lunes', _profile!.workSchedule.mondayStart, _profile!.workSchedule.mondayEnd),
+          _buildScheduleRow('Martes', _profile!.workSchedule.tuesdayStart, _profile!.workSchedule.tuesdayEnd),
+          _buildScheduleRow('Miércoles', _profile!.workSchedule.wednesdayStart, _profile!.workSchedule.wednesdayEnd),
+          _buildScheduleRow('Jueves', _profile!.workSchedule.thursdayStart, _profile!.workSchedule.thursdayEnd),
+          _buildScheduleRow('Viernes', _profile!.workSchedule.fridayStart, _profile!.workSchedule.fridayEnd),
+          _buildScheduleRow('Sábado', _profile!.workSchedule.saturdayStart, _profile!.workSchedule.saturdayEnd),
+          _buildScheduleRow('Domingo', _profile!.workSchedule.sundayStart, _profile!.workSchedule.sundayEnd),
+        ],
+
+        // ✅ BOTONES DE ACCIÓN (solo en modo edición)
+        if (_isEditingSchedule) ...[
+          SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      // Restaurar valores originales desde _profile
+                      final schedule = _profile!.workSchedule;
+                      _weekSchedule = {
+                        'Lunes': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.mondayStart.split(':')[0]),
+                            minute: int.parse(schedule.mondayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.mondayEnd.split(':')[0]),
+                            minute: int.parse(schedule.mondayEnd.split(':')[1])
+                          ),
+                          'active': schedule.mondayStart != '00:00' || schedule.mondayEnd != '00:00',
+                        },
+                        'Martes': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.tuesdayStart.split(':')[0]),
+                            minute: int.parse(schedule.tuesdayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.tuesdayEnd.split(':')[0]),
+                            minute: int.parse(schedule.tuesdayEnd.split(':')[1])
+                          ),
+                          'active': schedule.tuesdayStart != '00:00' || schedule.tuesdayEnd != '00:00',
+                        },
+                        'Miércoles': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.wednesdayStart.split(':')[0]),
+                            minute: int.parse(schedule.wednesdayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.wednesdayEnd.split(':')[0]),
+                            minute: int.parse(schedule.wednesdayEnd.split(':')[1])
+                          ),
+                          'active': schedule.wednesdayStart != '00:00' || schedule.wednesdayEnd != '00:00',
+                        },
+                        'Jueves': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.thursdayStart.split(':')[0]),
+                            minute: int.parse(schedule.thursdayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.thursdayEnd.split(':')[0]),
+                            minute: int.parse(schedule.thursdayEnd.split(':')[1])
+                          ),
+                          'active': schedule.thursdayStart != '00:00' || schedule.thursdayEnd != '00:00',
+                        },
+                        'Viernes': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.fridayStart.split(':')[0]),
+                            minute: int.parse(schedule.fridayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.fridayEnd.split(':')[0]),
+                            minute: int.parse(schedule.fridayEnd.split(':')[1])
+                          ),
+                          'active': schedule.fridayStart != '00:00' || schedule.fridayEnd != '00:00',
+                        },
+                        'Sábado': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.saturdayStart.split(':')[0]),
+                            minute: int.parse(schedule.saturdayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.saturdayEnd.split(':')[0]),
+                            minute: int.parse(schedule.saturdayEnd.split(':')[1])
+                          ),
+                          'active': schedule.saturdayStart != '00:00' || schedule.saturdayEnd != '00:00',
+                        },
+                        'Domingo': {
+                          'start': TimeOfDay(
+                            hour: int.parse(schedule.sundayStart.split(':')[0]),
+                            minute: int.parse(schedule.sundayStart.split(':')[1])
+                          ),
+                          'end': TimeOfDay(
+                            hour: int.parse(schedule.sundayEnd.split(':')[0]),
+                            minute: int.parse(schedule.sundayEnd.split(':')[1])
+                          ),
+                          'active': schedule.sundayStart != '00:00' || schedule.sundayEnd != '00:00',
+                        },
+                      };
+                      _isEditingSchedule = false;
+                    });
+                  },
+                  icon: Icon(Icons.cancel, color: ModernTheme.error),
+                  label: Text(
+                    'Cancelar',
+                    style: TextStyle(color: ModernTheme.error),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: ModernTheme.error),
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _saveWorkSchedule,
+                  icon: Icon(Icons.save, color: Theme.of(context).colorScheme.onPrimary),
+                  label: Text('Guardar', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
-      onEdit: () => _editWorkSchedule(), // ✅ Agregar callback de edición
+      onEdit: _isEditingSchedule ? null : () => _toggleEditSchedule(),
     );
   }
   
@@ -1994,7 +2675,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
             child: Text(
               '$startTime - $endTime',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -2036,7 +2717,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: ModernTheme.textSecondary),
+          Icon(icon, size: 18, color: context.secondaryText),
           SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -2046,7 +2727,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -2054,7 +2735,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
                   value,
                   style: TextStyle(
                     fontSize: 14,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
               ],
@@ -2075,9 +2756,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
     return Container(
       margin: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2153,14 +2834,19 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
     return '${months[date.month - 1]} ${date.year}';
   }
   
-  void _toggleEdit() {
-    setState(() {
-      _isEditing = !_isEditing;
-    });
-  }
-  
+  // ✅ OBSOLETO - Eliminado después de migrar todas las secciones
+  // void _toggleEdit() {
+  //   setState(() {
+  //     _isEditing = !_isEditing;
+  //   });
+  // }
+
+  // ✅ ACTUALIZADO: Guardar información personal
   Future<void> _saveProfile() async {
-    if (_formKey.currentState!.validate()) {
+    if (_personalFormKey.currentState!.validate()) {
+      // ✅ Capturar ScaffoldMessenger ANTES del await
+      final messenger = ScaffoldMessenger.of(context);
+
       try {
         // Actualizar en Firebase
         final userId = FirebaseAuth.instance.currentUser?.uid;
@@ -2181,6 +2867,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         });
 
         // Actualizar estado local
+        if (!mounted) return;
         setState(() {
           _profile = DriverProfile(
             id: _profile!.id,
@@ -2205,13 +2892,166 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
             vehicleInfo: _profile!.vehicleInfo,
             workSchedule: _profile!.workSchedule,
           );
-          _isEditing = false;
+          _isEditingPersonal = false;
+        });
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Información personal actualizada exitosamente'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Error al actualizar: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ NUEVO: Guardar información del vehículo
+  Future<void> _saveVehicleInfo() async {
+    if (_vehicleFormKey.currentState!.validate()) {
+      // ✅ Capturar ScaffoldMessenger ANTES del await
+      final messenger = ScaffoldMessenger.of(context);
+
+      try {
+        final userId = FirebaseAuth.instance.currentUser?.uid;
+        if (userId == null) {
+          throw Exception('Usuario no autenticado');
+        }
+
+        // Obtener valores de los controladores (TODO EN MAYÚSCULAS)
+        final make = _makeController.text.trim().toUpperCase();
+        final model = _modelController.text.trim().toUpperCase();
+        final year = int.tryParse(_yearController.text.trim()) ?? DateTime.now().year;
+        final color = _colorController.text.trim().toUpperCase();
+        final plate = _plateController.text.trim().toUpperCase();
+        final capacity = int.tryParse(_capacityController.text.trim()) ?? 4;
+
+        // Actualizar en Firebase
+        await FirebaseFirestore.instance.collection('users').doc(userId).update({
+          'vehicleInfo': {
+            'make': make,
+            'model': model,
+            'year': year,
+            'color': color,
+            'plate': plate,
+            'capacity': capacity,
+          },
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Actualizar estado local
+        if (!mounted) return;
+        setState(() {
+          _profile = DriverProfile(
+            id: _profile!.id,
+            name: _profile!.name,
+            email: _profile!.email,
+            phone: _profile!.phone,
+            profileImageUrl: _profile!.profileImageUrl,
+            rating: _profile!.rating,
+            totalTrips: _profile!.totalTrips,
+            totalDistance: _profile!.totalDistance,
+            totalHours: _profile!.totalHours,
+            totalEarnings: _profile!.totalEarnings,
+            memberSince: _profile!.memberSince,
+            bio: _profile!.bio,
+            emergencyContact: _profile!.emergencyContact,
+            preferences: _profile!.preferences,
+            achievements: _profile!.achievements,
+            vehicleInfo: VehicleInfo(
+              make: make,
+              model: model,
+              year: year,
+              color: color,
+              plate: plate,
+              capacity: capacity,
+            ),
+            workSchedule: _profile!.workSchedule,
+          );
+          _isEditingVehicle = false;
+        });
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Información del vehículo actualizada exitosamente'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Error al actualizar: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _savePreferences() async {
+    if (_preferencesFormKey.currentState!.validate()) {
+      try {
+        final userId = FirebaseAuth.instance.currentUser?.uid;
+        if (userId == null) {
+          throw Exception('Usuario no autenticado');
+        }
+
+        // Actualizar en Firebase
+        await FirebaseFirestore.instance.collection('users').doc(userId).update({
+          'preferences': {
+            'acceptPets': _acceptPets,
+            'acceptSmoking': _acceptSmoking,
+            'musicPreference': _musicPreference,
+            'languages': _languages,
+            'maxTripDistance': _maxTripDistance,
+            'preferredZones': _preferredZones,
+          },
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Actualizar estado local
+        setState(() {
+          _profile = DriverProfile(
+            id: _profile!.id,
+            name: _profile!.name,
+            email: _profile!.email,
+            phone: _profile!.phone,
+            profileImageUrl: _profile!.profileImageUrl,
+            rating: _profile!.rating,
+            totalTrips: _profile!.totalTrips,
+            totalDistance: _profile!.totalDistance,
+            totalHours: _profile!.totalHours,
+            totalEarnings: _profile!.totalEarnings,
+            memberSince: _profile!.memberSince,
+            bio: _profile!.bio,
+            emergencyContact: _profile!.emergencyContact,
+            preferences: DriverPreferences(
+              acceptPets: _acceptPets,
+              acceptSmoking: _acceptSmoking,
+              musicPreference: _musicPreference,
+              languages: _languages,
+              maxTripDistance: _maxTripDistance,
+              preferredZones: _preferredZones,
+            ),
+            achievements: _profile!.achievements,
+            vehicleInfo: _profile!.vehicleInfo,
+            workSchedule: _profile!.workSchedule,
+          );
+          _isEditingPreferences = false;
         });
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Perfil actualizado exitosamente en Firebase'),
+            content: Text('Preferencias actualizadas exitosamente'),
             backgroundColor: ModernTheme.success,
           ),
         );
@@ -2219,14 +3059,140 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al actualizar perfil: $e'),
+            content: Text('Error al actualizar preferencias: $e'),
             backgroundColor: ModernTheme.error,
           ),
         );
       }
     }
   }
-  
+
+  Future<void> _saveWorkSchedule() async {
+    try {
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId == null) {
+        throw Exception('Usuario no autenticado');
+      }
+
+      // Validar que hora fin > hora inicio para días activos
+      String? validationError;
+      for (var entry in _weekSchedule.entries) {
+        final day = entry.key;
+        final dayData = entry.value;
+        if (dayData['active']) {
+          final start = dayData['start'] as TimeOfDay;
+          final end = dayData['end'] as TimeOfDay;
+          final startMinutes = start.hour * 60 + start.minute;
+          final endMinutes = end.hour * 60 + end.minute;
+
+          if (endMinutes <= startMinutes) {
+            validationError = 'La hora de fin debe ser mayor que la hora de inicio en $day';
+            break;
+          }
+        }
+      }
+
+      if (validationError != null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validationError),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+        return;
+      }
+
+      // Formatear horarios para Firestore
+      String formatTime(TimeOfDay time) {
+        return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+      }
+
+      // Actualizar en Firebase
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'workSchedule': {
+          'mondayStart': _weekSchedule['Lunes']!['active'] ? formatTime(_weekSchedule['Lunes']!['start']) : '00:00',
+          'mondayEnd': _weekSchedule['Lunes']!['active'] ? formatTime(_weekSchedule['Lunes']!['end']) : '00:00',
+          'tuesdayStart': _weekSchedule['Martes']!['active'] ? formatTime(_weekSchedule['Martes']!['start']) : '00:00',
+          'tuesdayEnd': _weekSchedule['Martes']!['active'] ? formatTime(_weekSchedule['Martes']!['end']) : '00:00',
+          'wednesdayStart': _weekSchedule['Miércoles']!['active'] ? formatTime(_weekSchedule['Miércoles']!['start']) : '00:00',
+          'wednesdayEnd': _weekSchedule['Miércoles']!['active'] ? formatTime(_weekSchedule['Miércoles']!['end']) : '00:00',
+          'thursdayStart': _weekSchedule['Jueves']!['active'] ? formatTime(_weekSchedule['Jueves']!['start']) : '00:00',
+          'thursdayEnd': _weekSchedule['Jueves']!['active'] ? formatTime(_weekSchedule['Jueves']!['end']) : '00:00',
+          'fridayStart': _weekSchedule['Viernes']!['active'] ? formatTime(_weekSchedule['Viernes']!['start']) : '00:00',
+          'fridayEnd': _weekSchedule['Viernes']!['active'] ? formatTime(_weekSchedule['Viernes']!['end']) : '00:00',
+          'saturdayStart': _weekSchedule['Sábado']!['active'] ? formatTime(_weekSchedule['Sábado']!['start']) : '00:00',
+          'saturdayEnd': _weekSchedule['Sábado']!['active'] ? formatTime(_weekSchedule['Sábado']!['end']) : '00:00',
+          'sundayStart': _weekSchedule['Domingo']!['active'] ? formatTime(_weekSchedule['Domingo']!['start']) : '00:00',
+          'sundayEnd': _weekSchedule['Domingo']!['active'] ? formatTime(_weekSchedule['Domingo']!['end']) : '00:00',
+        },
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Actualizar estado local
+      setState(() {
+        _profile = DriverProfile(
+          id: _profile!.id,
+          name: _profile!.name,
+          email: _profile!.email,
+          phone: _profile!.phone,
+          profileImageUrl: _profile!.profileImageUrl,
+          rating: _profile!.rating,
+          totalTrips: _profile!.totalTrips,
+          totalDistance: _profile!.totalDistance,
+          totalHours: _profile!.totalHours,
+          totalEarnings: _profile!.totalEarnings,
+          memberSince: _profile!.memberSince,
+          bio: _profile!.bio,
+          emergencyContact: _profile!.emergencyContact,
+          preferences: _profile!.preferences,
+          achievements: _profile!.achievements,
+          vehicleInfo: _profile!.vehicleInfo,
+          workSchedule: WorkSchedule(
+            mondayStart: _weekSchedule['Lunes']!['active'] ? formatTime(_weekSchedule['Lunes']!['start']) : '00:00',
+            mondayEnd: _weekSchedule['Lunes']!['active'] ? formatTime(_weekSchedule['Lunes']!['end']) : '00:00',
+            tuesdayStart: _weekSchedule['Martes']!['active'] ? formatTime(_weekSchedule['Martes']!['start']) : '00:00',
+            tuesdayEnd: _weekSchedule['Martes']!['active'] ? formatTime(_weekSchedule['Martes']!['end']) : '00:00',
+            wednesdayStart: _weekSchedule['Miércoles']!['active'] ? formatTime(_weekSchedule['Miércoles']!['start']) : '00:00',
+            wednesdayEnd: _weekSchedule['Miércoles']!['active'] ? formatTime(_weekSchedule['Miércoles']!['end']) : '00:00',
+            thursdayStart: _weekSchedule['Jueves']!['active'] ? formatTime(_weekSchedule['Jueves']!['start']) : '00:00',
+            thursdayEnd: _weekSchedule['Jueves']!['active'] ? formatTime(_weekSchedule['Jueves']!['end']) : '00:00',
+            fridayStart: _weekSchedule['Viernes']!['active'] ? formatTime(_weekSchedule['Viernes']!['start']) : '00:00',
+            fridayEnd: _weekSchedule['Viernes']!['active'] ? formatTime(_weekSchedule['Viernes']!['end']) : '00:00',
+            saturdayStart: _weekSchedule['Sábado']!['active'] ? formatTime(_weekSchedule['Sábado']!['start']) : '00:00',
+            saturdayEnd: _weekSchedule['Sábado']!['active'] ? formatTime(_weekSchedule['Sábado']!['end']) : '00:00',
+            sundayStart: _weekSchedule['Domingo']!['active'] ? formatTime(_weekSchedule['Domingo']!['start']) : '00:00',
+            sundayEnd: _weekSchedule['Domingo']!['active'] ? formatTime(_weekSchedule['Domingo']!['end']) : '00:00',
+          ),
+        );
+        _isEditingSchedule = false;
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary),
+              SizedBox(width: 12),
+              Text('Horario actualizado correctamente'),
+            ],
+          ),
+          backgroundColor: ModernTheme.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al guardar horario: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
   void _changeProfileImage() {
     showModalBottomSheet(
       context: context,
@@ -2303,584 +3269,216 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
     );
   }
   
-  void _pickImageFromCamera() {
-    // Simulate image picking from camera
-    setState(() {
-      _profile = DriverProfile(
-        id: _profile!.id,
-        name: _profile!.name,
-        email: _profile!.email,
-        phone: _profile!.phone,
-        profileImageUrl: '', // URL real de Firebase Storage
-        rating: _profile!.rating,
-        totalTrips: _profile!.totalTrips,
-        totalDistance: _profile!.totalDistance,
-        totalHours: _profile!.totalHours,
-        totalEarnings: _profile!.totalEarnings,
-        memberSince: _profile!.memberSince,
-        bio: _profile!.bio,
-        emergencyContact: _profile!.emergencyContact,
-        preferences: _profile!.preferences,
-        achievements: _profile!.achievements,
-        vehicleInfo: _profile!.vehicleInfo,
-        workSchedule: _profile!.workSchedule,
+  Future<void> _pickImageFromCamera() async {
+    try {
+      // Seleccionar imagen desde la cámara usando image_picker
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
       );
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Foto actualizada desde cámara'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+
+      if (image == null) {
+        // Usuario canceló
+        return;
+      }
+
+      // Mostrar indicador de carga
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary)),
+                SizedBox(width: 16),
+                Text('Subiendo foto de perfil...'),
+              ],
+            ),
+            duration: Duration(minutes: 2),
+            backgroundColor: ModernTheme.info,
+          ),
+        );
+      }
+
+      // Subir imagen a Firebase Storage
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId == null) {
+        throw Exception('Usuario no autenticado');
+      }
+
+      final file = File(image.path);
+      final storageRef = _storage
+          .ref()
+          .child('users')
+          .child(userId)
+          .child('profile')
+          .child('profile_photo_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      // Actualizar Firestore con la nueva URL de la foto
+      await _firestore.collection('users').doc(userId).update({
+        'profilePhotoUrl': downloadUrl,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Actualizar el estado local
+      if (mounted) {
+        setState(() {
+          _profile = DriverProfile(
+            id: _profile!.id,
+            name: _profile!.name,
+            email: _profile!.email,
+            phone: _profile!.phone,
+            profileImageUrl: downloadUrl,
+            rating: _profile!.rating,
+            totalTrips: _profile!.totalTrips,
+            totalDistance: _profile!.totalDistance,
+            totalHours: _profile!.totalHours,
+            totalEarnings: _profile!.totalEarnings,
+            memberSince: _profile!.memberSince,
+            bio: _profile!.bio,
+            emergencyContact: _profile!.emergencyContact,
+            preferences: _profile!.preferences,
+            achievements: _profile!.achievements,
+            vehicleInfo: _profile!.vehicleInfo,
+            workSchedule: _profile!.workSchedule,
+          );
+        });
+
+        // Ocultar indicador de carga y mostrar mensaje de éxito
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Foto de perfil actualizada exitosamente'),
+            backgroundColor: ModernTheme.success,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('Error al seleccionar foto desde cámara: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error al actualizar foto: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
   
-  void _pickImageFromGallery() {
-    // Simulate image picking from gallery
-    setState(() {
-      _profile = DriverProfile(
-        id: _profile!.id,
-        name: _profile!.name,
-        email: _profile!.email,
-        phone: _profile!.phone,
-        profileImageUrl: '', // URL real de Firebase Storage
-        rating: _profile!.rating,
-        totalTrips: _profile!.totalTrips,
-        totalDistance: _profile!.totalDistance,
-        totalHours: _profile!.totalHours,
-        totalEarnings: _profile!.totalEarnings,
-        memberSince: _profile!.memberSince,
-        bio: _profile!.bio,
-        emergencyContact: _profile!.emergencyContact,
-        preferences: _profile!.preferences,
-        achievements: _profile!.achievements,
-        vehicleInfo: _profile!.vehicleInfo,
-        workSchedule: _profile!.workSchedule,
+  Future<void> _pickImageFromGallery() async {
+    try {
+      // Seleccionar imagen desde la galería usando image_picker
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
       );
-    });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Foto actualizada desde galería'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
-  }
+      if (image == null) {
+        // Usuario canceló
+        return;
+      }
 
-  // ✅ NUEVO: Método para editar preferencias de trabajo
-  void _editPreferences() {
-    // Valores iniciales desde Firebase o valores por defecto
-    bool acceptPets = _profile?.preferences.acceptPets ?? false;
-    bool acceptSmoking = _profile?.preferences.acceptSmoking ?? false;
-    // ✅ CORREGIDO: Validar que la preferencia musical esté en la lista válida
-    final validMusicOptions = ['Ninguna', 'Rock', 'Pop', 'Clásica', 'Jazz', 'Reggaeton', 'Salsa'];
-    final prefMusic = _profile?.preferences.musicPreference;
-    String musicPreference = (prefMusic == null || prefMusic.isEmpty || !validMusicOptions.contains(prefMusic))
-        ? 'Ninguna'
-        : prefMusic;
-    List<String> languages = List<String>.from(_profile?.preferences.languages ?? ['Español']);
-    // ✅ FIX: Asegurar que maxTripDistance esté en el rango válido del Slider (min: 5, max: 100)
-    double maxTripDistance = (_profile?.preferences.maxTripDistance ?? 50.0).clamp(5.0, 100.0);
-    List<String> preferredZones = List<String>.from(_profile?.preferences.preferredZones ?? []);
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: Row(
-                children: [
-                  Icon(Icons.tune, color: ModernTheme.oasisGreen),
-                  SizedBox(width: 12),
-                  Flexible(child: Text('Preferencias de Trabajo')),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: SizedBox(
-                  width: double.maxFinite,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Switch: Aceptar mascotas
-                      SwitchListTile(
-                        title: Text('Aceptar mascotas'),
-                        subtitle: Text('Permitir pasajeros con mascotas'),
-                        value: acceptPets,
-                        activeColor: ModernTheme.oasisGreen,
-                        onChanged: (value) {
-                          setDialogState(() => acceptPets = value);
-                        },
-                      ),
-
-                      // Switch: Permitir fumar
-                      SwitchListTile(
-                        title: Text('Permitir fumar'),
-                        subtitle: Text('Permitir que los pasajeros fumen'),
-                        value: acceptSmoking,
-                        activeColor: ModernTheme.oasisGreen,
-                        onChanged: (value) {
-                          setDialogState(() => acceptSmoking = value);
-                        },
-                      ),
-
-                      SizedBox(height: 16),
-
-                      // Dropdown: Preferencia musical
-                      Text('Preferencia Musical', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: musicPreference,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        // ✅ Usar la misma lista validada
-                        items: validMusicOptions
-                            .map((music) => DropdownMenuItem(value: music, child: Text(music)))
-                            .toList(),
-                        onChanged: (value) {
-                          setDialogState(() => musicPreference = value!);
-                        },
-                      ),
-
-                      SizedBox(height: 16),
-
-                      // Chips multiselect: Idiomas
-                      Text('Idiomas que hablas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: ['Español', 'Inglés', 'Francés', 'Alemán', 'Chino', 'Portugués'].map((lang) {
-                          final isSelected = languages.contains(lang);
-                          return FilterChip(
-                            label: Text(lang),
-                            selected: isSelected,
-                            selectedColor: ModernTheme.oasisGreen.withValues(alpha: 0.3),
-                            checkmarkColor: ModernTheme.oasisGreen,
-                            onSelected: (selected) {
-                              setDialogState(() {
-                                if (selected) {
-                                  if (!languages.contains(lang)) languages.add(lang);
-                                } else {
-                                  languages.remove(lang);
-                                }
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-
-                      SizedBox(height: 16),
-
-                      // Slider: Distancia máxima viaje
-                      Text('Distancia máxima de viaje: ${maxTripDistance.toInt()} km',
-                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      Slider(
-                        value: maxTripDistance,
-                        min: 5,
-                        max: 100,
-                        divisions: 19,
-                        activeColor: ModernTheme.oasisGreen,
-                        label: '${maxTripDistance.toInt()} km',
-                        onChanged: (value) {
-                          setDialogState(() => maxTripDistance = value);
-                        },
-                      ),
-
-                      SizedBox(height: 16),
-
-                      // Chips multiselect: Zonas preferidas
-                      Text('Zonas preferidas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: ['Centro', 'Norte', 'Sur', 'Este', 'Oeste', 'Aeropuerto', 'Playas'].map((zone) {
-                          final isSelected = preferredZones.contains(zone);
-                          return FilterChip(
-                            label: Text(zone),
-                            selected: isSelected,
-                            selectedColor: ModernTheme.oasisGreen.withValues(alpha: 0.3),
-                            checkmarkColor: ModernTheme.oasisGreen,
-                            onSelected: (selected) {
-                              setDialogState(() {
-                                if (selected) {
-                                  if (!preferredZones.contains(zone)) preferredZones.add(zone);
-                                } else {
-                                  preferredZones.remove(zone);
-                                }
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    try {
-                      // Guardar en Firestore
-                      await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(FirebaseAuth.instance.currentUser!.uid)
-                          .update({
-                        'preferences': {
-                          'acceptPets': acceptPets,
-                          'acceptSmoking': acceptSmoking,
-                          'musicPreference': musicPreference,
-                          'languages': languages,
-                          'maxTripDistance': maxTripDistance,
-                          'preferredZones': preferredZones,
-                        },
-                      });
-
-                      if (!context.mounted) return;
-                      Navigator.pop(context);
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Row(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.white),
-                              SizedBox(width: 12),
-                              Text('Preferencias actualizadas correctamente'),
-                            ],
-                          ),
-                          backgroundColor: ModernTheme.success,
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-
-                      // Recargar datos
-                      _loadProfile();
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Error al guardar preferencias: $e'),
-                          backgroundColor: ModernTheme.error,
-                        ),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ModernTheme.oasisGreen,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text('Guardar'),
-                ),
+      // Mostrar indicador de carga
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary)),
+                SizedBox(width: 16),
+                Text('Subiendo foto de perfil...'),
               ],
-            );
-          },
+            ),
+            duration: Duration(minutes: 2),
+            backgroundColor: ModernTheme.info,
+          ),
         );
-      },
-    );
+      }
+
+      // Subir imagen a Firebase Storage
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId == null) {
+        throw Exception('Usuario no autenticado');
+      }
+
+      final file = File(image.path);
+      final storageRef = _storage
+          .ref()
+          .child('users')
+          .child(userId)
+          .child('profile')
+          .child('profile_photo_${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      // Actualizar Firestore con la nueva URL de la foto
+      await _firestore.collection('users').doc(userId).update({
+        'profilePhotoUrl': downloadUrl,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Actualizar el estado local
+      if (mounted) {
+        setState(() {
+          _profile = DriverProfile(
+            id: _profile!.id,
+            name: _profile!.name,
+            email: _profile!.email,
+            phone: _profile!.phone,
+            profileImageUrl: downloadUrl,
+            rating: _profile!.rating,
+            totalTrips: _profile!.totalTrips,
+            totalDistance: _profile!.totalDistance,
+            totalHours: _profile!.totalHours,
+            totalEarnings: _profile!.totalEarnings,
+            memberSince: _profile!.memberSince,
+            bio: _profile!.bio,
+            emergencyContact: _profile!.emergencyContact,
+            preferences: _profile!.preferences,
+            achievements: _profile!.achievements,
+            vehicleInfo: _profile!.vehicleInfo,
+            workSchedule: _profile!.workSchedule,
+          );
+        });
+
+        // Ocultar indicador de carga y mostrar mensaje de éxito
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Foto de perfil actualizada exitosamente'),
+            backgroundColor: ModernTheme.success,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('Error al seleccionar foto desde galería: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error al actualizar foto: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
-  // ✅ NUEVO: Método para editar horario de trabajo
-  void _editWorkSchedule() {
-    // Horarios iniciales desde Firebase o valores por defecto
-    final schedule = _profile?.workSchedule;
-
-    // Mapa para almacenar tiempos de inicio/fin y estado activo para cada día
-    final Map<String, Map<String, dynamic>> weekSchedule = {
-      'Lunes': {
-        'start': TimeOfDay(hour: int.parse(schedule?.mondayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.mondayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.mondayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.mondayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.mondayStart != '00:00' || schedule?.mondayEnd != '00:00',
-      },
-      'Martes': {
-        'start': TimeOfDay(hour: int.parse(schedule?.tuesdayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.tuesdayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.tuesdayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.tuesdayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.tuesdayStart != '00:00' || schedule?.tuesdayEnd != '00:00',
-      },
-      'Miércoles': {
-        'start': TimeOfDay(hour: int.parse(schedule?.wednesdayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.wednesdayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.wednesdayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.wednesdayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.wednesdayStart != '00:00' || schedule?.wednesdayEnd != '00:00',
-      },
-      'Jueves': {
-        'start': TimeOfDay(hour: int.parse(schedule?.thursdayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.thursdayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.thursdayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.thursdayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.thursdayStart != '00:00' || schedule?.thursdayEnd != '00:00',
-      },
-      'Viernes': {
-        'start': TimeOfDay(hour: int.parse(schedule?.fridayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.fridayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.fridayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.fridayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.fridayStart != '00:00' || schedule?.fridayEnd != '00:00',
-      },
-      'Sábado': {
-        'start': TimeOfDay(hour: int.parse(schedule?.saturdayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.saturdayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.saturdayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.saturdayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.saturdayStart != '00:00' || schedule?.saturdayEnd != '00:00',
-      },
-      'Domingo': {
-        'start': TimeOfDay(hour: int.parse(schedule?.sundayStart.split(':')[0] ?? '08'), minute: int.parse(schedule?.sundayStart.split(':')[1] ?? '00')),
-        'end': TimeOfDay(hour: int.parse(schedule?.sundayEnd.split(':')[0] ?? '18'), minute: int.parse(schedule?.sundayEnd.split(':')[1] ?? '00')),
-        'active': schedule?.sundayStart != '00:00' || schedule?.sundayEnd != '00:00',
-      },
-    };
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: Row(
-                children: [
-                  Icon(Icons.schedule, color: ModernTheme.oasisGreen),
-                  SizedBox(width: 12),
-                  Flexible(child: Text('Horario de Trabajo')),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: SizedBox(
-                  width: double.maxFinite,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: weekSchedule.entries.map((entry) {
-                      final day = entry.key;
-                      final dayData = entry.value;
-
-                      return Card(
-                        margin: EdgeInsets.only(bottom: 12),
-                        child: Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Fila: Día + Switch activo/inactivo
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(day, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Switch(
-                                    value: dayData['active'],
-                                    activeColor: ModernTheme.oasisGreen,
-                                    onChanged: (value) {
-                                      setDialogState(() => dayData['active'] = value);
-                                    },
-                                  ),
-                                ],
-                              ),
-
-                              if (dayData['active']) ...[
-                                SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    // Hora de inicio
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: () async {
-                                          final picked = await showTimePicker(
-                                            context: context,
-                                            initialTime: dayData['start'],
-                                            builder: (context, child) {
-                                              return Theme(
-                                                data: Theme.of(context).copyWith(
-                                                  colorScheme: ColorScheme.light(primary: ModernTheme.oasisGreen),
-                                                ),
-                                                child: child!,
-                                              );
-                                            },
-                                          );
-                                          if (picked != null) {
-                                            setDialogState(() => dayData['start'] = picked);
-                                          }
-                                        },
-                                        child: Container(
-                                          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                                          decoration: BoxDecoration(
-                                            border: Border.all(color: Colors.grey.shade300),
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.access_time, size: 16, color: ModernTheme.oasisGreen),
-                                              SizedBox(width: 8),
-                                              Text('${dayData['start'].format(context)}'),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-
-                                    Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 8),
-                                      child: Icon(Icons.arrow_forward, size: 16),
-                                    ),
-
-                                    // Hora de fin
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: () async {
-                                          final picked = await showTimePicker(
-                                            context: context,
-                                            initialTime: dayData['end'],
-                                            builder: (context, child) {
-                                              return Theme(
-                                                data: Theme.of(context).copyWith(
-                                                  colorScheme: ColorScheme.light(primary: ModernTheme.oasisGreen),
-                                                ),
-                                                child: child!,
-                                              );
-                                            },
-                                          );
-                                          if (picked != null) {
-                                            setDialogState(() => dayData['end'] = picked);
-                                          }
-                                        },
-                                        child: Container(
-                                          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                                          decoration: BoxDecoration(
-                                            border: Border.all(color: Colors.grey.shade300),
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.access_time, size: 16, color: ModernTheme.oasisGreen),
-                                              SizedBox(width: 8),
-                                              Text('${dayData['end'].format(context)}'),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    try {
-                      // Validar que hora fin > hora inicio para días activos
-                      String? validationError;
-                      for (var entry in weekSchedule.entries) {
-                        final day = entry.key;
-                        final dayData = entry.value;
-                        if (dayData['active']) {
-                          final start = dayData['start'] as TimeOfDay;
-                          final end = dayData['end'] as TimeOfDay;
-                          final startMinutes = start.hour * 60 + start.minute;
-                          final endMinutes = end.hour * 60 + end.minute;
-
-                          if (endMinutes <= startMinutes) {
-                            validationError = 'La hora de fin debe ser mayor que la hora de inicio en $day';
-                            break;
-                          }
-                        }
-                      }
-
-                      if (validationError != null) {
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(validationError),
-                            backgroundColor: ModernTheme.error,
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Formatear horarios para Firestore
-                      String formatTime(TimeOfDay time) {
-                        return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-                      }
-
-                      // Guardar en Firestore
-                      await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(FirebaseAuth.instance.currentUser!.uid)
-                          .update({
-                        'workSchedule': {
-                          'mondayStart': weekSchedule['Lunes']!['active'] ? formatTime(weekSchedule['Lunes']!['start']) : '00:00',
-                          'mondayEnd': weekSchedule['Lunes']!['active'] ? formatTime(weekSchedule['Lunes']!['end']) : '00:00',
-                          'tuesdayStart': weekSchedule['Martes']!['active'] ? formatTime(weekSchedule['Martes']!['start']) : '00:00',
-                          'tuesdayEnd': weekSchedule['Martes']!['active'] ? formatTime(weekSchedule['Martes']!['end']) : '00:00',
-                          'wednesdayStart': weekSchedule['Miércoles']!['active'] ? formatTime(weekSchedule['Miércoles']!['start']) : '00:00',
-                          'wednesdayEnd': weekSchedule['Miércoles']!['active'] ? formatTime(weekSchedule['Miércoles']!['end']) : '00:00',
-                          'thursdayStart': weekSchedule['Jueves']!['active'] ? formatTime(weekSchedule['Jueves']!['start']) : '00:00',
-                          'thursdayEnd': weekSchedule['Jueves']!['active'] ? formatTime(weekSchedule['Jueves']!['end']) : '00:00',
-                          'fridayStart': weekSchedule['Viernes']!['active'] ? formatTime(weekSchedule['Viernes']!['start']) : '00:00',
-                          'fridayEnd': weekSchedule['Viernes']!['active'] ? formatTime(weekSchedule['Viernes']!['end']) : '00:00',
-                          'saturdayStart': weekSchedule['Sábado']!['active'] ? formatTime(weekSchedule['Sábado']!['start']) : '00:00',
-                          'saturdayEnd': weekSchedule['Sábado']!['active'] ? formatTime(weekSchedule['Sábado']!['end']) : '00:00',
-                          'sundayStart': weekSchedule['Domingo']!['active'] ? formatTime(weekSchedule['Domingo']!['start']) : '00:00',
-                          'sundayEnd': weekSchedule['Domingo']!['active'] ? formatTime(weekSchedule['Domingo']!['end']) : '00:00',
-                        },
-                      });
-
-                      if (!context.mounted) return;
-                      Navigator.pop(context);
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Row(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.white),
-                              SizedBox(width: 12),
-                              Text('Horario actualizado correctamente'),
-                            ],
-                          ),
-                          backgroundColor: ModernTheme.success,
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-
-                      // Recargar datos
-                      _loadProfile();
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Error al guardar horario: $e'),
-                          backgroundColor: ModernTheme.error,
-                        ),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ModernTheme.oasisGreen,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text('Guardar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+  // ✅ ELIMINADO: _editPreferences() - Ahora usa edición inline
+  // ✅ ELIMINADO: _editWorkSchedule() - Ahora usa edición inline
 }
 
 // Models

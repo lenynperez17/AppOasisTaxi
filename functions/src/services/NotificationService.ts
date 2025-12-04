@@ -1,5 +1,4 @@
 import * as admin from 'firebase-admin';
-import { google } from 'googleapis';
 
 // Interfaces para tipado
 interface NotificationPayload {
@@ -29,7 +28,7 @@ interface AndroidConfig {
       title: string;
     }>;
   };
-  ttl: string;
+  ttl: number; // ✅ Cambiado de string a number para compatibilidad con Firebase
 }
 
 interface ApnsConfig {
@@ -217,7 +216,7 @@ export class NotificationService {
           light_off_duration_millis: 300,
         },
       },
-      ttl: priority === 'high' ? '3600s' : '86400s',
+      ttl: priority === 'high' ? 3600 : 86400, // ✅ Cambiado a segundos como número
     };
   }
 
@@ -306,20 +305,6 @@ export class NotificationService {
    */
   async testConnection(): Promise<boolean> {
     try {
-      // Intentar obtener información de un topic (operación que no requiere tokens válidos)
-      // Si no falla, significa que la conexión FCM está funcionando
-      const testMessage = {
-        topic: 'test-connection-topic',
-        data: {
-          test: 'connection',
-        },
-      };
-
-      // No enviamos realmente, solo validamos la estructura
-      // En producción real, podrías enviar a un topic especial de testing
-      const dryRun = true;
-      
-      // Esta operación valida la configuración sin enviar
       console.log('🔍 Testing FCM connection...');
       return true; // Si llegamos aquí sin errores, FCM está configurado correctamente
       

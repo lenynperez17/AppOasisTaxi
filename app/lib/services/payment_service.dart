@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_service.dart';
 
 /// SERVICIO COMPLETO DE PAGOS OASIS TAXI - PERÚ
@@ -25,10 +26,13 @@ class PaymentService {
   bool _initialized = false;
   late String _apiBaseUrl;
   late String _mercadoPagoPublicKey;
-  
-  // URLs de la API backend - PERÚ
-  static const String _localApi = 'http://localhost:3000/api/v1';
-  static const String _productionApi = 'https://api.oasistaxi.com.pe/api/v1';
+
+  // ✅ PROJECT ID DE FIREBASE CONFIGURADO
+  static const String _firebaseProjectId = 'app-oasis-taxi';
+
+  // URLs de Firebase Functions - PERÚ
+  static const String _localApi = 'http://localhost:5001/$_firebaseProjectId/us-central1';
+  static const String _productionApi = 'https://us-central1-$_firebaseProjectId.cloudfunctions.net';
 
   /// Inicializar el servicio de pagos
   Future<void> initialize({bool isProduction = false}) async {
@@ -36,30 +40,82 @@ class PaymentService {
 
     try {
       _apiBaseUrl = isProduction ? _productionApi : _localApi;
-      
-      // CONFIGURACIÓN MERCADOPAGO PERÚ - ESTAS KEYS SON DE EJEMPLO
-      // ⚠️ REEMPLAZAR CON CREDENCIALES REALES DE MERCADOPAGO PERÚ
-      // Ver: docs/MERCADOPAGO_SETUP_PERU.md para configuración completa
-      _mercadoPagoPublicKey = isProduction 
-        ? 'APP_USR-REEMPLAZAR-CON-KEY-REAL-PRODUCCION'  // 🚨 CONFIGURAR PRODUCCIÓN
-        : 'TEST-REEMPLAZAR-CON-KEY-REAL-SANDBOX';       // 🚨 CONFIGURAR SANDBOX
 
       await _firebaseService.initialize();
-      
+
+      // ✅ CORRECCIÓN SEGURIDAD: Obtener public key desde Cloud Functions (NO hardcodeada)
+      debugPrint('💳 PaymentService: Obteniendo config de MercadoPago desde backend...');
+      try {
+        final configResponse = await http.get(
+          Uri.parse('$_apiBaseUrl/getMercadoPagoConfig'),
+        ).timeout(const Duration(seconds: 10));
+
+        if (configResponse.statusCode == 200) {
+          final configData = jsonDecode(configResponse.body);
+
+          if (configData['success'] == true) {
+            _mercadoPagoPublicKey = configData['publicKey'];
+            debugPrint('✅ MercadoPago public key obtenida - Env: ${configData['environment']}');
+          } else {
+            throw Exception('Error obteniendo config: ${configData['error']}');
+          }
+        } else {
+          throw Exception('Error HTTP ${configResponse.statusCode} obteniendo config');
+        }
+      } catch (e) {
+        debugPrint('❌ CRÍTICO: No se pudo obtener config de MercadoPago - $e');
+
+        await _firebaseService.crashlytics.recordError(
+          Exception('Config de MercadoPago no disponible: $e'),
+          StackTrace.current,
+          fatal: true,
+        );
+
+        _initialized = false;
+        throw Exception('No se pudo obtener configuración de MercadoPago. Verifica que Cloud Functions estén desplegadas.');
+      }
+
+      // ✅ CORRECCIÓN: Validar que Cloud Functions estén disponibles
+      debugPrint('💳 PaymentService: Validando disponibilidad de Cloud Functions...');
+      try {
+        final healthCheck = await http.get(
+          Uri.parse('$_apiBaseUrl/health'),
+        ).timeout(const Duration(seconds: 10));
+
+        if (healthCheck.statusCode != 200) {
+          throw Exception('Cloud Functions no responden (Status: ${healthCheck.statusCode})');
+        }
+
+        debugPrint('✅ Cloud Functions disponibles y funcionando');
+      } catch (e) {
+        debugPrint('❌ CRÍTICO: Cloud Functions NO disponibles - $e');
+        debugPrint('⚠️ PAGOS DESHABILITADOS - Despliega Cloud Functions primero');
+
+        await _firebaseService.crashlytics.recordError(
+          Exception('Cloud Functions no disponibles en $_apiBaseUrl'),
+          StackTrace.current,
+          fatal: true,
+        );
+
+        // NO marcar como inicializado si Cloud Functions no están
+        _initialized = false;
+        throw Exception('Cloud Functions no disponibles. Despliega functions con: firebase deploy --only functions');
+      }
+
       _initialized = true;
-      debugPrint('💳 PaymentService: Inicializado - ${isProduction ? "PRODUCCIÓN" : "TEST"}');
-      
+      debugPrint('💳 PaymentService: Inicializado correctamente - ${isProduction ? "PRODUCCIÓN" : "TEST"}');
+
       await _firebaseService.analytics.logEvent(
         name: 'payment_service_initialized',
         parameters: {
           'environment': isProduction ? 'production' : 'test'
         },
       );
-      
+
     } catch (e) {
       debugPrint('💳 PaymentService: Error inicializando - $e');
       await _firebaseService.crashlytics.recordError(e, null);
-      _initialized = true; // Continuar en modo desarrollo
+      rethrow; // Re-lanzar el error para que la app sepa que falló
     }
   }
 
@@ -76,19 +132,19 @@ class PaymentService {
     String? description,
   }) async {
     try {
-      debugPrint('💳 PaymentService: Creando preferencia MercadoPago - S/$amount');
+      debugPrint('💳 PaymentService: Creando preferencia MercadoPago - S/. amount');
 
       final response = await http.post(
-        Uri.parse('$_apiBaseUrl/payments/create-preference'),
+        Uri.parse('$_apiBaseUrl/createRechargePreference'),
         headers: {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'rideId': rideId,
+          'userId': rideId, // Usar como ID de transacción
           'amount': amount,
-          'description': description ?? 'Viaje Oasis Taxi #$rideId',
-          'payerEmail': payerEmail,
-          'payerName': payerName,
+          'email': payerEmail,
+          'firstName': payerName.split(' ').first,
+          'lastName': payerName.split(' ').length > 1 ? payerName.split(' ').last : '',
         }),
       );
 
@@ -128,13 +184,13 @@ class PaymentService {
     }
   }
 
-  /// Abrir checkout de MercadoPago
+  /// Abrir checkout de MercadoPago (DEPRECADO - usar Checkout Bricks in-app)
   Future<bool> openMercadoPagoCheckout(String initPoint) async {
     try {
       final uri = Uri.parse(initPoint);
       if (await canLaunchUrl(uri)) {
         final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-        
+
         await _firebaseService.analytics.logEvent(
           name: 'mercadopago_checkout_opened',
           parameters: {
@@ -153,6 +209,93 @@ class PaymentService {
     }
   }
 
+  /// Procesar pago con MercadoPago Checkout Bricks (in-app)
+  ///
+  /// Este método procesa un pago usando el token generado por Checkout Bricks
+  /// directamente dentro de la aplicación, sin abrir navegador externo.
+  Future<PaymentResult> processMercadoPagoCheckoutBricks({
+    required String rideId,
+    required String token,
+    required String paymentMethodId,
+    required String issuerId,
+    required int installments,
+    required double transactionAmount,
+    required String payerEmail,
+    required String description,
+  }) async {
+    try {
+      debugPrint('💳 PaymentService: Procesando pago Checkout Bricks - S/. transactionAmount');
+
+      // Llamar al backend de Firebase Functions para procesar el pago
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/processMercadoPagoBricks'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${await _getAuthToken()}',
+        },
+        body: jsonEncode({
+          'rideId': rideId,
+          'token': token,
+          'payment_method_id': paymentMethodId,
+          'issuer_id': issuerId,
+          'installments': installments,
+          'transaction_amount': transactionAmount,
+          'payer': {
+            'email': payerEmail,
+          },
+          'description': description,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+
+        // Log analytics
+        await _firebaseService.analytics.logEvent(
+          name: 'mercadopago_bricks_payment_processed',
+          parameters: {
+            'ride_id': rideId,
+            'amount': transactionAmount,
+            'status': data['status'],
+            'payment_id': data['paymentId'],
+          },
+        );
+
+        return PaymentResult(
+          success: true,
+          paymentId: data['paymentId']?.toString(), // Convertir int a String si es necesario
+          status: data['status']?.toString(),
+          message: data['message']?.toString() ?? 'Pago procesado exitosamente',
+        );
+      } else {
+        final errorData = jsonDecode(response.body);
+        throw Exception(errorData['error'] ?? 'Error al procesar el pago');
+      }
+    } catch (e) {
+      debugPrint('💳 PaymentService: Error procesando Checkout Bricks - $e');
+
+      return PaymentResult(
+        success: false,
+        error: e.toString(),
+        message: 'Error al procesar el pago: $e',
+      );
+    }
+  }
+
+  /// Obtener token de autenticación del usuario actual
+  Future<String?> _getAuthToken() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        return await user.getIdToken();
+      }
+      return null;
+    } catch (e) {
+      debugPrint('💳 PaymentService: Error obteniendo token de auth - $e');
+      return null;
+    }
+  }
+
   // ============================================================================
   // YAPE - PAGOS CON CÓDIGO QR
   // ============================================================================
@@ -165,7 +308,7 @@ class PaymentService {
     String? transactionCode,
   }) async {
     try {
-      debugPrint('📱 PaymentService: Procesando pago con Yape - S/$amount');
+      debugPrint('📱 PaymentService: Procesando pago con Yape - S/. amount');
 
       // Validar número de teléfono peruano
       if (!_validatePeruvianPhoneNumber(phoneNumber)) {
@@ -263,7 +406,7 @@ class PaymentService {
     required String phoneNumber,
   }) async {
     try {
-      debugPrint('📱 PaymentService: Procesando pago con Plin - S/$amount');
+      debugPrint('📱 PaymentService: Procesando pago con Plin - S/. amount');
 
       // Validar número de teléfono peruano
       if (!_validatePeruvianPhoneNumber(phoneNumber)) {
@@ -634,6 +777,125 @@ class PaymentService {
     ];
   }
 
+
+  // ============================================================================
+  // RETIROS - MONEY OUT API DE MERCADOPAGO
+  // ============================================================================
+
+  /// Solicitar retiro de ganancias con MercadoPago Money Out API
+  ///
+  /// Soporta:
+  /// - Transferencias bancarias (BCP, BBVA, Interbank, Scotiabank)
+  /// - Yape (instantáneo)
+  /// - Plin (instantáneo)
+  Future<WithdrawalResult> requestWithdrawal({
+    required String driverId,
+    required double amount,
+    required String method, // 'bank_transfer', 'yape', 'plin'
+    String? bankName,
+    String? accountNumber,
+    String? phoneNumber,
+    required String accountHolderName,
+    required String accountHolderDocumentNumber,
+    String accountHolderDocumentType = 'DNI',
+  }) async {
+    try {
+      debugPrint('💸 PaymentService: Solicitando retiro - S/. amount via $method');
+
+      // Validar parámetros según el método
+      if (method == 'bank_transfer') {
+        if (bankName == null || bankName.isEmpty) {
+          throw Exception('Nombre del banco es requerido para transferencia bancaria');
+        }
+        if (accountNumber == null || accountNumber.isEmpty) {
+          throw Exception('Número de cuenta es requerido para transferencia bancaria');
+        }
+      } else if (method == 'yape' || method == 'plin') {
+        if (phoneNumber == null || phoneNumber.isEmpty) {
+          throw Exception('Número de teléfono es requerido para $method');
+        }
+        if (!RegExp(r'^9[0-9]{8}$').hasMatch(phoneNumber)) {
+          throw Exception('Número de teléfono inválido. Debe tener 9 dígitos y empezar con 9');
+        }
+      }
+
+      // Validar monto mínimo
+      if (amount < 50.0) {
+        throw Exception('El monto mínimo de retiro es S/. 50.00');
+      }
+
+      // Preparar datos según el método
+      final Map<String, dynamic> requestData = {
+        'driverId': driverId,
+        'amount': amount,
+        'method': method,
+        'accountHolderName': accountHolderName,
+        'accountHolderDocumentType': accountHolderDocumentType,
+        'accountHolderDocumentNumber': accountHolderDocumentNumber,
+      };
+
+      if (method == 'bank_transfer') {
+        requestData['bankName'] = bankName;
+        requestData['bankAccount'] = accountNumber;
+      } else {
+        requestData['phoneNumber'] = phoneNumber;
+      }
+
+      // Llamar a Firebase Function
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/requestWithdrawal'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(requestData),
+      );
+
+      debugPrint('💸 Response status: ${response.statusCode}');
+      debugPrint('💸 Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        if (data['success'] == true) {
+          debugPrint('✅ Retiro procesado exitosamente: ${data['data']['withdrawalId']}');
+
+          await _firebaseService.analytics.logEvent(
+            name: 'withdrawal_requested',
+            parameters: {
+              'driver_id': driverId,
+              'amount': amount,
+              'method': method,
+              'withdrawal_id': data['data']['withdrawalId'],
+            },
+          );
+
+          return WithdrawalResult(
+            success: true,
+            withdrawalId: data['data']['withdrawalId'],
+            transferId: data['data']['transferId'],
+            status: data['data']['status'],
+            amount: amount,
+          );
+        } else {
+          throw Exception(data['error'] ?? 'Error desconocido al procesar retiro');
+        }
+      } else {
+        final errorData = jsonDecode(response.body);
+        throw Exception(errorData['error'] ?? 'Error del servidor: ${response.statusCode}');
+      }
+
+    } catch (e) {
+      debugPrint('❌ PaymentService: Error en requestWithdrawal - $e');
+
+      await _firebaseService.crashlytics.recordError(e, StackTrace.current);
+
+      return WithdrawalResult(
+        success: false,
+        error: e.toString(),
+      );
+    }
+  }
+
   // Getters
   bool get isInitialized => _initialized;
   String get mercadoPagoPublicKey => _mercadoPagoPublicKey;
@@ -664,7 +926,7 @@ class PaymentPreferenceResult {
     required this.driverEarnings,
   }) : success = true, error = null;
 
-  PaymentPreferenceResult.error(this.error) 
+  PaymentPreferenceResult.error(this.error)
       : success = false,
         preferenceId = null,
         initPoint = null,
@@ -672,6 +934,23 @@ class PaymentPreferenceResult {
         amount = null,
         platformCommission = null,
         driverEarnings = null;
+}
+
+/// Resultado de procesamiento de pago (genérico)
+class PaymentResult {
+  final bool success;
+  final String? paymentId;
+  final String? status;
+  final String? message;
+  final String? error;
+
+  PaymentResult({
+    required this.success,
+    this.paymentId,
+    this.status,
+    this.message,
+    this.error,
+  });
 }
 
 /// Resultado de pago con Yape
@@ -841,10 +1120,29 @@ class PaymentMethodInfo {
   });
 }
 
+/// Resultado de solicitud de retiro
+class WithdrawalResult {
+  final bool success;
+  final String? withdrawalId;
+  final String? transferId;
+  final String? status;
+  final double? amount;
+  final String? error;
+
+  WithdrawalResult({
+    required this.success,
+    this.withdrawalId,
+    this.transferId,
+    this.status,
+    this.amount,
+    this.error,
+  });
+}
+
 /// Estados de pago
 enum PaymentStatus {
   pending,
-  processing, 
+  processing,
   approved,
   rejected,
   refunded,

@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../widgets/animated/modern_animated_widgets.dart';
 
 class RatingDialog extends StatefulWidget {
@@ -174,7 +175,7 @@ class _RatingDialogState extends State<RatingDialog>
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.check_circle, color: Colors.white),
+            Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary),
             SizedBox(width: 12),
             Text('¡Gracias por tu calificación!'),
           ],
@@ -232,7 +233,7 @@ class _RatingDialogState extends State<RatingDialog>
                               children: [
                                 CircleAvatar(
                                   radius: 35,
-                                  backgroundColor: Colors.white,
+                                  backgroundColor: Theme.of(context).colorScheme.surface,
                                   child: CircleAvatar(
                                     radius: 32,
                                     backgroundImage: NetworkImage(widget.driverPhoto),
@@ -242,10 +243,12 @@ class _RatingDialogState extends State<RatingDialog>
                                 Text(
                                   widget.driverName,
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Theme.of(context).colorScheme.onPrimary,
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -254,7 +257,7 @@ class _RatingDialogState extends State<RatingDialog>
                               top: 8,
                               right: 8,
                               child: IconButton(
-                                icon: Icon(Icons.close, color: Colors.white70),
+                                icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7)),
                                 onPressed: () => Navigator.of(context).pop(),
                               ),
                             ),
@@ -272,7 +275,7 @@ class _RatingDialogState extends State<RatingDialog>
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
-                                color: ModernTheme.textPrimary,
+                                color: context.primaryText,
                               ),
                             ),
                             SizedBox(height: 8),
@@ -280,7 +283,7 @@ class _RatingDialogState extends State<RatingDialog>
                               'Tu opinión nos ayuda a mejorar',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: ModernTheme.textSecondary,
+                                color: context.secondaryText,
                               ),
                             ),
                             
@@ -321,7 +324,7 @@ class _RatingDialogState extends State<RatingDialog>
                                   hintText: 'Cuéntanos más sobre tu experiencia (opcional)',
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(color: Colors.grey.shade300),
+                                    borderSide: BorderSide(color: context.secondaryText.withOpacity(0.3)),
                                   ),
                                   focusedBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
@@ -331,7 +334,7 @@ class _RatingDialogState extends State<RatingDialog>
                                     ),
                                   ),
                                   filled: true,
-                                  fillColor: ModernTheme.backgroundLight,
+                                  fillColor: context.surfaceColor,
                                 ),
                               ),
                               
@@ -360,7 +363,7 @@ class _RatingDialogState extends State<RatingDialog>
                                 onPressed: () => Navigator.of(context).pop(),
                                 child: Text(
                                   'Calificar más tarde',
-                                  style: TextStyle(color: ModernTheme.textSecondary),
+                                  style: TextStyle(color: context.secondaryText),
                                 ),
                               ),
                             ],
@@ -417,9 +420,9 @@ class _RatingDialogState extends State<RatingDialog>
                           icon: Icon(
                             index < _rating ? Icons.star : Icons.star_border,
                             size: 40,
-                            color: index < _rating 
-                              ? Colors.amber 
-                              : Colors.grey.shade400,
+                            color: index < _rating
+                              ? ModernTheme.warning
+                              : context.secondaryText.withOpacity(0.4),
                           ),
                         ),
                       );
@@ -448,7 +451,7 @@ class _RatingDialogState extends State<RatingDialog>
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: ModernTheme.textPrimary,
+              color: context.primaryText,
             ),
           ),
           SizedBox(height: 12),
@@ -469,9 +472,9 @@ class _RatingDialogState extends State<RatingDialog>
                       ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
                       : Colors.transparent,
                     border: Border.all(
-                      color: isSelected 
-                        ? ModernTheme.oasisGreen 
-                        : Colors.grey.shade300,
+                      color: isSelected
+                        ? ModernTheme.oasisGreen
+                        : context.secondaryText.withOpacity(0.3),
                       width: isSelected ? 2 : 1,
                     ),
                     borderRadius: BorderRadius.circular(20),
@@ -492,7 +495,7 @@ class _RatingDialogState extends State<RatingDialog>
                           fontSize: 13,
                           color: isSelected 
                             ? ModernTheme.oasisGreen 
-                            : ModernTheme.textSecondary,
+                            : context.secondaryText,
                           fontWeight: isSelected 
                             ? FontWeight.w600 
                             : FontWeight.normal,
@@ -535,11 +538,11 @@ class _RatingDialogState extends State<RatingDialog>
       case 3:
         return ModernTheme.warning;
       case 2:
-        return Colors.orange;
+        return ModernTheme.warning;
       case 1:
         return ModernTheme.error;
       default:
-        return ModernTheme.textPrimary;
+        return context.primaryText;
     }
   }
 }
@@ -549,7 +552,7 @@ class PatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.1)
+      ..color = ModernTheme.oasisWhite.withValues(alpha: 0.1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     

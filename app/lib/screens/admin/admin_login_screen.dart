@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 // ignore_for_file: library_private_types_in_public_api
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
+import '../../providers/auth_provider.dart' as app_auth;
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
@@ -63,27 +66,63 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
-      
-      // Simular verificación de credenciales
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // Verificar credenciales de admin
-      if (_emailController.text == 'admin@oasistaxiadmin.com' &&
-          _passwordController.text == 'admin123') {
-        
-        // Mostrar pantalla de 2FA
-        if (mounted) {
-          setState(() {
-            _showTwoFactor = true;
-            _isLoading = false;
-          });
+
+      try {
+        // ✅ AUTENTICACIÓN REAL CON FIREBASE AUTH
+        final authProvider = Provider.of<app_auth.AuthProvider>(context, listen: false);
+
+        final success = await authProvider.login(
+          _emailController.text.trim(),
+          _passwordController.text.trim(),
+        );
+
+        if (!mounted) return;
+
+        if (success) {
+          final user = authProvider.currentUser;
+
+          // ✅ VERIFICAR QUE EL USUARIO SEA REALMENTE ADMINISTRADOR
+          if (user != null && user.userType == 'admin') {
+            // Mostrar pantalla de 2FA para admin
+            setState(() {
+              _showTwoFactor = true;
+              _isLoading = false;
+            });
+          } else {
+            // Usuario autenticado pero NO es admin
+            await authProvider.logout();
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Acceso denegado. Solo administradores pueden ingresar.'),
+                backgroundColor: ModernTheme.error,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            );
+            setState(() => _isLoading = false);
+          }
+        } else {
+          // Error de autenticación
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(authProvider.errorMessage ?? 'Credenciales inválidas'),
+              backgroundColor: ModernTheme.error,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+          setState(() => _isLoading = false);
         }
-      } else {
-        // Error de credenciales
+      } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Credenciales de administrador inválidas'),
+            content: Text('Error al autenticar: $e'),
             backgroundColor: ModernTheme.error,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
@@ -91,9 +130,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
             ),
           ),
         );
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -248,7 +285,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
                         constraints: const BoxConstraints(maxWidth: 400),
                         padding: const EdgeInsets.all(32),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.95),
+                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.95),
                           borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
@@ -299,10 +336,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
                     ),
                   ],
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.admin_panel_settings,
                   size: 50,
-                  color: Colors.white,
+                  color: context.onPrimaryText,
                 ),
               );
             },
@@ -310,20 +347,20 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
           
           const SizedBox(height: 24),
           
-          const Text(
+          Text(
             'ADMIN PANEL',
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.bold,
-              color: ModernTheme.oasisBlack,
+              color: context.primaryText,
               letterSpacing: 2,
             ),
           ),
-          
-          const Text(
+
+          Text(
             'Acceso Restringido',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 14,
             ),
           ),
@@ -334,7 +371,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
           TextFormField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
-            style: const TextStyle(color: ModernTheme.oasisBlack),
+            style: TextStyle(color: context.primaryText),
             decoration: InputDecoration(
               labelText: 'Correo Administrativo',
               prefixIcon: const Icon(Icons.email, color: ModernTheme.oasisGreen),
@@ -346,7 +383,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
                 borderSide: const BorderSide(color: ModernTheme.oasisGreen, width: 2),
               ),
               filled: true,
-              fillColor: Colors.grey.shade50,
+              fillColor: Theme.of(context).colorScheme.surface,
             ),
             validator: (value) {
               if (value == null || value.isEmpty) {
@@ -365,14 +402,14 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
           TextFormField(
             controller: _passwordController,
             obscureText: _obscurePassword,
-            style: const TextStyle(color: ModernTheme.oasisBlack),
+            style: TextStyle(color: context.primaryText),
             decoration: InputDecoration(
               labelText: 'Contraseña',
               prefixIcon: const Icon(Icons.lock, color: ModernTheme.oasisGreen),
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                 ),
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
               ),
@@ -384,7 +421,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
                 borderSide: const BorderSide(color: ModernTheme.oasisGreen, width: 2),
               ),
               filled: true,
-              fillColor: Colors.grey.shade50,
+              fillColor: Theme.of(context).colorScheme.surface,
             ),
             validator: (value) {
               if (value == null || value.isEmpty) {
@@ -414,20 +451,20 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.amber.shade50,
+              color: ModernTheme.warning.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.amber.shade200),
+              border: Border.all(color: ModernTheme.warning.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                Icon(Icons.info, color: Colors.amber.shade700, size: 20),
+                Icon(Icons.info, color: ModernTheme.warning, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Este acceso es solo para administradores autorizados',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.amber.shade900,
+                      color: ModernTheme.warning,
                     ),
                   ),
                 ),
@@ -440,9 +477,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
           // Volver al login normal
           TextButton(
             onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
-            child: const Text(
+            child: Text(
               'Volver al Login Normal',
-              style: TextStyle(color: ModernTheme.textSecondary),
+              style: TextStyle(color: context.secondaryText),
             ),
           ),
         ],
@@ -462,21 +499,21 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
         
         const SizedBox(height: 24),
         
-        const Text(
+        Text(
           'Verificación de 2 Factores',
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: ModernTheme.oasisBlack,
+            color: context.primaryText,
           ),
         ),
-        
+
         const SizedBox(height: 8),
-        
-        const Text(
+
+        Text(
           'Ingresa el código de 6 dígitos',
           style: TextStyle(
-            color: ModernTheme.textSecondary,
+            color: context.secondaryText,
           ),
         ),
         
@@ -504,7 +541,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
               borderSide: const BorderSide(color: ModernTheme.oasisGreen, width: 2),
             ),
             filled: true,
-            fillColor: Colors.grey.shade50,
+            fillColor: Theme.of(context).colorScheme.surface,
           ),
         ),
         
@@ -527,19 +564,19 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
               _codeController.clear();
             });
           },
-          child: const Text(
+          child: Text(
             'Cancelar',
-            style: TextStyle(color: ModernTheme.textSecondary),
+            style: TextStyle(color: context.secondaryText),
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
-        const Text(
+
+        Text(
           'Se enviará un código de verificación a su email registrado.',
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey,
+            color: context.secondaryText,
             fontStyle: FontStyle.italic,
           ),
         ),

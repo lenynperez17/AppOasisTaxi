@@ -2,13 +2,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../providers/ride_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/trip_model.dart';
 import '../../services/emergency_service.dart';
+import '../../widgets/verification_code_widget.dart'; // ✅ NUEVO: Widget de verificación mutua
 
-/// Pantalla que muestra el código de verificación al pasajero
+/// Pantalla de verificación mutua para pasajeros
+/// Muestra el código del pasajero y permite ingresar el código del conductor
 class TripVerificationCodeScreen extends StatefulWidget {
   final TripModel trip;
 
@@ -73,17 +76,17 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
   
   void _onTripStatusChanged() {
     if (!mounted) return;
-    
+
     final rideProvider = Provider.of<RideProvider>(context, listen: false);
     final currentTrip = rideProvider.currentTrip;
-    
+
     if (currentTrip != null && currentTrip.id == widget.trip.id) {
-      // Si el código fue verificado (viaje en progreso), volver a la pantalla anterior
-      if (currentTrip.status == 'in_progress' && currentTrip.isVerificationCodeUsed) {
+      // ✅ NUEVO: Si la verificación mutua está completa, viaje iniciado
+      if (currentTrip.status == 'in_progress' && currentTrip.isMutualVerificationComplete) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('¡Código verificado exitosamente! Tu viaje ha comenzado.'),
+            content: Text('¡Verificación mutua completada! Tu viaje ha comenzado.'),
             backgroundColor: ModernTheme.success,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
@@ -108,48 +111,34 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: OasisAppBar(
-        title: 'Código de Verificación',
+        title: 'Verificación Mutua',
         showBackButton: true,
       ),
-      body: Consumer<RideProvider>(
-        builder: (context, rideProvider, child) {
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  // Información del conductor
-                  _buildDriverInfo(),
-                  
-                  SizedBox(height: 40),
-                  
-                  // Código de verificación principal
-                  SlideTransition(
-                    position: _slideAnimation,
-                    child: _buildVerificationCode(),
-                  ),
-                  
-                  SizedBox(height: 30),
-                  
-                  // Instrucciones
-                  _buildInstructions(),
-                  
-                  Spacer(),
-                  
-                  // Estado del viaje
-                  _buildTripStatus(),
-                  
-                  SizedBox(height: 20),
-                  
-                  // Botón de emergencia
-                  _buildEmergencyButton(),
-                ],
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            children: [
+              // Información del conductor
+              _buildDriverInfo(),
+
+              SizedBox(height: 20),
+
+              // ✅ NUEVO: Widget de verificación mutua completo
+              VerificationCodeWidget(
+                rideId: widget.trip.id,
+                isDriver: false, // Es pasajero
               ),
-            ),
-          );
-        },
+
+              SizedBox(height: 20),
+
+              // Botón de emergencia
+              _buildEmergencyButton(),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -158,9 +147,9 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
     return Container(
       padding: EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Row(
         children: [
@@ -185,7 +174,7 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
                 SizedBox(height: 4),
@@ -196,17 +185,17 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
                     Text(
                       widget.trip.driverRating?.toStringAsFixed(1) ?? '5.0',
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                         fontSize: 14,
                       ),
                     ),
                     SizedBox(width: 16),
-                    Icon(Icons.directions_car, size: 16, color: ModernTheme.textSecondary),
+                    Icon(Icons.directions_car, size: 16, color: context.secondaryText),
                     SizedBox(width: 4),
                     Text(
                       widget.trip.vehicleInfo?['model'] ?? 'Vehículo',
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                         fontSize: 14,
                       ),
                     ),
@@ -236,245 +225,7 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
     );
   }
 
-  Widget _buildVerificationCode() {
-    final code = widget.trip.verificationCode ?? '----';
-    
-    return AnimatedBuilder(
-      animation: _pulseAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _pulseAnimation.value,
-          child: Container(
-            padding: EdgeInsets.all(30),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  ModernTheme.oasisGreen,
-                  ModernTheme.oasisGreen.withValues(alpha: 0.8),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: ModernTheme.oasisGreen.withValues(alpha: 0.4),
-                  blurRadius: 20,
-                  offset: Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.security,
-                  size: 48,
-                  color: Colors.white,
-                ),
-                SizedBox(height: 16),
-                Text(
-                  'Tu Código de Verificación',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: code.split('').map((digit) {
-                    return Container(
-                      width: 60,
-                      height: 60,
-                      margin: EdgeInsets.symmetric(horizontal: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          width: 1,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          digit,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildInstructions() {
-    return Container(
-      padding: EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: ModernTheme.backgroundLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ModernTheme.oasisGreen.withValues(alpha: 0.2),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.info_outline,
-                  color: ModernTheme.oasisGreen,
-                  size: 20,
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Instrucciones de Seguridad',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 16),
-          _buildInstructionItem(
-            '1',
-            'Muestra este código al conductor cuando llegue',
-          ),
-          _buildInstructionItem(
-            '2',
-            'El conductor debe ingresar el código exacto',
-          ),
-          _buildInstructionItem(
-            '3',
-            'El viaje solo comenzará con el código correcto',
-          ),
-          _buildInstructionItem(
-            '4',
-            'No compartas este código con nadie más',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInstructionItem(String number, String text) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: ModernTheme.oasisGreen,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                number,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: ModernTheme.textSecondary,
-                fontSize: 14,
-                height: 1.4,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTripStatus() {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: ModernTheme.cardShadow,
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: widget.trip.status == 'driver_arriving' 
-                ? Colors.orange.withValues(alpha: 0.1)
-                : ModernTheme.oasisGreen.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              widget.trip.status == 'driver_arriving' 
-                ? Icons.directions_car
-                : Icons.check_circle,
-              color: widget.trip.status == 'driver_arriving' 
-                ? Colors.orange
-                : ModernTheme.oasisGreen,
-              size: 20,
-            ),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.trip.statusDisplay,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                Text(
-                  widget.trip.status == 'driver_arriving' 
-                    ? 'Tu conductor está llegando'
-                    : 'Esperando verificación',
-                  style: TextStyle(
-                    color: ModernTheme.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ✅ Métodos viejos eliminados - ahora usa VerificationCodeWidget
 
   Widget _buildEmergencyButton() {
     return SizedBox(
@@ -519,7 +270,7 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
           ElevatedButton(
             onPressed: _triggerRealEmergency,
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Llamar Emergencia', style: TextStyle(color: Colors.white)),
+            child: Text('Llamar Emergencia', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
           ),
         ],
       ),
@@ -643,7 +394,7 @@ class _TripVerificationCodeScreenState extends State<TripVerificationCodeScreen>
               );
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: Text('Entendido', style: TextStyle(color: Colors.white)),
+            child: Text('Entendido', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
           ),
         ],
       ),

@@ -1,7 +1,12 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
+import '../../utils/logger.dart';
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
 
@@ -15,11 +20,16 @@ class _SupportScreenState extends State<SupportScreen>
   late AnimationController _slideController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _slideAnimation;
-  
+
   // Support data
   List<SupportTicket> _tickets = [];
   List<FAQ> _faqs = [];
   bool _isLoading = true;
+
+  // ✅ Información de contacto desde Firebase
+  String _supportPhone = '';
+  String _supportWhatsApp = '';
+  String _supportEmail = 'soporte@oasistaxi.com';
   
   // Form controllers
   final _formKey = GlobalKey<FormState>();
@@ -65,56 +75,103 @@ class _SupportScreenState extends State<SupportScreen>
   }
   
   void _loadSupportData() async {
-    // Simulate loading support data
-    await Future.delayed(Duration(seconds: 1));
-    
-    setState(() {
-      _tickets = [
-        SupportTicket(
-          id: 'TK001',
-          subject: 'Problema con el pago',
-          description: 'No se procesó el pago de mi último viaje',
-          category: SupportCategory.payment,
-          priority: TicketPriority.high,
-          status: TicketStatus.inProgress,
-          createdAt: DateTime.now().subtract(Duration(hours: 2)),
-          updatedAt: DateTime.now().subtract(Duration(minutes: 30)),
-          responses: [
-            TicketResponse(
-              id: 'R001',
-              message: 'Hemos recibido tu reporte y estamos investigando el problema.',
-              isFromSupport: true,
-              createdAt: DateTime.now().subtract(Duration(minutes: 45)),
-            ),
-            TicketResponse(
-              id: 'R002',
-              message: 'El problema ha sido identificado y ya se procesó tu reembolso.',
-              isFromSupport: true,
-              createdAt: DateTime.now().subtract(Duration(minutes: 30)),
-            ),
-          ],
-        ),
-        SupportTicket(
-          id: 'TK002',
-          subject: 'Conductor no llegó al punto de recogida',
-          description: 'El conductor canceló el viaje sin avisar',
-          category: SupportCategory.trip,
-          priority: TicketPriority.medium,
-          status: TicketStatus.resolved,
-          createdAt: DateTime.now().subtract(Duration(days: 1)),
-          updatedAt: DateTime.now().subtract(Duration(hours: 6)),
-          responses: [
-            TicketResponse(
-              id: 'R003',
-              message: 'Lamentamos esta experiencia. Hemos aplicado una penalización al conductor.',
-              isFromSupport: true,
-              createdAt: DateTime.now().subtract(Duration(hours: 8)),
-            ),
-          ],
-        ),
-      ];
-      
-      _faqs = [
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        AppLogger.warning('⚠️ No hay usuario autenticado');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // ✅ Cargar información de contacto desde Firebase config
+      final configDoc = await FirebaseFirestore.instance
+          .collection('config')
+          .doc('support_info')
+          .get();
+
+      if (configDoc.exists) {
+        final data = configDoc.data()!;
+        _supportPhone = data['phone'] ?? '';
+        _supportWhatsApp = data['whatsapp'] ?? '';
+        _supportEmail = data['email'] ?? 'soporte@oasistaxi.com';
+      }
+
+      // ✅ Cargar tickets reales del usuario desde Firestore
+      final ticketsSnapshot = await FirebaseFirestore.instance
+          .collection('supportTickets')
+          .where('userId', isEqualTo: currentUser.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+
+      List<SupportTicket> loadedTickets = [];
+      for (var doc in ticketsSnapshot.docs) {
+        try {
+          final data = doc.data();
+          loadedTickets.add(SupportTicket(
+            id: doc.id,
+            subject: data['subject'] ?? '',
+            description: data['description'] ?? '',
+            category: _parseCategoryFromString(data['category'] ?? 'general'),
+            priority: _parsePriorityFromString(data['priority'] ?? 'medium'),
+            status: _parseStatusFromString(data['status'] ?? 'open'),
+            createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            responses: [], // Se cargarán bajo demanda al abrir el ticket
+          ));
+        } catch (e) {
+          AppLogger.error('Error parseando ticket ${doc.id}: $e');
+        }
+      }
+
+      // ✅ Cargar FAQs desde Firebase
+      final faqsSnapshot = await FirebaseFirestore.instance
+          .collection('faqs')
+          .where('active', isEqualTo: true)
+          .orderBy('order')
+          .get();
+
+      List<FAQ> loadedFaqs = [];
+      for (var doc in faqsSnapshot.docs) {
+        try {
+          final data = doc.data();
+          loadedFaqs.add(FAQ(
+            id: doc.id,
+            question: data['question'] ?? '',
+            answer: data['answer'] ?? '',
+            category: data['category'] ?? 'General',
+            isHelpful: null,
+          ));
+        } catch (e) {
+          AppLogger.error('Error parseando FAQ ${doc.id}: $e');
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _tickets = loadedTickets;
+        _faqs = loadedFaqs.isNotEmpty ? loadedFaqs : _getDefaultFAQs();
+        _isLoading = false;
+      });
+
+      _fadeController.forward();
+      _slideController.forward();
+    } catch (e) {
+      AppLogger.error('❌ Error cargando datos de soporte: $e');
+      if (!mounted) return;
+
+      setState(() {
+        _tickets = [];
+        _faqs = _getDefaultFAQs();
+        _isLoading = false;
+      });
+    }
+  }
+
+  // ✅ FAQs por defecto si no hay en Firebase
+  List<FAQ> _getDefaultFAQs() {
+    return [
         FAQ(
           id: '1',
           question: '¿Cómo puedo cambiar mi método de pago?',
@@ -151,34 +208,28 @@ class _SupportScreenState extends State<SupportScreen>
           isHelpful: null,
         ),
       ];
-      
-      _isLoading = false;
-    });
-    
-    _fadeController.forward();
-    _slideController.forward();
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
-        backgroundColor: ModernTheme.backgroundLight,
+        backgroundColor: context.surfaceColor,
         appBar: AppBar(
           backgroundColor: ModernTheme.oasisGreen,
           elevation: 0,
           title: Text(
             'Centro de Soporte',
             style: TextStyle(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.onPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
           bottom: TabBar(
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
+            indicatorColor: Theme.of(context).colorScheme.onPrimary,
+            labelColor: Theme.of(context).colorScheme.onPrimary,
+            unselectedLabelColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.70),
             tabs: [
               Tab(icon: Icon(Icons.help_outline), text: 'FAQs'),
               Tab(icon: Icon(Icons.support_agent), text: 'Mis Tickets'),
@@ -204,7 +255,7 @@ class _SupportScreenState extends State<SupportScreen>
           Text(
             'Cargando información de soporte...',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -296,11 +347,11 @@ class _SupportScreenState extends State<SupportScreen>
         onSelected: (selected) {
           // Implement category filtering
         },
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         selectedColor: ModernTheme.oasisGreen.withValues(alpha: 0.2),
         checkmarkColor: ModernTheme.oasisGreen,
         labelStyle: TextStyle(
-          color: isSelected ? ModernTheme.oasisGreen : ModernTheme.textSecondary,
+          color: isSelected ? ModernTheme.oasisGreen : context.secondaryText,
         ),
       ),
     );
@@ -317,7 +368,7 @@ class _SupportScreenState extends State<SupportScreen>
           faq.question,
           style: TextStyle(
             fontWeight: FontWeight.w600,
-            color: ModernTheme.textPrimary,
+            color: context.primaryText,
           ),
         ),
         subtitle: Container(
@@ -345,7 +396,7 @@ class _SupportScreenState extends State<SupportScreen>
                 Text(
                   faq.answer,
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     height: 1.5,
                   ),
                 ),
@@ -356,18 +407,18 @@ class _SupportScreenState extends State<SupportScreen>
                       '¿Te fue útil esta respuesta?',
                       style: TextStyle(
                         fontSize: 12,
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                       ),
                     ),
                     Spacer(),
                     IconButton(
                       icon: Icon(Icons.thumb_up_outlined),
-                      color: faq.isHelpful == true ? ModernTheme.success : ModernTheme.textSecondary,
+                      color: faq.isHelpful == true ? ModernTheme.success : context.secondaryText,
                       onPressed: () => _markFAQHelpful(faq, true),
                     ),
                     IconButton(
                       icon: Icon(Icons.thumb_down_outlined),
-                      color: faq.isHelpful == false ? ModernTheme.error : ModernTheme.textSecondary,
+                      color: faq.isHelpful == false ? ModernTheme.error : context.secondaryText,
                       onPressed: () => _markFAQHelpful(faq, false),
                     ),
                   ],
@@ -389,7 +440,7 @@ class _SupportScreenState extends State<SupportScreen>
             Icon(
               Icons.support_agent,
               size: 64,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
             SizedBox(height: 16),
             Text(
@@ -397,14 +448,14 @@ class _SupportScreenState extends State<SupportScreen>
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
             ),
             SizedBox(height: 8),
             Text(
               'Crea un nuevo ticket si necesitas ayuda',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
             ),
           ],
@@ -441,7 +492,7 @@ class _SupportScreenState extends State<SupportScreen>
                   Container(
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: _getStatusColor(ticket.status).withValues(alpha: 0.1),
+                      color: _getStatusColor(ticket.status, context).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -449,7 +500,7 @@ class _SupportScreenState extends State<SupportScreen>
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: _getStatusColor(ticket.status),
+                        color: _getStatusColor(ticket.status, context),
                       ),
                     ),
                   ),
@@ -458,7 +509,7 @@ class _SupportScreenState extends State<SupportScreen>
                     ticket.id,
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                 ],
@@ -469,14 +520,14 @@ class _SupportScreenState extends State<SupportScreen>
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: ModernTheme.textPrimary,
+                  color: context.primaryText,
                 ),
               ),
               SizedBox(height: 4),
               Text(
                 ticket.description,
                 style: TextStyle(
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -487,28 +538,28 @@ class _SupportScreenState extends State<SupportScreen>
                   Icon(
                     _getCategoryIcon(ticket.category),
                     size: 16,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                   SizedBox(width: 4),
                   Text(
                     _getCategoryText(ticket.category),
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                   SizedBox(width: 16),
                   Icon(
                     Icons.schedule,
                     size: 16,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                   SizedBox(width: 4),
                   Text(
                     _formatDateTime(ticket.updatedAt),
                     style: TextStyle(
                       fontSize: 12,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                   Spacer(),
@@ -550,7 +601,7 @@ class _SupportScreenState extends State<SupportScreen>
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 24),
@@ -560,7 +611,7 @@ class _SupportScreenState extends State<SupportScreen>
               'Categoría',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 8),
@@ -594,7 +645,7 @@ class _SupportScreenState extends State<SupportScreen>
               'Prioridad',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 8),
@@ -626,7 +677,7 @@ class _SupportScreenState extends State<SupportScreen>
               'Asunto',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 8),
@@ -656,7 +707,7 @@ class _SupportScreenState extends State<SupportScreen>
               'Descripción',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 8),
@@ -689,7 +740,7 @@ class _SupportScreenState extends State<SupportScreen>
                 onPressed: _submitTicket,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ModernTheme.oasisGreen,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -715,13 +766,13 @@ class _SupportScreenState extends State<SupportScreen>
       padding: EdgeInsets.all(16),
       child: Column(
         children: [
-          // Contact options
+          // ✅ Contact options con información real desde Firebase
           _buildContactOption(
             'Llamar a Soporte',
             'Habla directamente con nuestro equipo',
             Icons.phone,
             ModernTheme.primaryBlue,
-            '+51 1 234-5678',
+            _supportPhone.isNotEmpty ? _supportPhone : 'Configurar número',
             _callSupport,
           ),
           _buildContactOption(
@@ -736,16 +787,16 @@ class _SupportScreenState extends State<SupportScreen>
             'Email',
             'Envía un correo a nuestro equipo',
             Icons.email,
-            Colors.orange,
-            'soporte@oasistaxi.com',
+            ModernTheme.warning, // Naranja para email
+            _supportEmail,
             _sendEmail,
           ),
           _buildContactOption(
             'WhatsApp',
             'Contacta por WhatsApp',
             Icons.message,
-            Colors.green,
-            '+51 987 654 321',
+            ModernTheme.success, // Verde para WhatsApp
+            _supportWhatsApp.isNotEmpty ? _supportWhatsApp : 'Configurar WhatsApp',
             _openWhatsApp,
           ),
           
@@ -755,7 +806,7 @@ class _SupportScreenState extends State<SupportScreen>
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: ModernTheme.backgroundLight,
+              color: context.surfaceColor,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -766,7 +817,7 @@ class _SupportScreenState extends State<SupportScreen>
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
                 SizedBox(height: 12),
@@ -778,7 +829,7 @@ class _SupportScreenState extends State<SupportScreen>
                   '* Chat en vivo disponible 24/7',
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                 ),
               ],
@@ -793,17 +844,17 @@ class _SupportScreenState extends State<SupportScreen>
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: ModernTheme.textPrimary,
+              color: context.primaryText,
             ),
           ),
           SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildSocialButton('Facebook', Icons.facebook, Colors.blue),
-              _buildSocialButton('Twitter', Icons.alternate_email, Colors.lightBlue),
-              _buildSocialButton('Instagram', Icons.camera_alt, Colors.purple),
-              _buildSocialButton('LinkedIn', Icons.work, Colors.indigo),
+              _buildSocialButton('Facebook', Icons.facebook, ModernTheme.primaryBlue),
+              _buildSocialButton('Twitter', Icons.alternate_email, ModernTheme.info),
+              _buildSocialButton('Instagram', Icons.camera_alt, ModernTheme.error),
+              _buildSocialButton('LinkedIn', Icons.work, ModernTheme.primaryBlue),
             ],
           ),
         ],
@@ -849,14 +900,14 @@ class _SupportScreenState extends State<SupportScreen>
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: ModernTheme.textPrimary,
+                        color: context.primaryText,
                       ),
                     ),
                     Text(
                       subtitle,
                       style: TextStyle(
                         fontSize: 12,
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                       ),
                     ),
                     SizedBox(height: 4),
@@ -873,7 +924,7 @@ class _SupportScreenState extends State<SupportScreen>
               ),
               Icon(
                 Icons.arrow_forward_ios,
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 size: 16,
               ),
             ],
@@ -893,13 +944,13 @@ class _SupportScreenState extends State<SupportScreen>
             day,
             style: TextStyle(
               fontWeight: FontWeight.w500,
-              color: ModernTheme.textPrimary,
+              color: context.primaryText,
             ),
           ),
           Text(
             hours,
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -921,8 +972,8 @@ class _SupportScreenState extends State<SupportScreen>
       ),
     );
   }
-  
-  Color _getStatusColor(TicketStatus status) {
+
+  Color _getStatusColor(TicketStatus status, BuildContext context) {
     switch (status) {
       case TicketStatus.open:
         return ModernTheme.warning;
@@ -931,10 +982,10 @@ class _SupportScreenState extends State<SupportScreen>
       case TicketStatus.resolved:
         return ModernTheme.success;
       case TicketStatus.closed:
-        return ModernTheme.textSecondary;
+        return context.secondaryText;
     }
   }
-  
+
   String _getStatusText(TicketStatus status) {
     switch (status) {
       case TicketStatus.open:
@@ -947,7 +998,7 @@ class _SupportScreenState extends State<SupportScreen>
         return 'Cerrado';
     }
   }
-  
+
   IconData _getCategoryIcon(SupportCategory category) {
     switch (category) {
       case SupportCategory.general:
@@ -1026,43 +1077,85 @@ class _SupportScreenState extends State<SupportScreen>
     );
   }
   
-  void _submitTicket() {
+  // ✅ Implementación completa de creación de ticket con Firebase
+  void _submitTicket() async {
     if (_formKey.currentState!.validate()) {
-      // Simulate ticket creation
-      final newTicket = SupportTicket(
-        id: 'TK${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}',
-        subject: _subjectController.text,
-        description: _descriptionController.text,
-        category: _parseCategoryFromString(_selectedCategory),
-        priority: _parsePriorityFromString(_selectedPriority),
-        status: TicketStatus.open,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        responses: [],
-      );
-      
-      setState(() {
-        _tickets.insert(0, newTicket);
-        _subjectController.clear();
-        _descriptionController.clear();
-        _selectedCategory = 'general';
-        _selectedPriority = 'medium';
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ticket creado exitosamente - ${newTicket.id}'),
-          backgroundColor: ModernTheme.success,
-        ),
-      );
-      
-      // Switch to tickets tab
-      DefaultTabController.of(context).animateTo(1);
+      try {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Debes estar autenticado para crear un ticket'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+          return;
+        }
+
+        // ✅ Guardar en Firestore
+        final ticketData = {
+          'userId': currentUser.uid,
+          'subject': _subjectController.text,
+          'description': _descriptionController.text,
+          'category': _selectedCategory,
+          'priority': _selectedPriority,
+          'status': 'open',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+
+        final docRef = await FirebaseFirestore.instance
+            .collection('supportTickets')
+            .add(ticketData);
+
+        // Crear objeto de ticket local
+        final newTicket = SupportTicket(
+          id: docRef.id,
+          subject: _subjectController.text,
+          description: _descriptionController.text,
+          category: _parseCategoryFromString(_selectedCategory),
+          priority: _parsePriorityFromString(_selectedPriority),
+          status: TicketStatus.open,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          responses: [],
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+          _tickets.insert(0, newTicket);
+          _subjectController.clear();
+          _descriptionController.clear();
+          _selectedCategory = 'general';
+          _selectedPriority = 'medium';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ticket creado exitosamente - ${newTicket.id}'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+
+        // Cambiar al tab de tickets
+        DefaultTabController.of(context).animateTo(1);
+      } catch (e) {
+        AppLogger.error('❌ Error creando ticket: $e');
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al crear ticket: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
     }
   }
   
   SupportCategory _parseCategoryFromString(String category) {
-    switch (category) {
+    switch (category.toLowerCase()) {
       case 'trip':
         return SupportCategory.trip;
       case 'payment':
@@ -1077,9 +1170,9 @@ class _SupportScreenState extends State<SupportScreen>
         return SupportCategory.general;
     }
   }
-  
+
   TicketPriority _parsePriorityFromString(String priority) {
-    switch (priority) {
+    switch (priority.toLowerCase()) {
       case 'low':
         return TicketPriority.low;
       case 'high':
@@ -1090,41 +1183,120 @@ class _SupportScreenState extends State<SupportScreen>
         return TicketPriority.medium;
     }
   }
-  
-  void _callSupport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Llamando a soporte: +51 1 234-5678'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+
+  TicketStatus _parseStatusFromString(String status) {
+    switch (status.toLowerCase()) {
+      case 'open':
+        return TicketStatus.open;
+      case 'in_progress':
+      case 'inprogress':
+        return TicketStatus.inProgress;
+      case 'resolved':
+        return TicketStatus.resolved;
+      case 'closed':
+        return TicketStatus.closed;
+      default:
+        return TicketStatus.open;
+    }
   }
   
+  // ✅ Implementación completa de llamadas con url_launcher
+  void _callSupport() async {
+    if (_supportPhone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Número de soporte no configurado'),
+          backgroundColor: ModernTheme.warning,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final Uri phoneUri = Uri(scheme: 'tel', path: _supportPhone);
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        throw 'No se puede abrir la aplicación de teléfono';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al intentar llamar: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
   void _openLiveChat() {
+    // ✅ Redirigir al tab de nuevo ticket para crear uno
+    DefaultTabController.of(context).animateTo(2);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Abriendo chat en vivo...'),
+        content: Text('Crea un ticket y te responderemos pronto'),
         backgroundColor: ModernTheme.info,
       ),
     );
   }
-  
-  void _sendEmail() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Abriendo cliente de correo...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+
+  // ✅ Implementación completa de email con url_launcher
+  void _sendEmail() async {
+    try {
+      final Uri emailUri = Uri(
+        scheme: 'mailto',
+        path: _supportEmail,
+        query: 'subject=Soporte Oasis Taxi',
+      );
+
+      if (await canLaunchUrl(emailUri)) {
+        await launchUrl(emailUri);
+      } else {
+        throw 'No se puede abrir el cliente de correo';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al abrir correo: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
   }
-  
-  void _openWhatsApp() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Abriendo WhatsApp...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+
+  // ✅ Implementación completa de WhatsApp con url_launcher
+  void _openWhatsApp() async {
+    if (_supportWhatsApp.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('WhatsApp de soporte no configurado'),
+          backgroundColor: ModernTheme.warning,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Limpiar el número (quitar espacios, guiones, etc.)
+      final cleanNumber = _supportWhatsApp.replaceAll(RegExp(r'[^\d+]'), '');
+      final Uri whatsappUri = Uri.parse('https://wa.me/$cleanNumber');
+
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'No se puede abrir WhatsApp';
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al abrir WhatsApp: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
   }
   
   void _openSocialMedia(String platform) {
@@ -1135,7 +1307,7 @@ class _SupportScreenState extends State<SupportScreen>
       ),
     );
   }
-}
+} // Fin de la clase _SupportScreenState
 
 // Ticket Details Screen
 class TicketDetailsScreen extends StatelessWidget {
@@ -1146,15 +1318,15 @@ class TicketDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: Text(
           'Ticket ${ticket.id}',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -1167,9 +1339,9 @@ class TicketDetailsScreen extends StatelessWidget {
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: ModernTheme.cardShadow,
+                boxShadow: ModernTheme.getCardShadow(context),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1179,7 +1351,7 @@ class TicketDetailsScreen extends StatelessWidget {
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _getStatusColor(ticket.status).withValues(alpha: 0.1),
+                          color: _getStatusColor(ticket.status, context).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1187,7 +1359,7 @@ class TicketDetailsScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: _getStatusColor(ticket.status),
+                            color: _getStatusColor(ticket.status, context),
                           ),
                         ),
                       ),
@@ -1196,7 +1368,7 @@ class TicketDetailsScreen extends StatelessWidget {
                         'Creado: ${_formatDate(ticket.createdAt)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                       ),
                     ],
@@ -1207,14 +1379,14 @@ class TicketDetailsScreen extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: ModernTheme.textPrimary,
+                      color: context.primaryText,
                     ),
                   ),
                   SizedBox(height: 8),
                   Text(
                     ticket.description,
                     style: TextStyle(
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                       height: 1.5,
                     ),
                   ),
@@ -1231,13 +1403,13 @@ class TicketDetailsScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: ModernTheme.textPrimary,
+                  color: context.primaryText,
                 ),
               ),
               SizedBox(height: 12),
-              ...ticket.responses.map((response) => _buildResponseCard(response)),
+              ...ticket.responses.map((response) => _buildResponseCard(context, response)),
             ],
-            
+
             SizedBox(height: 16),
             
             // Add response button
@@ -1250,7 +1422,7 @@ class TicketDetailsScreen extends StatelessWidget {
                   label: Text('Responder'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ModernTheme.oasisGreen,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     padding: EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -1264,7 +1436,7 @@ class TicketDetailsScreen extends StatelessWidget {
     );
   }
   
-  Widget _buildResponseCard(TicketResponse response) {
+  Widget _buildResponseCard(BuildContext context, TicketResponse response) {
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       child: Row(
@@ -1274,14 +1446,14 @@ class TicketDetailsScreen extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: response.isFromSupport 
+              color: response.isFromSupport
                   ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
                   : ModernTheme.primaryBlue.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               response.isFromSupport ? Icons.support_agent : Icons.person,
-              color: response.isFromSupport 
+              color: response.isFromSupport
                   ? ModernTheme.oasisGreen
                   : ModernTheme.primaryBlue,
               size: 20,
@@ -1292,14 +1464,14 @@ class TicketDetailsScreen extends StatelessWidget {
             child: Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: response.isFromSupport 
+                color: response.isFromSupport
                     ? ModernTheme.oasisGreen.withValues(alpha: 0.05)
-                    : Colors.white,
+                    : Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: response.isFromSupport 
+                  color: response.isFromSupport
                       ? ModernTheme.oasisGreen.withValues(alpha: 0.2)
-                      : Colors.grey.shade300,
+                      : Theme.of(context).dividerColor,
                 ),
               ),
               child: Column(
@@ -1311,7 +1483,7 @@ class TicketDetailsScreen extends StatelessWidget {
                         response.isFromSupport ? 'Soporte Oasis' : 'Tú',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: response.isFromSupport 
+                          color: response.isFromSupport
                               ? ModernTheme.oasisGreen
                               : ModernTheme.primaryBlue,
                         ),
@@ -1321,7 +1493,7 @@ class TicketDetailsScreen extends StatelessWidget {
                         _formatDateTime(response.createdAt),
                         style: TextStyle(
                           fontSize: 12,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                       ),
                     ],
@@ -1330,7 +1502,7 @@ class TicketDetailsScreen extends StatelessWidget {
                   Text(
                     response.message,
                     style: TextStyle(
-                      color: ModernTheme.textPrimary,
+                      color: context.primaryText,
                       height: 1.4,
                     ),
                   ),
@@ -1342,8 +1514,8 @@ class TicketDetailsScreen extends StatelessWidget {
       ),
     );
   }
-  
-  Color _getStatusColor(TicketStatus status) {
+
+  Color _getStatusColor(TicketStatus status, BuildContext context) {
     switch (status) {
       case TicketStatus.open:
         return ModernTheme.warning;
@@ -1352,10 +1524,10 @@ class TicketDetailsScreen extends StatelessWidget {
       case TicketStatus.resolved:
         return ModernTheme.success;
       case TicketStatus.closed:
-        return ModernTheme.textSecondary;
+        return context.secondaryText;
     }
   }
-  
+
   String _getStatusText(TicketStatus status) {
     switch (status) {
       case TicketStatus.open:
@@ -1368,7 +1540,7 @@ class TicketDetailsScreen extends StatelessWidget {
         return 'Cerrado';
     }
   }
-  
+
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
   }

@@ -2,10 +2,15 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_storage/firebase_storage.dart'; // ✅ NUEVO: Para subir fotos
+import 'package:image_picker/image_picker.dart'; // ✅ NUEVO: Para tomar/seleccionar fotos
 import 'dart:io';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
+import '../../utils/logger.dart';
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
 
@@ -127,10 +132,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
   Future<void> _loadUserData() async {
     try {
       setState(() => _isLoading = true);
-      
-      // Por ahora usar un userId de ejemplo
-      // En producción, esto vendría del usuario autenticado
-      _userId = 'test_user_id';
+
+      // ✅ Obtener el ID del usuario autenticado desde Firebase Auth
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Usuario no autenticado'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+          Navigator.pop(context);
+        }
+        return;
+      }
+      _userId = currentUser.uid;
       
       // Cargar datos del usuario desde Firestore
       final userDoc = await _firestore.collection('users').doc(_userId).get();
@@ -161,7 +179,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         });
       }
     } catch (e) {
-      print('Error cargando datos del usuario: $e');
+      AppLogger.error('Error cargando datos del usuario: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -189,14 +207,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         if (shouldPop) Navigator.of(context).pop();
       },
       child: Scaffold(
-        backgroundColor: ModernTheme.backgroundLight,
+        backgroundColor: context.surfaceColor,
         appBar: AppBar(
           backgroundColor: ModernTheme.oasisGreen,
           elevation: 0,
           title: Text(
             'Editar Perfil',
             style: TextStyle(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -207,7 +225,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                 child: Text(
                   'Guardar',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -311,7 +329,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                         ? Icon(
                             Icons.person,
                             size: 60,
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.surface,
                           )
                         : null,
                   ),
@@ -326,11 +344,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                         decoration: BoxDecoration(
                           color: ModernTheme.primaryBlue,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
+                          border: Border.all(color: Theme.of(context).colorScheme.onPrimary, width: 2),
                         ),
                         child: Icon(
                           Icons.camera_alt,
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           size: 18,
                         ),
                       ),
@@ -342,7 +360,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
               Text(
                 'Toca para cambiar foto',
                 style: TextStyle(
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                   fontSize: 14,
                 ),
               ),
@@ -402,23 +420,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           child: Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
-                Icon(Icons.calendar_today, color: ModernTheme.textSecondary),
+                Icon(Icons.calendar_today, color: context.secondaryText),
                 SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     _birthDate.isEmpty ? 'Fecha de nacimiento' : _birthDate,
                     style: TextStyle(
-                      color: _birthDate.isEmpty ? ModernTheme.textSecondary : ModernTheme.textPrimary,
+                      color: _birthDate.isEmpty ? context.secondaryText : context.primaryText,
                       fontSize: 16,
                     ),
                   ),
                 ),
-                Icon(Icons.arrow_drop_down, color: ModernTheme.textSecondary),
+                Icon(Icons.arrow_drop_down, color: context.secondaryText),
               ],
             ),
           ),
@@ -475,20 +493,64 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
           },
         ),
         SizedBox(height: 16),
-        _buildTextFormField(
-          controller: _phoneController,
-          label: 'Número de teléfono',
-          icon: Icons.phone_outlined,
-          focusNode: _phoneFocusNode, // ✅ FocusNode configurado
-          textInputAction: TextInputAction.next, // ✅ Botón Next para ir a contacto de emergencia
-          onFieldSubmitted: (_) => _emergencyNameFocusNode.requestFocus(), // ✅ Avanza al nombre de contacto de emergencia
-          keyboardType: TextInputType.phone,
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Ingresa tu teléfono';
+        // ✅ MODIFICADO: Campo de teléfono con botón para cambiar número
+        GestureDetector(
+          onTap: () async {
+            // Abrir pantalla de cambio de número
+            final result = await Navigator.pushNamed(
+              context,
+              '/change-phone-number',
+              arguments: _phoneController.text.trim(),
+            );
+
+            // Si se cambió exitosamente, recargar datos
+            if (result == true && mounted) {
+              await _loadUserData();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Número actualizado. Recargando perfil...'),
+                  backgroundColor: ModernTheme.success,
+                ),
+              );
             }
-            return null;
           },
+          child: AbsorbPointer(
+            child: TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                labelText: 'Número de teléfono',
+                prefixIcon: Icon(Icons.phone_outlined),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.verified, color: ModernTheme.success, size: 20),
+                    SizedBox(width: 8),
+                    Icon(Icons.edit, color: ModernTheme.oasisGreen, size: 20),
+                    SizedBox(width: 12),
+                  ],
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: ModernTheme.oasisGreen, width: 2),
+                ),
+                helperText: 'Toca para cambiar tu número de teléfono',
+                helperStyle: TextStyle(
+                  color: ModernTheme.info,
+                  fontSize: 12,
+                ),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Ingresa tu teléfono';
+                }
+                return null;
+              },
+            ),
+          ),
         ),
       ],
     );
@@ -683,11 +745,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         Container(
           padding: EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset: Offset(0, 2),
               ),
@@ -741,7 +803,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         onPressed: _isLoading || !_hasChanges ? null : _saveProfile,
         style: ElevatedButton.styleFrom(
           backgroundColor: ModernTheme.oasisGreen,
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
           padding: EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -754,7 +816,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
                 width: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                 ),
               )
             : Text(
@@ -869,36 +931,90 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
     );
   }
   
-  void _pickImageFromCamera() {
-    // Simulate image picking from camera
-    setState(() {
-      _profileImagePath = '/mock/camera/image.jpg';
-      _hasChanges = true;
-    });
-    
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Foto tomada desde la cámara'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+  /// ✅ CORREGIDO: Tomar foto con la cámara real usando image_picker
+  Future<void> _pickImageFromCamera() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      setState(() {
+        _profileImagePath = image.path; // Usar ruta real del archivo
+        _hasChanges = true;
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary, size: 20),
+              SizedBox(width: 12),
+              Text('Foto tomada desde la cámara'),
+            ],
+          ),
+          backgroundColor: ModernTheme.info,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error tomando foto: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al tomar foto: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
   }
-  
-  void _pickImageFromGallery() {
-    // Simulate image picking from gallery
-    setState(() {
-      _profileImagePath = '/mock/gallery/image.jpg';
-      _hasChanges = true;
-    });
-    
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Imagen seleccionada de la galería'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+
+  /// ✅ CORREGIDO: Seleccionar imagen de galería real usando image_picker
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      setState(() {
+        _profileImagePath = image.path; // Usar ruta real del archivo
+        _hasChanges = true;
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary, size: 20),
+              SizedBox(width: 12),
+              Text('Imagen seleccionada de la galería'),
+            ],
+          ),
+          backgroundColor: ModernTheme.info,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error seleccionando imagen: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al seleccionar imagen: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
   }
   
   void _removeProfileImage() {
@@ -969,13 +1085,47 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
     return shouldDiscard ?? false;
   }
   
-  void _saveProfile() async {
+  /// ✅ CORREGIDO: Guardar perfil con subida real a Firebase Storage
+  Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
-      // Guardar datos en Firestore
+      // ✅ PASO 1: Subir foto de perfil a Firebase Storage si hay cambios
+      String? profileImageUrl = _profileImagePath;
+
+      // Verificar si _profileImagePath es un archivo local (no una URL de Firebase)
+      if (_profileImagePath.isNotEmpty &&
+          !_profileImagePath.startsWith('http://') &&
+          !_profileImagePath.startsWith('https://')) {
+        try {
+          final file = File(_profileImagePath);
+          if (await file.exists()) {
+            AppLogger.debug('🚕 OasisTaxi [DEBUG] Subiendo foto de perfil a Firebase Storage...');
+            // Crear referencia única con timestamp
+            final timestamp = DateTime.now().millisecondsSinceEpoch;
+            final storage = FirebaseStorage.instance;
+            final profilePhotoRef = storage.ref('profile_photos/$_userId/profile_$timestamp.jpg');
+
+            // Subir con metadata
+            final metadata = SettableMetadata(
+              contentType: 'image/jpeg',
+              customMetadata: {'uploadedBy': _userId!, 'type': 'profile_photo'},
+            );
+
+            final uploadTask = await profilePhotoRef.putFile(file, metadata);
+            profileImageUrl = await uploadTask.ref.getDownloadURL();
+
+            AppLogger.debug('🚕 OasisTaxi [INFO] ✅ Foto de perfil subida exitosamente: $profileImageUrl');
+          }
+        } catch (e) {
+          AppLogger.error('🚕 OasisTaxi [ERROR] Error subiendo foto de perfil: $e');
+          // No fallar el guardado si hay error en la foto
+        }
+      }
+
+      // ✅ PASO 2: Guardar datos en Firestore con URL de Firebase Storage
       await _firestore.collection('users').doc(_userId).update({
         'firstName': _nameController.text.trim(),
         'lastName': _lastNameController.text.trim(),
@@ -987,7 +1137,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         'documentNumber': _documentNumber,
         'emergencyContactName': _emergencyNameController.text.trim(),
         'emergencyContactPhone': _emergencyPhoneController.text.trim(),
-        'profileImage': _profileImagePath,
+        'profileImage': profileImageUrl, // ✅ CORREGIDO: Usar URL de Firebase Storage
         'notificationsEnabled': _notificationsEnabled,
         'smsEnabled': _smsEnabled,
         'emailPromotions': _emailPromotions,
@@ -1007,7 +1157,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
             backgroundColor: ModernTheme.success,
             action: SnackBarAction(
               label: 'Ver perfil',
-              textColor: Colors.white,
+              textColor: Theme.of(context).colorScheme.onPrimary,
               onPressed: () {
                 Navigator.pop(context);
               },
@@ -1016,8 +1166,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen>
         );
       }
     } catch (e) {
-      print('Error guardando perfil: $e');
-      
+      AppLogger.error('Error guardando perfil: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         

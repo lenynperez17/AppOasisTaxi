@@ -1,9 +1,17 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart'; // ✅ NUEVO: Para usar PreferencesProvider
+import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ Firebase Firestore
+import 'package:firebase_storage/firebase_storage.dart'; // ✅ NUEVO: Firebase Storage para imágenes
+import 'package:image_picker/image_picker.dart'; // ✅ NUEVO: Selector de imágenes
+import 'package:geocoding/geocoding.dart'; // ✅ Para búsqueda de lugares con Google
 import '../../core/theme/modern_theme.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/currency_formatter.dart';
+import '../../utils/logger.dart'; // ✅ Para logs
+import '../../providers/preferences_provider.dart'; // ✅ NUEVO: Provider de preferencias
 
 class SettingsAdminScreen extends StatefulWidget {
   const SettingsAdminScreen({super.key});
@@ -13,51 +21,47 @@ class SettingsAdminScreen extends StatefulWidget {
   _SettingsAdminScreenState createState() => _SettingsAdminScreenState();
 }
 
-class _SettingsAdminScreenState extends State<SettingsAdminScreen> 
+class _SettingsAdminScreenState extends State<SettingsAdminScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
-  
+
+  // ✅ NUEVO: Firebase instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ✅ NUEVO: Loading state
+  bool _isLoading = true;
+  bool _isSaving = false;
+
   // General settings
   bool _maintenanceMode = false;
   bool _allowNewRegistrations = true;
   bool _requireDocumentVerification = true;
   String _defaultLanguage = 'es';
   String _timezone = 'America/Lima';
-  
+  bool _darkMode = false; // ✅ NUEVO: Modo oscuro
+
   // Pricing settings
-  final TextEditingController _baseFareController = TextEditingController(text: '5.00');
-  final TextEditingController _perKmController = TextEditingController(text: '2.50');
-  final TextEditingController _perMinController = TextEditingController(text: '0.50');
-  final TextEditingController _commissionController = TextEditingController(text: '20');
-  final TextEditingController _cancellationFeeController = TextEditingController(text: '5.00');
+  final TextEditingController _baseFareController = TextEditingController();
+  final TextEditingController _perKmController = TextEditingController();
+  final TextEditingController _perMinController = TextEditingController();
+  final TextEditingController _commissionController = TextEditingController();
+  final TextEditingController _cancellationFeeController = TextEditingController();
+  final TextEditingController _withdrawalMinimumController = TextEditingController(); // ✅ NUEVO
   bool _dynamicPricing = true;
   double _surgeMultiplier = 1.5;
-  
-  // Zones settings
-  final List<Zone> _zones = [
-    Zone(name: 'Centro', surcharge: 0, restricted: false),
-    Zone(name: 'Aeropuerto', surcharge: 10, restricted: false),
-    Zone(name: 'Zona Industrial', surcharge: 5, restricted: true),
-  ];
-  
-  // Promotions settings
-  final List<Promotion> _promotions = [
-    Promotion(
-      code: 'NUEVO20',
-      discount: 20,
-      type: DiscountType.percentage,
-      active: true,
-      expiryDate: DateTime.now().add(Duration(days: 30)),
-    ),
-    Promotion(
-      code: 'TAXI10',
-      discount: 10,
-      type: DiscountType.fixed,
-      active: true,
-      expiryDate: DateTime.now().add(Duration(days: 15)),
-    ),
-  ];
-  
+
+  // ✅ NUEVO: Tarifas especiales
+  bool _nightSurchargeEnabled = true;
+  double _nightSurchargePercent = 20.0;
+  bool _weekendSurchargeEnabled = true;
+  double _weekendSurchargePercent = 15.0;
+
+  // Zones settings - ✅ AHORA DESDE FIREBASE
+  final List<Zone> _zones = [];
+
+  // Promotions settings - ✅ AHORA DESDE FIREBASE
+  final List<Promotion> _promotions = [];
+
   // Notifications settings
   bool _pushNotifications = true;
   bool _emailNotifications = true;
@@ -65,7 +69,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
   bool _notifyNewTrips = true;
   bool _notifyPayments = true;
   bool _notifyEmergencies = true;
-  
+
   // Security settings
   bool _twoFactorAuth = true;
   int _sessionTimeout = 30;
@@ -73,18 +77,19 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
   bool _requireStrongPasswords = true;
   bool _enableApiAccess = false;
   String _apiKey = 'sk_live_...';
-  
+
   // Backup settings
   bool _autoBackup = true;
   String _backupFrequency = 'daily';
   String _backupTime = '03:00';
-  
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 6, vsync: this);
+    _loadAllSettingsFromFirebase(); // ✅ IMPLEMENTADO: Carga todas las configuraciones desde Firebase
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -93,9 +98,463 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
     _perMinController.dispose();
     _commissionController.dispose();
     _cancellationFeeController.dispose();
+    _withdrawalMinimumController.dispose(); // ✅ NUEVO
     super.dispose();
   }
-  
+
+  // ✅ NUEVO: Cargar TODAS las configuraciones desde Firebase
+  Future<void> _loadAllSettingsFromFirebase() async {
+    try {
+      AppLogger.info('Cargando configuraciones desde Firebase...');
+      setState(() => _isLoading = true);
+
+      // 1. Cargar configuración general desde 'settings/app_config'
+      final settingsDoc = await _firestore.collection('settings').doc('app_config').get();
+      if (settingsDoc.exists) {
+        final data = settingsDoc.data()!;
+        setState(() {
+          _maintenanceMode = data['maintenanceMode'] ?? false;
+          _allowNewRegistrations = data['allowNewRegistrations'] ?? true;
+          _requireDocumentVerification = data['requireDocumentVerification'] ?? true;
+          _defaultLanguage = data['defaultLanguage'] ?? 'es';
+          _timezone = data['timezone'] ?? 'America/Lima';
+          _darkMode = data['darkMode'] ?? false; // ✅ NUEVO: Cargar modo oscuro
+
+          // Pricing
+          _baseFareController.text = (data['baseFare'] ?? 5.0).toString();
+          _perKmController.text = (data['perKm'] ?? 2.5).toString();
+          _perMinController.text = (data['perMin'] ?? 0.5).toString();
+          _commissionController.text = (data['commission'] ?? 20).toString();
+          _cancellationFeeController.text = (data['cancellationFee'] ?? 5.0).toString();
+          _withdrawalMinimumController.text = (data['withdrawalMinimum'] ?? 50.0).toString(); // ✅ NUEVO
+          _dynamicPricing = data['dynamicPricing'] ?? true;
+          _surgeMultiplier = (data['surgeMultiplier'] ?? 1.5).toDouble();
+
+          // ✅ NUEVO: Tarifas especiales
+          _nightSurchargeEnabled = data['nightSurchargeEnabled'] ?? true;
+          _nightSurchargePercent = (data['nightSurchargePercent'] ?? 20.0).toDouble();
+          _weekendSurchargeEnabled = data['weekendSurchargeEnabled'] ?? true;
+          _weekendSurchargePercent = (data['weekendSurchargePercent'] ?? 15.0).toDouble();
+
+          // Notifications
+          _pushNotifications = data['pushNotifications'] ?? true;
+          _emailNotifications = data['emailNotifications'] ?? true;
+          _smsNotifications = data['smsNotifications'] ?? false;
+          _notifyNewTrips = data['notifyNewTrips'] ?? true;
+          _notifyPayments = data['notifyPayments'] ?? true;
+          _notifyEmergencies = data['notifyEmergencies'] ?? true;
+
+          // Security
+          _twoFactorAuth = data['twoFactorAuth'] ?? true;
+          _sessionTimeout = data['sessionTimeout'] ?? 30;
+          _maxLoginAttempts = data['maxLoginAttempts'] ?? 5;
+          _requireStrongPasswords = data['requireStrongPasswords'] ?? true;
+          _enableApiAccess = data['enableApiAccess'] ?? false;
+          _apiKey = data['apiKey'] ?? 'sk_live_...';
+
+          // Backup
+          _autoBackup = data['autoBackup'] ?? true;
+          _backupFrequency = data['backupFrequency'] ?? 'daily';
+          _backupTime = data['backupTime'] ?? '03:00';
+        });
+        AppLogger.info('✅ Configuraciones generales cargadas');
+      } else {
+        // ✅ NUEVO: Crear documento inicial con valores por defecto
+        AppLogger.warning('⚠️ No existe documento de configuración, creando uno con valores por defecto...');
+        await _createDefaultSettings();
+      }
+
+      // 2. Cargar zonas desde 'zones' collection
+      await _loadZonesFromFirebase();
+
+      // 3. Cargar promociones desde 'promotions' collection
+      await _loadPromotionsFromFirebase();
+
+      setState(() => _isLoading = false);
+      AppLogger.info('✅ Todas las configuraciones cargadas correctamente');
+
+    } catch (e, stackTrace) {
+      AppLogger.error('Error cargando configuraciones desde Firebase', e, stackTrace);
+      setState(() => _isLoading = false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cargar configuraciones: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ NUEVO: Crear configuración por defecto si no existe
+  Future<void> _createDefaultSettings() async {
+    try {
+      await _firestore.collection('settings').doc('app_config').set({
+        // General
+        'maintenanceMode': false,
+        'allowNewRegistrations': true,
+        'requireDocumentVerification': true,
+        'defaultLanguage': 'es',
+        'timezone': 'America/Lima',
+        'darkMode': false, // ✅ NUEVO: Modo oscuro por defecto
+
+        // Pricing - Valores base preestablecidos
+        'baseFare': 5.0,
+        'perKm': 2.5,
+        'perMin': 0.5,
+        'commission': 20.0,
+        'cancellationFee': 5.0,
+        'withdrawalMinimum': 50.0, // ✅ NUEVO: Monto mínimo de retiro
+        'dynamicPricing': true,
+        'surgeMultiplier': 1.5,
+
+        // Tarifas especiales
+        'nightSurchargeEnabled': true,
+        'nightSurchargePercent': 20.0,
+        'weekendSurchargeEnabled': true,
+        'weekendSurchargePercent': 15.0,
+
+        // Notifications
+        'pushNotifications': true,
+        'emailNotifications': true,
+        'smsNotifications': false,
+        'notifyNewTrips': true,
+        'notifyPayments': true,
+        'notifyEmergencies': true,
+
+        // Security
+        'twoFactorAuth': true,
+        'sessionTimeout': 30,
+        'maxLoginAttempts': 5,
+        'requireStrongPasswords': true,
+        'enableApiAccess': false,
+        'apiKey': 'sk_live_...',
+
+        // Backup
+        'autoBackup': true,
+        'backupFrequency': 'daily',
+        'backupTime': '03:00',
+
+        // Metadata
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      AppLogger.info('✅ Configuración inicial creada en Firebase');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error creando configuración inicial', e, stackTrace);
+    }
+  }
+
+  // ✅ NUEVO: Cargar zonas desde Firebase
+  Future<void> _loadZonesFromFirebase() async {
+    try {
+      AppLogger.info('Cargando zonas desde Firebase...');
+      final zonesSnapshot = await _firestore.collection('zones').get();
+
+      _zones.clear();
+      for (var doc in zonesSnapshot.docs) {
+        final data = doc.data();
+        _zones.add(Zone(
+          id: doc.id,
+          name: data['name'] ?? 'Sin nombre',
+          surcharge: (data['surcharge'] ?? 0).toDouble(),
+          restricted: data['restricted'] ?? false,
+          latitude: data['latitude']?.toDouble(),
+          longitude: data['longitude']?.toDouble(),
+          placeId: data['placeId'],
+          address: data['address'],
+        ));
+      }
+
+      AppLogger.info('✅ ${_zones.length} zonas cargadas desde Firebase');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error cargando zonas', e, stackTrace);
+    }
+  }
+
+  // ✅ NUEVO: Cargar promociones desde Firebase
+  Future<void> _loadPromotionsFromFirebase() async {
+    try {
+      AppLogger.info('Cargando promociones desde Firebase...');
+      final promosSnapshot = await _firestore
+          .collection('promotions')
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      _promotions.clear();
+      for (var doc in promosSnapshot.docs) {
+        final data = doc.data();
+        _promotions.add(Promotion(
+          id: doc.id,
+          code: data['code'] ?? 'SIN CÓDIGO',
+          discount: (data['discount'] ?? 0).toDouble(),
+          type: data['type'] == 'percentage' ? DiscountType.percentage : DiscountType.fixed,
+          active: data['isActive'] ?? false,
+          expiryDate: (data['validUntil'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          imageUrl: data['imageUrl'], // ✅ NUEVO
+          targetUserType: data['targetUserType'] ?? 'both', // ✅ NUEVO
+        ));
+      }
+
+      AppLogger.info('✅ ${_promotions.length} promociones cargadas desde Firebase');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error cargando promociones', e, stackTrace);
+    }
+  }
+
+  // ✅ NUEVO: Guardar REAL a Firebase
+  Future<void> _saveSettings() async {
+    if (_isSaving) return;
+
+    try {
+      setState(() => _isSaving = true);
+      AppLogger.info('Guardando configuraciones en Firebase...');
+
+      // Validar campos numéricos
+      final baseFare = double.tryParse(_baseFareController.text);
+      final perKm = double.tryParse(_perKmController.text);
+      final perMin = double.tryParse(_perMinController.text);
+      final commission = double.tryParse(_commissionController.text);
+      final cancellationFee = double.tryParse(_cancellationFeeController.text);
+      final withdrawalMinimum = double.tryParse(_withdrawalMinimumController.text); // ✅ NUEVO
+
+      if (baseFare == null || perKm == null || perMin == null || commission == null || cancellationFee == null || withdrawalMinimum == null) {
+        throw Exception('Valores de tarifas inválidos');
+      }
+
+      // Guardar en Firebase
+      await _firestore.collection('settings').doc('app_config').set({
+        // General
+        'maintenanceMode': _maintenanceMode,
+        'allowNewRegistrations': _allowNewRegistrations,
+        'requireDocumentVerification': _requireDocumentVerification,
+        'defaultLanguage': _defaultLanguage,
+        'timezone': _timezone,
+        'darkMode': _darkMode, // ✅ NUEVO: Guardar modo oscuro
+
+        // Pricing
+        'baseFare': baseFare,
+        'perKm': perKm,
+        'perMin': perMin,
+        'commission': commission,
+        'cancellationFee': cancellationFee,
+        'withdrawalMinimum': withdrawalMinimum, // ✅ NUEVO
+        'dynamicPricing': _dynamicPricing,
+        'surgeMultiplier': _surgeMultiplier,
+
+        // ✅ NUEVO: Tarifas especiales
+        'nightSurchargeEnabled': _nightSurchargeEnabled,
+        'nightSurchargePercent': _nightSurchargePercent,
+        'weekendSurchargeEnabled': _weekendSurchargeEnabled,
+        'weekendSurchargePercent': _weekendSurchargePercent,
+
+        // Notifications
+        'pushNotifications': _pushNotifications,
+        'emailNotifications': _emailNotifications,
+        'smsNotifications': _smsNotifications,
+        'notifyNewTrips': _notifyNewTrips,
+        'notifyPayments': _notifyPayments,
+        'notifyEmergencies': _notifyEmergencies,
+
+        // Security
+        'twoFactorAuth': _twoFactorAuth,
+        'sessionTimeout': _sessionTimeout,
+        'maxLoginAttempts': _maxLoginAttempts,
+        'requireStrongPasswords': _requireStrongPasswords,
+        'enableApiAccess': _enableApiAccess,
+        'apiKey': _apiKey,
+
+        // Backup
+        'autoBackup': _autoBackup,
+        'backupFrequency': _backupFrequency,
+        'backupTime': _backupTime,
+
+        // Metadata
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      AppLogger.info('✅ Configuraciones guardadas en Firebase');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Configuración guardada exitosamente en Firebase'),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      }
+
+    } catch (e, stackTrace) {
+      AppLogger.error('Error guardando configuraciones', e, stackTrace);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error al guardar: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  // ✅ NUEVO: Guardar zona en Firebase
+  Future<void> _saveZone(Zone zone) async {
+    try {
+      final zoneData = {
+        'name': zone.name,
+        'surcharge': zone.surcharge,
+        'restricted': zone.restricted,
+        'latitude': zone.latitude,
+        'longitude': zone.longitude,
+        'placeId': zone.placeId,
+        'address': zone.address,
+      };
+
+      if (zone.id == null) {
+        // Crear nueva zona
+        final docRef = await _firestore.collection('zones').add({
+          ...zoneData,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        zone.id = docRef.id;
+      } else {
+        // Actualizar zona existente
+        await _firestore.collection('zones').doc(zone.id).update({
+          ...zoneData,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      AppLogger.info('✅ Zona guardada: ${zone.name}');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error guardando zona', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // ✅ NUEVO: Eliminar zona de Firebase
+  Future<void> _deleteZone(Zone zone) async {
+    try {
+      if (zone.id != null) {
+        await _firestore.collection('zones').doc(zone.id).delete();
+        AppLogger.info('✅ Zona eliminada: ${zone.name}');
+      }
+    } catch (e, stackTrace) {
+      AppLogger.error('Error eliminando zona', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // ✅ NUEVO: Guardar promoción en Firebase
+  Future<void> _savePromotion(Promotion promo) async {
+    try {
+      final data = {
+        'code': promo.code,
+        'discount': promo.discount,
+        'type': promo.type == DiscountType.percentage ? 'percentage' : 'fixed',
+        'isActive': promo.active,
+        'validUntil': Timestamp.fromDate(promo.expiryDate),
+        'imageUrl': promo.imageUrl, // ✅ NUEVO
+        'targetUserType': promo.targetUserType, // ✅ NUEVO
+      };
+
+      if (promo.id == null) {
+        // Crear nueva promoción
+        final docRef = await _firestore.collection('promotions').add({
+          ...data,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        promo.id = docRef.id;
+      } else {
+        // Actualizar promoción existente
+        await _firestore.collection('promotions').doc(promo.id).update({
+          ...data,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      AppLogger.info('✅ Promoción guardada: ${promo.code}');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error guardando promoción', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // ✅ NUEVO: Eliminar promoción de Firebase
+  Future<void> _deletePromotion(Promotion promo) async {
+    try {
+      if (promo.id != null) {
+        // Eliminar imagen de Storage si existe
+        if (promo.imageUrl != null && promo.imageUrl!.isNotEmpty) {
+          try {
+            final ref = FirebaseStorage.instance.refFromURL(promo.imageUrl!);
+            await ref.delete();
+            AppLogger.info('🗑️ Imagen eliminada de Storage');
+          } catch (e) {
+            AppLogger.warning('No se pudo eliminar imagen: $e');
+          }
+        }
+
+        // Eliminar documento de Firestore
+        await _firestore.collection('promotions').doc(promo.id).delete();
+        AppLogger.info('✅ Promoción eliminada: ${promo.code}');
+      }
+    } catch (e, stackTrace) {
+      AppLogger.error('Error eliminando promoción', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // ✅ NUEVO: Subir imagen de promoción a Firebase Storage
+  Future<String?> _uploadPromotionImage(String promotionId, File imageFile) async {
+    try {
+      AppLogger.info('📤 Subiendo imagen de promoción $promotionId...');
+
+      // Crear referencia en Storage: promotions/{promotionId}/image_{timestamp}.jpg
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('promotions')
+          .child(promotionId)
+          .child('image_$timestamp.jpg');
+
+      // Subir archivo con metadata
+      final metadata = SettableMetadata(
+        contentType: 'image/jpeg',
+        customMetadata: {
+          'uploadedBy': 'admin',
+          'uploadedAt': DateTime.now().toIso8601String(),
+        },
+      );
+
+      final uploadTask = storageRef.putFile(imageFile, metadata);
+
+      // Mostrar progreso (opcional)
+      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+        final progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        AppLogger.info('📊 Progreso de subida: ${progress.toStringAsFixed(1)}%');
+      });
+
+      // Esperar a que termine la subida
+      final snapshot = await uploadTask;
+
+      // Obtener URL de descarga
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      AppLogger.info('✅ Imagen subida exitosamente: $downloadUrl');
+      return downloadUrl;
+    } catch (e, stackTrace) {
+      AppLogger.error('Error subiendo imagen', e, stackTrace);
+      rethrow;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -105,22 +564,16 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
         elevation: 0,
         title: Text(
           'Configuración del Sistema',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
-        actions: [
-          TextButton.icon(
-            onPressed: _saveSettings,
-            icon: Icon(Icons.save, color: ModernTheme.oasisGreen),
-            label: Text(
-              'Guardar',
-              style: TextStyle(color: ModernTheme.oasisGreen),
-            ),
-          ),
-        ],
+        // ✅ ELIMINADO: Botón Guardar que generaba errores
+        // Cada sección tiene su propio botón de guardado individual
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
-          indicatorColor: ModernTheme.oasisGreen,
+          indicatorColor: Theme.of(context).colorScheme.onPrimary,
+          labelColor: Theme.of(context).colorScheme.onPrimary,
+          unselectedLabelColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
           tabs: [
             Tab(text: 'General'),
             Tab(text: 'Tarifas'),
@@ -131,20 +584,33 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildGeneralSettings(),
-          _buildPricingSettings(),
-          _buildZonesSettings(),
-          _buildPromotionsSettings(),
-          _buildNotificationSettings(),
-          _buildSecuritySettings(),
-        ],
-      ),
+      body: _isLoading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(ModernTheme.oasisGreen),
+                  ),
+                  SizedBox(height: 16),
+                  Text('Cargando configuraciones desde Firebase...'),
+                ],
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildGeneralSettings(),
+                _buildPricingSettings(),
+                _buildZonesSettings(),
+                _buildPromotionsSettings(),
+                _buildNotificationSettings(),
+                _buildSecuritySettings(),
+              ],
+            ),
     );
   }
-  
+
   Widget _buildGeneralSettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -199,8 +665,33 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               onChanged: (value) => setState(() => _requireDocumentVerification = value),
               thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
             ),
+            Divider(),
+            // ✅ NUEVO: Toggle de Dark Mode con PreferencesProvider
+            Consumer<PreferencesProvider>(
+              builder: (context, prefsProvider, _) => SwitchListTile(
+                secondary: Icon(
+                  prefsProvider.darkMode ? Icons.dark_mode : Icons.light_mode,
+                  color: prefsProvider.darkMode ? Colors.deepPurple : Colors.amber,
+                ),
+                title: Text('Modo Oscuro'),
+                subtitle: Text(prefsProvider.darkMode
+                    ? 'Tema oscuro activado'
+                    : 'Tema claro activado'),
+                value: prefsProvider.darkMode,
+                onChanged: (value) async {
+                  await prefsProvider.setDarkMode(value);
+                  // También guardar en Firebase
+                  await _firestore.collection('settings').doc('app_config').update({
+                    'darkMode': value,
+                  });
+                },
+                thumbColor: WidgetStateProperty.all(
+                  prefsProvider.darkMode ? Colors.deepPurple : ModernTheme.oasisGreen
+                ),
+              ),
+            ),
           ]),
-          
+
           SizedBox(height: 20),
           _buildSectionTitle('Regional'),
           _buildSettingCard([
@@ -218,7 +709,35 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               onTap: _showTimezoneDialog,
             ),
           ]),
-          
+
+          SizedBox(height: 20),
+
+          // ✅ NUEVO: Botón para guardar configuración general
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: _isSaving ? null : _saveSettings,
+              icon: _isSaving
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.onPrimary),
+                      ),
+                    )
+                  : Icon(Icons.save),
+              label: Text(_isSaving ? 'Guardando...' : 'Guardar Configuración General'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ModernTheme.oasisGreen,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+
           SizedBox(height: 20),
           _buildSectionTitle('Respaldo de Datos'),
           _buildSettingCard([
@@ -250,7 +769,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildPricingSettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -276,7 +795,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               ),
             ),
           ]),
-          
+
           SizedBox(height: 20),
           _buildSectionTitle('Precios Dinámicos'),
           _buildSettingCard([
@@ -325,45 +844,136 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               ),
             ],
           ]),
-          
+
           SizedBox(height: 20),
           _buildSectionTitle('Horarios Especiales'),
           _buildSettingCard([
-            ListTile(
-              leading: Icon(Icons.nightlight, color: ModernTheme.primaryBlue),
+            // ✅ CORREGIDO: Switch funcional para tarifa nocturna
+            SwitchListTile(
+              secondary: Icon(Icons.nightlight, color: ModernTheme.primaryBlue),
               title: Text('Tarifa Nocturna'),
-              subtitle: Text('22:00 - 06:00 (+20%)'),
-              trailing: Switch(
-                value: true,
-                onChanged: (value) {},
-                thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
-              ),
+              subtitle: Text('22:00 - 06:00 (+${_nightSurchargePercent.toStringAsFixed(0)}%)'),
+              value: _nightSurchargeEnabled,
+              onChanged: (value) => setState(() => _nightSurchargeEnabled = value),
+              thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
             ),
+            if (_nightSurchargeEnabled) ...[
+              Divider(),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Porcentaje de Recargo Nocturno',
+                      style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                    ),
+                    SizedBox(height: 8),
+                    Slider(
+                      value: _nightSurchargePercent,
+                      min: 0,
+                      max: 50,
+                      divisions: 10,
+                      label: '${_nightSurchargePercent.toStringAsFixed(0)}%',
+                      activeColor: ModernTheme.primaryBlue,
+                      onChanged: (value) {
+                        setState(() => _nightSurchargePercent = value);
+                      },
+                    ),
+                    Center(
+                      child: Text(
+                        '+${_nightSurchargePercent.toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: ModernTheme.primaryBlue,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Divider(),
-            ListTile(
-              leading: Icon(Icons.weekend, color: Colors.orange),
+            // ✅ CORREGIDO: Switch funcional para tarifa fin de semana
+            SwitchListTile(
+              secondary: Icon(Icons.weekend, color: Colors.orange),
               title: Text('Tarifa Fin de Semana'),
-              subtitle: Text('Sábado y Domingo (+15%)'),
-              trailing: Switch(
-                value: true,
-                onChanged: (value) {},
-                thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
-              ),
+              subtitle: Text('Sábado y Domingo (+${_weekendSurchargePercent.toStringAsFixed(0)}%)'),
+              value: _weekendSurchargeEnabled,
+              onChanged: (value) => setState(() => _weekendSurchargeEnabled = value),
+              thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
             ),
+            if (_weekendSurchargeEnabled) ...[
+              Divider(),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Porcentaje de Recargo Fin de Semana',
+                      style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                    ),
+                    SizedBox(height: 8),
+                    Slider(
+                      value: _weekendSurchargePercent,
+                      min: 0,
+                      max: 50,
+                      divisions: 10,
+                      label: '${_weekendSurchargePercent.toStringAsFixed(0)}%',
+                      activeColor: Colors.orange,
+                      onChanged: (value) {
+                        setState(() => _weekendSurchargePercent = value);
+                      },
+                    ),
+                    Center(
+                      child: Text(
+                        '+${_weekendSurchargePercent.toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ]),
         ],
       ),
     );
   }
-  
+
   Widget _buildZonesSettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('Zonas Especiales'),
-          ..._zones.map((zone) => _buildZoneCard(zone)),
+          _buildSectionTitle('Zonas Especiales (${_zones.length})'),
+          if (_zones.isEmpty)
+            Container(
+              padding: EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: ModernTheme.getCardShadow(context),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.location_off, size: 48, color: ModernTheme.textSecondary),
+                    SizedBox(height: 16),
+                    Text('No hay zonas configuradas'),
+                  ],
+                ),
+              ),
+            )
+          else
+            ..._zones.map((zone) => _buildZoneCard(zone)),
           SizedBox(height: 16),
           Center(
             child: ElevatedButton.icon(
@@ -372,7 +982,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               label: Text('Agregar Zona'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: ModernTheme.oasisGreen,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -384,27 +994,40 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildZoneCard(Zone zone) {
+    final TextEditingController nameController = TextEditingController(text: zone.name);
+    final TextEditingController surchargeController = TextEditingController(text: zone.surcharge.toString());
+    final TextEditingController locationController = TextEditingController(
+      text: zone.address ?? (zone.latitude != null ? 'Lat: ${zone.latitude}, Lng: ${zone.longitude}' : ''),
+    );
+
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ExpansionTile(
         title: Text(zone.name),
         subtitle: Text(
-          zone.restricted ? 'Zona Restringida' : 'Recargo: ${zone.surcharge.toCurrency()}',
+          zone.restricted
+            ? 'Zona Restringida'
+            : zone.address != null
+              ? '${zone.address} - Recargo: ${zone.surcharge.toCurrency()}'
+              : 'Recargo: ${zone.surcharge.toCurrency()}',
           style: TextStyle(
             color: zone.restricted ? ModernTheme.error : ModernTheme.textSecondary,
+            fontSize: 12,
           ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         leading: Container(
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: zone.restricted 
+            color: zone.restricted
                 ? ModernTheme.error.withValues(alpha: 0.1)
                 : ModernTheme.oasisGreen.withValues(alpha: 0.1),
             shape: BoxShape.circle,
@@ -422,17 +1045,140 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
           Padding(
             padding: EdgeInsets.all(16),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Campo: Nombre de la zona
                 TextField(
                   decoration: InputDecoration(
                     labelText: 'Nombre de la Zona',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
+                    prefixIcon: Icon(Icons.label, color: ModernTheme.oasisGreen),
                   ),
-                  controller: TextEditingController(text: zone.name),
+                  controller: nameController,
+                  onChanged: (value) => zone.name = value,
                 ),
                 SizedBox(height: 16),
+
+                // ✅ NUEVO: Campo de búsqueda de ubicación con Google
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Buscar Ubicación',
+                    hintText: 'Ej: Miraflores, Lima',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    prefixIcon: Icon(Icons.search, color: ModernTheme.primaryBlue),
+                    suffixIcon: locationController.text.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.clear),
+                            onPressed: () {
+                              locationController.clear();
+                              zone.latitude = null;
+                              zone.longitude = null;
+                              zone.address = null;
+                              zone.placeId = null;
+                            },
+                          )
+                        : null,
+                  ),
+                  controller: locationController,
+                  onSubmitted: (value) async {
+                    if (value.trim().isEmpty) return;
+
+                    try {
+                      // Buscar ubicación con geocoding
+                      final locations = await locationFromAddress(value);
+
+                      if (locations.isNotEmpty) {
+                        final location = locations.first;
+
+                        // Obtener dirección formateada
+                        final placemarks = await placemarkFromCoordinates(
+                          location.latitude,
+                          location.longitude,
+                        );
+
+                        if (placemarks.isNotEmpty) {
+                          final placemark = placemarks.first;
+                          final address = [
+                            placemark.street,
+                            placemark.locality,
+                            placemark.administrativeArea,
+                            placemark.country,
+                          ].where((e) => e != null && e.isNotEmpty).join(', ');
+
+                          setState(() {
+                            zone.latitude = location.latitude;
+                            zone.longitude = location.longitude;
+                            zone.address = address;
+                            locationController.text = address;
+                          });
+
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('✅ Ubicación encontrada: $address'),
+                                backgroundColor: ModernTheme.success,
+                              ),
+                            );
+                          }
+                        }
+                      } else {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('⚠️ No se encontró la ubicación'),
+                              backgroundColor: ModernTheme.warning,
+                            ),
+                          );
+                        }
+                      }
+                    } catch (e) {
+                      AppLogger.error('Error buscando ubicación', e, StackTrace.current);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('❌ Error buscando ubicación: $e'),
+                            backgroundColor: ModernTheme.error,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                ),
+
+                // Mostrar coordenadas si existen
+                if (zone.latitude != null && zone.longitude != null) ...[
+                  SizedBox(height: 8),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: ModernTheme.success, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Coordenadas: ${zone.latitude!.toStringAsFixed(6)}, ${zone.longitude!.toStringAsFixed(6)}',
+                            style: TextStyle(
+                              color: ModernTheme.textPrimary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                SizedBox(height: 16),
+
+                // Campo: Recargo
                 TextField(
                   decoration: InputDecoration(
                     labelText: 'Recargo (${AppConstants.currencySymbol})',
@@ -440,19 +1186,74 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                     prefixText: '${AppConstants.currencySymbol} ',
+                    prefixIcon: Icon(Icons.attach_money, color: ModernTheme.primaryOrange),
                   ),
-                  controller: TextEditingController(text: zone.surcharge.toString()),
+                  controller: surchargeController,
                   keyboardType: TextInputType.number,
+                  onChanged: (value) => zone.surcharge = double.tryParse(value) ?? 0,
                 ),
                 SizedBox(height: 16),
+
+                // Switch: Zona restringida
                 SwitchListTile(
                   title: Text('Zona Restringida'),
-                  subtitle: Text('Solo conductores autorizados'),
+                  subtitle: Text('Solo conductores autorizados pueden operar aquí'),
                   value: zone.restricted,
                   onChanged: (value) {
                     setState(() => zone.restricted = value);
                   },
                   thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
+                ),
+                SizedBox(height: 16),
+
+                // Botón: Guardar zona
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      // Validaciones
+                      if (zone.name.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('⚠️ El nombre de la zona no puede estar vacío'),
+                            backgroundColor: ModernTheme.warning,
+                          ),
+                        );
+                        return;
+                      }
+
+                      try {
+                        await _saveZone(zone);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('✅ Zona guardada exitosamente en Firebase'),
+                              backgroundColor: ModernTheme.success,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('❌ Error al guardar: $e'),
+                              backgroundColor: ModernTheme.error,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: Icon(Icons.save),
+                    label: Text('Guardar Zona en Firebase'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ModernTheme.oasisGreen,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -461,15 +1262,34 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildPromotionsSettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('Promociones Activas'),
-          ..._promotions.map((promo) => _buildPromotionCard(promo)),
+          _buildSectionTitle('Promociones Activas (${_promotions.length})'),
+          if (_promotions.isEmpty)
+            Container(
+              padding: EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: ModernTheme.getCardShadow(context),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.discount, size: 48, color: ModernTheme.textSecondary),
+                    SizedBox(height: 16),
+                    Text('No hay promociones activas'),
+                  ],
+                ),
+              ),
+            )
+          else
+            ..._promotions.map((promo) => _buildPromotionCard(promo)),
           SizedBox(height: 16),
           Center(
             child: ElevatedButton.icon(
@@ -478,7 +1298,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               label: Text('Crear Promoción'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: ModernTheme.oasisGreen,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -490,15 +1310,15 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildPromotionCard(Promotion promo) {
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -532,8 +1352,14 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               Spacer(),
               Switch(
                 value: promo.active,
-                onChanged: (value) {
+                onChanged: (value) async {
                   setState(() => promo.active = value);
+                  try {
+                    await _savePromotion(promo);
+                  } catch (e) {
+                    // Revertir
+                    setState(() => promo.active = !value);
+                  }
                 },
                 thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
               ),
@@ -576,7 +1402,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildNotificationSettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -612,7 +1438,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               secondary: Icon(Icons.sms, color: Colors.purple),
             ),
           ]),
-          
+
           SizedBox(height: 20),
           _buildSectionTitle('Tipos de Notificaciones'),
           _buildSettingCard([
@@ -644,7 +1470,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildSecuritySettings() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(16),
@@ -722,7 +1548,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
               thumbColor: WidgetStateProperty.all(ModernTheme.oasisGreen),
             ),
           ]),
-          
+
           SizedBox(height: 20),
           _buildSectionTitle('API y Acceso Externo'),
           _buildSettingCard([
@@ -760,7 +1586,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: EdgeInsets.only(bottom: 12),
@@ -774,18 +1600,18 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   Widget _buildSettingCard(List<Widget> children) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Column(children: children),
     );
   }
-  
+
   Widget _buildPriceInput(String label, TextEditingController controller, String suffix) {
     return TextField(
       controller: controller,
@@ -802,7 +1628,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ],
     );
   }
-  
+
   String _getBackupFrequencyText() {
     switch (_backupFrequency) {
       case 'daily':
@@ -815,7 +1641,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
         return 'Diario';
     }
   }
-  
+
   void _showLanguageDialog() {
     showDialog(
       context: context,
@@ -859,7 +1685,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   void _showTimezoneDialog() {
     showDialog(
       context: context,
@@ -903,7 +1729,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   void _showBackupFrequencyDialog() {
     showDialog(
       context: context,
@@ -962,7 +1788,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   void _showTimePickerDialog() async {
     final time = await showTimePicker(
       context: context,
@@ -974,19 +1800,59 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       });
     }
   }
-  
+
   void _addZone() {
     setState(() {
       _zones.add(Zone(name: 'Nueva Zona', surcharge: 0, restricted: false));
     });
   }
-  
-  void _removeZone(Zone zone) {
-    setState(() {
-      _zones.remove(zone);
-    });
+
+  Future<void> _removeZone(Zone zone) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Confirmar Eliminación'),
+        content: Text('¿Eliminar la zona "${zone.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: ModernTheme.error),
+            child: Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await _deleteZone(zone);
+        setState(() => _zones.remove(zone));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Zona eliminada'),
+              backgroundColor: ModernTheme.success,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+      }
+    }
   }
-  
+
   void _addPromotion() {
     setState(() {
       _promotions.add(
@@ -1000,17 +1866,702 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       );
     });
   }
-  
-  void _editPromotion(Promotion promo) {
-    // Show edit dialog
+
+  /// ✅ IMPLEMENTADO: Diálogo profesional de edición de promociones
+  Future<void> _editPromotion(Promotion promo) async {
+    final TextEditingController codeController = TextEditingController(text: promo.code);
+    final TextEditingController discountController = TextEditingController(text: promo.discount.toString());
+    DiscountType selectedType = promo.type;
+    bool isActive = promo.active;
+    DateTime selectedDate = promo.expiryDate;
+    File? selectedImage; // ✅ NUEVO: Imagen seleccionada
+    String selectedUserType = promo.targetUserType; // ✅ NUEVO: Tipo de usuario
+    final ImagePicker picker = ImagePicker(); // ✅ NUEVO: Selector de imágenes
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.edit, color: ModernTheme.oasisGreen),
+              SizedBox(width: 12),
+              Text(
+                'Editar Promoción',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Campo: Código de promoción
+                  Text(
+                    'Código de Promoción',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  TextField(
+                    controller: codeController,
+                    decoration: InputDecoration(
+                      hintText: 'Ej: VERANO2025',
+                      prefixIcon: Icon(Icons.confirmation_number, color: ModernTheme.oasisGreen),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: ModernTheme.oasisGreen, width: 2),
+                      ),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9]')),
+                      LengthLimitingTextInputFormatter(20),
+                    ],
+                  ),
+                  SizedBox(height: 20),
+
+                  // Campo: Descuento
+                  Text(
+                    'Descuento',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  TextField(
+                    controller: discountController,
+                    decoration: InputDecoration(
+                      hintText: selectedType == DiscountType.percentage ? 'Ej: 20' : 'Ej: 10.00',
+                      prefixIcon: Icon(
+                        selectedType == DiscountType.percentage ? Icons.percent : Icons.attach_money,
+                        color: ModernTheme.oasisGreen,
+                      ),
+                      suffixText: selectedType == DiscountType.percentage ? '%' : 'S/',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: ModernTheme.oasisGreen, width: 2),
+                      ),
+                    ),
+                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                    ],
+                  ),
+                  SizedBox(height: 20),
+
+                  // Selector: Tipo de descuento
+                  Text(
+                    'Tipo de Descuento',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).dividerColor),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        RadioListTile<DiscountType>(
+                          title: Text('Porcentaje (%)'),
+                          subtitle: Text('Ej: 20% de descuento'),
+                          value: DiscountType.percentage,
+                          groupValue: selectedType,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              selectedType = value!;
+                            });
+                          },
+                        ),
+                        Divider(height: 1),
+                        RadioListTile<DiscountType>(
+                          title: Text('Monto Fijo (S/)'),
+                          subtitle: Text('Ej: S/ 10 de descuento'),
+                          value: DiscountType.fixed,
+                          groupValue: selectedType,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              selectedType = value!;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // Switch: Estado activo/inactivo
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isActive ? ModernTheme.oasisGreen.withValues(alpha: 0.1) : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isActive ? ModernTheme.oasisGreen : Theme.of(context).dividerColor,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isActive ? Icons.check_circle : Icons.cancel,
+                          color: isActive ? ModernTheme.success : ModernTheme.textSecondary,
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Estado de la Promoción',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                isActive ? 'Activa - Visible para usuarios' : 'Inactiva - No visible',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: ModernTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: isActive,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              isActive = value;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // ✅ NUEVO: Selector de tipo de usuario
+                  Text(
+                    'Tipo de Usuario',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).dividerColor),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        RadioListTile<String>(
+                          title: Text('Conductor'),
+                          subtitle: Text('Solo para conductores'),
+                          value: 'driver',
+                          groupValue: selectedUserType,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              selectedUserType = value!;
+                            });
+                          },
+                        ),
+                        Divider(height: 1),
+                        RadioListTile<String>(
+                          title: Text('Pasajero'),
+                          subtitle: Text('Solo para pasajeros'),
+                          value: 'passenger',
+                          groupValue: selectedUserType,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              selectedUserType = value!;
+                            });
+                          },
+                        ),
+                        Divider(height: 1),
+                        RadioListTile<String>(
+                          title: Text('Ambos'),
+                          subtitle: Text('Para conductores y pasajeros'),
+                          value: 'both',
+                          groupValue: selectedUserType,
+                          activeColor: ModernTheme.oasisGreen,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              selectedUserType = value!;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // ✅ NUEVO: Selector de imagen
+                  Text(
+                    'Imagen de Promoción',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+
+                  // Preview de imagen existente o seleccionada
+                  if (selectedImage != null || (promo.imageUrl != null && promo.imageUrl!.isNotEmpty))
+                    Container(
+                      height: 200,
+                      margin: EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Theme.of(context).dividerColor),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: selectedImage != null
+                            ? Image.file(selectedImage!, fit: BoxFit.cover)
+                            : Image.network(
+                                promo.imageUrl!,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Center(
+                                    child: CircularProgressIndicator(
+                                      value: loadingProgress.expectedTotalBytes != null
+                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                          : null,
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.error_outline, size: 48, color: ModernTheme.error),
+                                        SizedBox(height: 8),
+                                        Text('Error cargando imagen'),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ),
+
+                  // Botones de selección de imagen
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final XFile? image = await picker.pickImage(
+                                source: ImageSource.gallery,
+                                maxWidth: 1920,
+                                maxHeight: 1080,
+                                imageQuality: 85,
+                              );
+                              if (image != null) {
+                                setDialogState(() {
+                                  selectedImage = File(image.path);
+                                });
+                              }
+                            } catch (e) {
+                              AppLogger.error('Error seleccionando imagen', e, StackTrace.current);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error al seleccionar imagen: $e'),
+                                  backgroundColor: ModernTheme.error,
+                                ),
+                              );
+                            }
+                          },
+                          icon: Icon(Icons.photo_library),
+                          label: Text('Galería'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: ModernTheme.oasisGreen,
+                            side: BorderSide(color: ModernTheme.oasisGreen),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final XFile? image = await picker.pickImage(
+                                source: ImageSource.camera,
+                                maxWidth: 1920,
+                                maxHeight: 1080,
+                                imageQuality: 85,
+                              );
+                              if (image != null) {
+                                setDialogState(() {
+                                  selectedImage = File(image.path);
+                                });
+                              }
+                            } catch (e) {
+                              AppLogger.error('Error capturando imagen', e, StackTrace.current);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error al capturar imagen: $e'),
+                                  backgroundColor: ModernTheme.error,
+                                ),
+                              );
+                            }
+                          },
+                          icon: Icon(Icons.camera_alt),
+                          label: Text('Cámara'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: ModernTheme.oasisGreen,
+                            side: BorderSide(color: ModernTheme.oasisGreen),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // Botón para remover imagen
+                  if (selectedImage != null || (promo.imageUrl != null && promo.imageUrl!.isNotEmpty))
+                    Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: TextButton.icon(
+                        onPressed: () {
+                          setDialogState(() {
+                            selectedImage = null;
+                            // Si había imagen en Firebase, la marcaremos para eliminar
+                          });
+                        },
+                        icon: Icon(Icons.delete_outline, color: ModernTheme.error),
+                        label: Text('Quitar Imagen', style: TextStyle(color: ModernTheme.error)),
+                      ),
+                    ),
+
+                  SizedBox(height: 20),
+
+                  // Selector: Fecha de expiración
+                  Text(
+                    'Fecha de Expiración',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: ModernTheme.textPrimary,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  InkWell(
+                    onTap: () async {
+                      final DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(Duration(days: 365)),
+                        builder: (context, child) {
+                          return Theme(
+                            data: Theme.of(context).copyWith(
+                              colorScheme: ColorScheme.light(
+                                primary: ModernTheme.oasisGreen,
+                                onPrimary: Theme.of(context).colorScheme.onPrimary,
+                                onSurface: ModernTheme.textPrimary,
+                              ),
+                            ),
+                            child: child!,
+                          );
+                        },
+                      );
+                      if (picked != null) {
+                        setDialogState(() {
+                          selectedDate = picked;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Theme.of(context).dividerColor),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.calendar_today, color: ModernTheme.oasisGreen),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  'Toca para cambiar',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: ModernTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_drop_down, color: ModernTheme.textSecondary),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: ModernTheme.textSecondary),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Validaciones
+                if (codeController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('⚠️ El código no puede estar vacío'),
+                      backgroundColor: ModernTheme.warning,
+                    ),
+                  );
+                  return;
+                }
+
+                final discount = double.tryParse(discountController.text);
+                if (discount == null || discount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('⚠️ El descuento debe ser mayor a 0'),
+                      backgroundColor: ModernTheme.warning,
+                    ),
+                  );
+                  return;
+                }
+
+                if (selectedType == DiscountType.percentage && discount > 100) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('⚠️ El porcentaje no puede ser mayor a 100%'),
+                      backgroundColor: ModernTheme.warning,
+                    ),
+                  );
+                  return;
+                }
+
+                // Retornar datos editados
+                Navigator.pop(context, {
+                  'code': codeController.text.trim().toUpperCase(),
+                  'discount': discount,
+                  'type': selectedType,
+                  'active': isActive,
+                  'expiryDate': selectedDate,
+                  'targetUserType': selectedUserType, // ✅ NUEVO
+                  'selectedImage': selectedImage, // ✅ NUEVO
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ModernTheme.oasisGreen,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.save, size: 18),
+                  SizedBox(width: 8),
+                  Text('Guardar Cambios'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Si el usuario confirmó la edición, actualizar la promoción
+    if (result != null) {
+      try {
+        setState(() => _isSaving = true);
+
+        String? imageUrl = promo.imageUrl; // Mantener URL existente por defecto
+
+        // ✅ NUEVO: Si hay una nueva imagen seleccionada, subirla a Firebase Storage
+        final File? selectedImage = result['selectedImage'];
+        if (selectedImage != null && promo.id != null) {
+          AppLogger.info('📤 Subiendo nueva imagen de promoción...');
+
+          // Eliminar imagen anterior si existe
+          if (promo.imageUrl != null && promo.imageUrl!.isNotEmpty) {
+            try {
+              final oldRef = FirebaseStorage.instance.refFromURL(promo.imageUrl!);
+              await oldRef.delete();
+              AppLogger.info('🗑️ Imagen anterior eliminada de Storage');
+            } catch (e) {
+              AppLogger.warning('No se pudo eliminar imagen anterior: $e');
+            }
+          }
+
+          // Subir nueva imagen
+          imageUrl = await _uploadPromotionImage(promo.id!, selectedImage);
+          AppLogger.info('✅ Nueva imagen subida: $imageUrl');
+        }
+
+        // Actualizar promoción en Firebase
+        if (promo.id != null) {
+          await _firestore.collection('promotions').doc(promo.id).update({
+            'code': result['code'],
+            'discount': result['discount'],
+            'type': result['type'] == DiscountType.percentage ? 'percentage' : 'fixed',
+            'isActive': result['active'],
+            'validUntil': Timestamp.fromDate(result['expiryDate']),
+            'targetUserType': result['targetUserType'], // ✅ NUEVO
+            'imageUrl': imageUrl, // ✅ NUEVO
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          // Actualizar en la lista local
+          setState(() {
+            final index = _promotions.indexOf(promo);
+            if (index != -1) {
+              _promotions[index] = Promotion(
+                id: promo.id,
+                code: result['code'],
+                discount: result['discount'],
+                type: result['type'],
+                active: result['active'],
+                expiryDate: result['expiryDate'],
+                targetUserType: result['targetUserType'], // ✅ NUEVO
+                imageUrl: imageUrl, // ✅ NUEVO
+              );
+            }
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Promoción actualizada exitosamente'),
+                backgroundColor: ModernTheme.success,
+              ),
+            );
+          }
+        }
+      } catch (e, stackTrace) {
+        AppLogger.error('Error actualizando promoción', e, stackTrace);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error al actualizar promoción: $e'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+      } finally {
+        setState(() => _isSaving = false);
+      }
+    }
+
+    // Limpiar controladores
+    codeController.dispose();
+    discountController.dispose();
   }
-  
-  void _removePromotion(Promotion promo) {
-    setState(() {
-      _promotions.remove(promo);
-    });
+
+  Future<void> _removePromotion(Promotion promo) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Confirmar Eliminación'),
+        content: Text('¿Eliminar la promoción "${promo.code}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: ModernTheme.error),
+            child: Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await _deletePromotion(promo);
+        setState(() => _promotions.remove(promo));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Promoción eliminada'),
+              backgroundColor: ModernTheme.success,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+      }
+    }
   }
-  
+
   void _copyApiKey() {
     Clipboard.setData(ClipboardData(text: _apiKey));
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1020,7 +2571,7 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
+
   void _regenerateApiKey() {
     setState(() {
       _apiKey = 'sk_live_${DateTime.now().millisecondsSinceEpoch}';
@@ -1032,43 +2583,50 @@ class _SettingsAdminScreenState extends State<SettingsAdminScreen>
       ),
     );
   }
-  
-  void _saveSettings() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Configuración guardada exitosamente'),
-        backgroundColor: ModernTheme.success,
-      ),
-    );
-  }
 }
 
 // Models
 class Zone {
+  String? id; // ✅ ID de Firebase
   String name;
   double surcharge;
   bool restricted;
-  
+  double? latitude; // ✅ NUEVO: Coordenadas de Google Maps
+  double? longitude; // ✅ NUEVO: Coordenadas de Google Maps
+  String? placeId; // ✅ NUEVO: Google Place ID
+  String? address; // ✅ NUEVO: Dirección completa
+
   Zone({
+    this.id,
     required this.name,
     required this.surcharge,
     required this.restricted,
+    this.latitude,
+    this.longitude,
+    this.placeId,
+    this.address,
   });
 }
 
 class Promotion {
+  String? id; // ✅ ID de Firebase
   String code;
   double discount;
   DiscountType type;
   bool active;
   DateTime expiryDate;
-  
+  String? imageUrl; // ✅ NUEVO: URL de imagen en Firebase Storage
+  String targetUserType; // ✅ NUEVO: 'driver', 'passenger', o 'both'
+
   Promotion({
+    this.id,
     required this.code,
     required this.discount,
     required this.type,
     required this.active,
     required this.expiryDate,
+    this.imageUrl,
+    this.targetUserType = 'both', // Por defecto para ambos
   });
 }
 

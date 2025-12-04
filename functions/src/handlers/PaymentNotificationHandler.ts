@@ -243,7 +243,7 @@ export class PaymentNotificationHandler {
   ): Promise<void> {
     try {
       // Obtener datos del viaje y conductor
-      const tripDoc = await this.db.collection('trips').doc(tripId).get();
+      const tripDoc = await this.db.collection('rides').doc(tripId).get();
       const tripData = tripDoc.data();
 
       if (!tripData || !tripData.driverId) {
@@ -329,7 +329,7 @@ export class PaymentNotificationHandler {
         return;
       }
 
-      const tripDoc = await this.db.collection('trips').doc(tripId).get();
+      const tripDoc = await this.db.collection('rides').doc(tripId).get();
       const tripData = tripDoc.data();
 
       if (!tripData) {

@@ -87,6 +87,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -94,7 +95,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
           Icon(
             Icons.error_outline,
             size: 80,
-            color: Colors.grey[400],
+            color: theme.colorScheme.outline,
           ),
           const SizedBox(height: 16),
           Text(
@@ -102,7 +103,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[600],
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -111,6 +112,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
   }
 
   Widget _buildAlertBanner(dynamic emergency) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -119,16 +121,16 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
       ),
       child: Column(
         children: [
-          const Icon(
+          Icon(
             Icons.warning_amber_rounded,
             size: 60,
-            color: Colors.white,
+            color: theme.colorScheme.onError,
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'EMERGENCIA ACTIVA',
             style: TextStyle(
-              color: Colors.white,
+              color: theme.colorScheme.onError,
               fontSize: 24,
               fontWeight: FontWeight.bold,
             ),
@@ -136,8 +138,8 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
           const SizedBox(height: 8),
           Text(
             emergency.status == 'active' ? 'EN CURSO' : 'FINALIZADA',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: theme.colorScheme.onError,
               fontSize: 16,
             ),
           ),
@@ -149,6 +151,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
   }
 
   Widget _buildTimer(DateTime createdAt) {
+    final theme = Theme.of(context);
     final elapsed = DateTime.now().difference(createdAt);
     final minutes = elapsed.inMinutes;
     final seconds = elapsed.inSeconds % 60;
@@ -156,13 +159,13 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha:0.2),
+        color: theme.colorScheme.onError.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         'Tiempo transcurrido: $minutes:${seconds.toString().padLeft(2, '0')}',
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.colorScheme.onError,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -214,7 +217,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                             ? 'Pasajero'
                             : 'Conductor',
                         style: TextStyle(
-                          color: Colors.grey[600],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontSize: 14,
                         ),
                       ),
@@ -225,12 +228,14 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                             Icon(
                               Icons.phone,
                               size: 16,
-                              color: Colors.grey[600],
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 4),
                             Text(
                               emergency.userPhone!,
-                              style: TextStyle(color: Colors.grey[600]),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ],
                         ),
@@ -285,7 +290,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                         'Lat: ${emergency.locationLat?.toStringAsFixed(6) ?? 'N/A'}\n'
                         'Lng: ${emergency.locationLng?.toStringAsFixed(6) ?? 'N/A'}',
                         style: TextStyle(
-                          color: Colors.grey[600],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontSize: 12,
                         ),
                       ),
@@ -434,7 +439,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
               icon: Icons.local_police,
               label: 'Policía - 105',
               phone: '105',
-              color: Colors.blue,
+              color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 8),
             _buildContactButton(
@@ -448,7 +453,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
               icon: Icons.fire_truck,
               label: 'Bomberos - 116',
               phone: '116',
-              color: Colors.orange,
+              color: Theme.of(context).colorScheme.tertiary,
             ),
           ],
         ),
@@ -548,14 +553,14 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
               Container(
                 width: 2,
                 height: 20,
-                color: Colors.grey[300],
+                color: Theme.of(context).colorScheme.outlineVariant,
               ),
             Icon(icon, color: ModernTheme.oasisGreen),
             if (!isLast)
               Container(
                 width: 2,
                 height: 20,
-                color: Colors.grey[300],
+                color: Theme.of(context).colorScheme.outlineVariant,
               ),
           ],
         ),
@@ -577,7 +582,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                 Text(
                   _formatDateTime(time),
                   style: TextStyle(
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 14,
                   ),
                 ),
@@ -632,6 +637,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
   }
 
   Widget _buildInfoRow(String label, String value) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -640,7 +646,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
           Text(
             label,
             style: TextStyle(
-              color: Colors.grey[600],
+              color: theme.colorScheme.onSurfaceVariant,
               fontSize: 14,
             ),
           ),

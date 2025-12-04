@@ -123,11 +123,11 @@ class _AddressSearchWidgetState extends State<AddressSearchWidget> {
             child: Container(
               constraints: const BoxConstraints(maxHeight: 300),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
@@ -161,11 +161,11 @@ class _AddressSearchWidgetState extends State<AddressSearchWidget> {
     }
 
     if (_suggestions.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
+      return Padding(
+        padding: const EdgeInsets.all(16),
         child: Text(
           'No se encontraron resultados',
-          style: TextStyle(color: Colors.grey),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
           textAlign: TextAlign.center,
         ),
       );
@@ -199,7 +199,7 @@ class _AddressSearchWidgetState extends State<AddressSearchWidget> {
           ? Text(
               suggestion.secondaryText!,
               style: TextStyle(
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                 fontSize: 12,
               ),
             )
@@ -276,7 +276,7 @@ class _AddressSearchWidgetState extends State<AddressSearchWidget> {
                     )
                   : null,
           filled: true,
-          fillColor: Colors.grey.shade50,
+          fillColor: Theme.of(context).colorScheme.surface,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 16,
@@ -288,7 +288,7 @@ class _AddressSearchWidgetState extends State<AddressSearchWidget> {
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(
-              color: Colors.grey.shade200,
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
               width: 1,
             ),
           ),

@@ -1,5 +1,5 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../services/firebase_service.dart';
@@ -8,13 +8,13 @@ class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
-  _AdminDashboardScreenState createState() => _AdminDashboardScreenState();
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedIndex = 0;
   late FirebaseService _firebaseService;
-  
+
   Map<String, dynamic> _stats = {
     'totalUsers': 0,
     'totalDrivers': 0,
@@ -37,52 +37,207 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     try {
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
+      final monthStart = DateTime(now.year, now.month, 1);
 
-      final usersSnapshot = await _firebaseService.firestore.collection('users').get();
-      final driversSnapshot = await _firebaseService.firestore.collection('users').where('userType', isEqualTo: 'driver').get();
-      final tripsSnapshot = await _firebaseService.firestore.collection('trips')
-          .where('requestedAt', isGreaterThanOrEqualTo: todayStart)
-          .get();
+      debugPrint('📊 Cargando datos del dashboard admin...');
+      debugPrint('📅 Fecha actual: $now');
+      debugPrint('🌅 Inicio del día: $todayStart');
+      debugPrint('📆 Inicio del mes: $monthStart');
+
+      // Consultas Firebase en paralelo para mejor performance
+      QuerySnapshot<Map<String, dynamic>>? usersSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? driversSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? tripsSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? newUsersMonthSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? suspendedUsersSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? withdrawalsSnapshot;
+      QuerySnapshot<Map<String, dynamic>>? disputesSnapshot;
+
+      try {
+        usersSnapshot = await _firebaseService.firestore.collection('users').get();
+      } catch (e) {
+        debugPrint('❌ Error cargando usuarios: $e');
+      }
+
+      try {
+        // ✅ CORREGIDO: Buscar usuarios con userType 'driver' O 'dual'
+        driversSnapshot = await _firebaseService.firestore
+            .collection('users')
+            .where('userType', whereIn: ['driver', 'dual'])
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando conductores: $e');
+      }
+
+      try {
+        // ✅ CORREGIDO: Cambiar 'trips' a 'rides' (colección correcta)
+        tripsSnapshot = await _firebaseService.firestore
+            .collection('rides')
+            .where('requestedAt', isGreaterThanOrEqualTo: todayStart)
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando viajes: $e');
+      }
+
+      try {
+        newUsersMonthSnapshot = await _firebaseService.firestore
+            .collection('users')
+            .where('createdAt', isGreaterThanOrEqualTo: monthStart)
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando usuarios nuevos: $e');
+      }
+
+      try {
+        suspendedUsersSnapshot = await _firebaseService.firestore
+            .collection('users')
+            .where('isActive', isEqualTo: false)
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando usuarios suspendidos: $e');
+      }
+
+      try {
+        withdrawalsSnapshot = await _firebaseService.firestore
+            .collection('withdrawals')
+            .where('requestedAt', isGreaterThanOrEqualTo: todayStart)
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando retiros: $e');
+      }
+
+      try {
+        disputesSnapshot = await _firebaseService.firestore
+            .collection('disputes')
+            .where('status', isEqualTo: 'open')
+            .get();
+      } catch (e) {
+        debugPrint('❌ Error cargando disputas: $e');
+      }
+
+      debugPrint('✅ Resultados obtenidos:');
+      debugPrint('   👥 Usuarios: ${usersSnapshot?.docs.length ?? 0}');
+      debugPrint('   🚗 Conductores: ${driversSnapshot?.docs.length ?? 0}');
+      debugPrint('   🚕 Viajes hoy: ${tripsSnapshot?.docs.length ?? 0}');
 
       double todayEarnings = 0.0;
+      double totalPlatformCommission = 0.0;
       int activeUsers = 0;
       int onlineDrivers = 0;
       int availableDrivers = 0;
       int driversInTrip = 0;
+      int completedTripsToday = 0;
+      int pendingPayments = 0;
+      double totalRating = 0.0;
+      int ratedTrips = 0;
 
-      for (var user in usersSnapshot.docs) {
-        final userData = user.data();
-        if (userData['isActive'] == true) activeUsers++;
-      }
-
-      for (var driver in driversSnapshot.docs) {
-        final driverData = driver.data();
-        if (driverData['isOnline'] == true) onlineDrivers++;
-        if (driverData['isAvailable'] == true) availableDrivers++;
-        if (driverData['status'] == 'in_trip') driversInTrip++;
-      }
-
-      for (var trip in tripsSnapshot.docs) {
-        final tripData = trip.data();
-        if (tripData['status'] == 'completed') {
-          todayEarnings += (tripData['finalFare'] ?? 0.0).toDouble();
+      // Calcular usuarios activos
+      if (usersSnapshot != null) {
+        for (var user in usersSnapshot.docs) {
+          try {
+            final userData = user.data() as Map<String, dynamic>?;
+            if (userData != null && userData['isActive'] == true) activeUsers++;
+          } catch (e) {
+            debugPrint('⚠️ Error procesando usuario ${user.id}: $e');
+          }
         }
       }
 
+      // Calcular estados de conductores
+      if (driversSnapshot != null) {
+        for (var driver in driversSnapshot.docs) {
+          try {
+            final driverData = driver.data() as Map<String, dynamic>?;
+            if (driverData != null) {
+              if (driverData['isOnline'] == true) onlineDrivers++;
+              if (driverData['isAvailable'] == true) availableDrivers++;
+              if (driverData['status'] == 'in_trip') driversInTrip++;
+            }
+          } catch (e) {
+            debugPrint('⚠️ Error procesando conductor ${driver.id}: $e');
+          }
+        }
+      }
+
+      // Calcular ingresos, comisiones y ratings del día
+      if (tripsSnapshot != null) {
+        for (var trip in tripsSnapshot.docs) {
+          try {
+            final tripData = trip.data() as Map<String, dynamic>?;
+            if (tripData == null) continue;
+
+            final status = tripData['status'];
+
+            if (status == 'completed') {
+              completedTripsToday++;
+              final fare = (tripData['finalFare'] ?? 0.0).toDouble();
+              final commission =
+                  (tripData['platformCommission'] ?? 0.0).toDouble();
+              todayEarnings += fare;
+              totalPlatformCommission += commission;
+
+              // Calcular rating promedio
+              if (tripData['rating'] != null) {
+                totalRating += (tripData['rating'] as num).toDouble();
+                ratedTrips++;
+              }
+            } else if (status == 'pending_payment') {
+              pendingPayments++;
+            }
+          } catch (e) {
+            debugPrint('⚠️ Error procesando viaje ${trip.id}: $e');
+          }
+        }
+      }
+
+      final averageRating = ratedTrips > 0 ? totalRating / ratedTrips : 0.0;
+      final conversionRate = (tripsSnapshot != null && tripsSnapshot.docs.isNotEmpty)
+          ? (completedTripsToday / tripsSnapshot.docs.length * 100)
+          : 0.0;
+
+      debugPrint('💰 Ingresos hoy: S/. ${todayEarnings.toStringAsFixed(2)}');
+      debugPrint('⭐ Rating promedio: ${averageRating.toStringAsFixed(1)}');
+      debugPrint('📈 Tasa de conversión: ${conversionRate.toStringAsFixed(1)}%');
+
+      // ✅ CORREGIDO: Verificar mounted antes de setState para evitar error de dispose
+      if (!mounted) return;
+
       setState(() {
         _stats = {
-          'totalUsers': usersSnapshot.docs.length,
-          'totalDrivers': driversSnapshot.docs.length,
-          'tripsToday': tripsSnapshot.docs.length,
+          'totalUsers': usersSnapshot?.docs.length ?? 0,
+          'totalDrivers': driversSnapshot?.docs.length ?? 0,
+          'tripsToday': tripsSnapshot?.docs.length ?? 0,
           'todayEarnings': todayEarnings,
           'activeUsers': activeUsers,
           'onlineDrivers': onlineDrivers,
           'availableDrivers': availableDrivers,
           'driversInTrip': driversInTrip,
+          'newUsersMonth': newUsersMonthSnapshot?.docs.length ?? 0,
+          'suspendedUsers': suspendedUsersSnapshot?.docs.length ?? 0,
+          'averageRating': averageRating,
+          'conversionRate': conversionRate,
+          'completedTripsToday': completedTripsToday,
+          'pendingPayments': pendingPayments,
+          'withdrawalsToday': withdrawalsSnapshot?.docs.length ?? 0,
+          'openDisputes': disputesSnapshot?.docs.length ?? 0,
+          'platformCommission': totalPlatformCommission,
         };
       });
-    } catch (e) {
-      debugPrint('Error loading dashboard data: $e');
+
+      debugPrint('✅ Dashboard cargado exitosamente');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error crítico loading dashboard: $e');
+      debugPrint('📍 Stack trace: $stackTrace');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cargar el dashboard: ${e.toString()}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -128,11 +283,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         showBackButton: false,
         actions: [
           IconButton(
-            icon: Icon(Icons.notifications, color: Colors.white),
-            onPressed: () {},
+            icon: Icon(Icons.notifications, color: Theme.of(context).colorScheme.onPrimary),
+            onPressed: () {
+              Navigator.pushNamed(context, '/shared/notifications');
+            },
+            tooltip: 'Notificaciones',
           ),
           IconButton(
-            icon: Icon(Icons.logout, color: Colors.white),
+            icon: Icon(Icons.logout, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: () {
               Navigator.pushNamedAndRemoveUntil(
                 context,
@@ -179,10 +337,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildSidebar() {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: [
-          OasisDrawerHeader(
+          const OasisDrawerHeader(
             userType: 'admin',
             userName: 'Administrador',
           ),
@@ -194,11 +352,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 final isSelected = index == _selectedIndex;
                 
                 return Container(
-                  margin: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
-                        : Colors.transparent,
+                        : Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: ListTile(
@@ -221,7 +379,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     subtitle: Text(
                       item.subtitle,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: ModernTheme.textSecondary,
                         fontSize: 12,
                       ),
@@ -261,7 +419,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildMobileNav() {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: _menuItems.length,
@@ -287,7 +445,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         : ModernTheme.textSecondary,
                     size: 24,
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
                     item.title,
                     style: TextStyle(
@@ -314,27 +472,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildMainContent() {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             _menuItems[_selectedIndex].title,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: ModernTheme.textPrimary,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             _menuItems[_selectedIndex].subtitle,
-            style: TextStyle(
+            style: const TextStyle(
               color: ModernTheme.textSecondary,
               fontSize: 14,
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           Expanded(
             child: _buildContentForIndex(_selectedIndex),
           ),
@@ -372,7 +530,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _buildStatsCard('Usuarios Totales', _stats['totalUsers'].toString(), Icons.people, Colors.blue),
         _buildStatsCard('Conductores', _stats['totalDrivers'].toString(), Icons.directions_car, Colors.green),
         _buildStatsCard('Viajes Hoy', _stats['tripsToday'].toString(), Icons.route, Colors.orange),
-        _buildStatsCard('Ingresos', '\$${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.attach_money, Colors.purple),
+        _buildStatsCard('Ingresos', 'S/. ${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.account_balance_wallet, Colors.purple), // ✅ Moneda en Soles
       ],
     );
   }
@@ -381,11 +539,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         return Container(
-          padding: EdgeInsets.all(8),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: ModernTheme.cardShadow,
+            boxShadow: ModernTheme.getCardShadow(context),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -393,7 +551,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Container(
-                  padding: EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
@@ -405,7 +563,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 fit: BoxFit.scaleDown,
                 child: Text(
                   value,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: ModernTheme.textPrimary,
@@ -417,7 +575,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 fit: BoxFit.scaleDown,
                 child: Text(
                   title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: ModernTheme.textSecondary,
                     fontSize: 9,
                   ),
@@ -439,7 +597,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           // Estadísticas de usuarios
           GridView.count(
             shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
@@ -447,19 +605,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             children: [
               _buildStatsCard('Total Usuarios', _stats['totalUsers'].toString(), Icons.people, Colors.blue),
               _buildStatsCard('Activos', _stats['activeUsers'].toString(), Icons.check_circle, Colors.green),
-              _buildStatsCard('Nuevos (Mes)', '0', Icons.person_add, Colors.orange),
-              _buildStatsCard('Suspendidos', '0', Icons.block, Colors.red),
+              _buildStatsCard('Nuevos (Mes)', _stats['newUsersMonth'].toString(), Icons.person_add, Colors.orange),
+              _buildStatsCard('Suspendidos', _stats['suspendedUsers'].toString(), Icons.block, Colors.red),
             ],
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Botón para ir a gestión completa
           ElevatedButton.icon(
             onPressed: () => Navigator.pushNamed(context, '/admin/users-management'),
-            icon: Icon(Icons.manage_accounts),
-            label: Text('Gestión Completa de Usuarios'),
+            icon: const Icon(Icons.manage_accounts),
+            label: const Text('Gestión Completa de Usuarios'),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.oasisGreen,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -475,7 +633,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           // Estadísticas de conductores
           GridView.count(
             shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
@@ -487,15 +645,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               _buildStatsCard('En Viaje', _stats['driversInTrip'].toString(), Icons.route, Colors.purple),
             ],
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Botón para ir a gestión completa
           ElevatedButton.icon(
             onPressed: () => Navigator.pushNamed(context, '/admin/drivers-management'),
-            icon: Icon(Icons.drive_eta),
-            label: Text('Gestión Completa de Conductores'),
+            icon: const Icon(Icons.drive_eta),
+            label: const Text('Gestión Completa de Conductores'),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.oasisGreen,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -511,66 +669,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           // KPIs principales
           GridView.count(
             shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
             childAspectRatio: MediaQuery.of(context).size.width > 600 ? 1.8 : 1.5,
             children: [
               _buildStatsCard('Viajes Hoy', _stats['tripsToday'].toString(), Icons.route, Colors.blue),
-              _buildStatsCard('Ingresos Hoy', '\$${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.attach_money, Colors.green),
-              _buildStatsCard('Rating Promedio', '5.0⭐', Icons.star, Colors.amber),
-              _buildStatsCard('Tasa Conversión', '0%', Icons.trending_up, Colors.purple),
+              _buildStatsCard('Ingresos Hoy', 'S/. ${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.account_balance_wallet, Colors.green),
+              _buildStatsCard('Rating Promedio', '${_stats['averageRating'].toStringAsFixed(1)}⭐', Icons.star, Colors.amber),
+              _buildStatsCard('Tasa Conversión', '${_stats['conversionRate'].toStringAsFixed(0)}%', Icons.trending_up, Colors.purple),
             ],
           ),
-          SizedBox(height: 24),
-          // Mini gráfico de barras simple
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: ModernTheme.cardShadow,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Viajes Últimos 7 días', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                SizedBox(height: 16),
-                SizedBox(
-                  height: 100,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: List.generate(7, (index) {
-                      double height = 20 + (index * 8.0);
-                      return Flexible(
-                        child: Container(
-                          width: 25,
-                          height: height,
-                          margin: EdgeInsets.symmetric(horizontal: 2),
-                          decoration: BoxDecoration(
-                            color: ModernTheme.oasisGreen.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Botón para ir a analíticas completas
           ElevatedButton.icon(
             onPressed: () => Navigator.pushNamed(context, '/admin/analytics'),
-            icon: Icon(Icons.analytics),
-            label: Text('Ver Analíticas Completas'),
+            icon: const Icon(Icons.analytics),
+            label: const Text('Ver Analíticas Completas'),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.oasisGreen,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -585,7 +704,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         children: [
           // Resumen financiero
           Container(
-            padding: EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [ModernTheme.oasisGreen, ModernTheme.oasisGreen.withValues(alpha: 0.8)],
@@ -593,38 +712,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: ModernTheme.cardShadow,
+              boxShadow: ModernTheme.getCardShadow(context),
             ),
             child: Column(
               children: [
                 Text(
                   'Balance del Día',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 16),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
                 Text(
-                  '\$${_stats['todayEarnings'].toStringAsFixed(2)}',
+                  'S/. ${_stats['todayEarnings'].toStringAsFixed(2)}',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.onPrimary,
                     fontSize: 32,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                SizedBox(height: 16),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     Column(
                       children: [
-                        Text('Ingresos', style: TextStyle(color: Colors.white70)),
-                        Text('\$${_stats['todayEarnings'].toStringAsFixed(0)}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        Text('Ingresos', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7))),
+                        Text('S/. ${_stats['todayEarnings'].toStringAsFixed(0)}', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontWeight: FontWeight.bold)),
                       ],
                     ),
-                    Container(width: 1, height: 30, color: Colors.white30),
+                    Container(width: 1, height: 30, color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.3)),
                     Column(
                       children: [
-                        Text('Comisiones', style: TextStyle(color: Colors.white70)),
-                        Text('\$${(_stats['todayEarnings'] * 0.2).toStringAsFixed(0)}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        Text('Comisiones', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7))),
+                        Text('S/. ${_stats['platformCommission'].toStringAsFixed(0)}', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ],
@@ -632,31 +751,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ],
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Estadísticas financieras
           GridView.count(
             shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
             childAspectRatio: 1.6,
             children: [
-              _buildStatsCard('Pagos Pendientes', '0', Icons.pending, Colors.orange),
-              _buildStatsCard('Pagos Completados', _stats['tripsToday'].toString(), Icons.check_circle, Colors.green),
-              _buildStatsCard('Retiros Hoy', '0', Icons.account_balance, Colors.blue),
-              _buildStatsCard('Disputas', '0', Icons.warning, Colors.red),
+              _buildStatsCard('Pagos Pendientes', _stats['pendingPayments'].toString(), Icons.pending, Colors.orange),
+              _buildStatsCard('Pagos Completados', _stats['completedTripsToday'].toString(), Icons.check_circle, Colors.green),
+              _buildStatsCard('Retiros Hoy', _stats['withdrawalsToday'].toString(), Icons.account_balance, Colors.blue),
+              _buildStatsCard('Disputas', _stats['openDisputes'].toString(), Icons.warning, Colors.red),
             ],
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Botón para ir a finanzas completas
           ElevatedButton.icon(
             onPressed: () => Navigator.pushNamed(context, '/admin/financial'),
-            icon: Icon(Icons.account_balance_wallet),
-            label: Text('Gestión Financiera Completa'),
+            icon: const Icon(Icons.account_balance_wallet),
+            label: const Text('Gestión Financiera Completa'),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.oasisGreen,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
@@ -672,113 +791,63 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           // Lista de configuraciones
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: ModernTheme.cardShadow,
+              boxShadow: ModernTheme.getCardShadow(context),
             ),
             child: Column(
               children: [
                 ListTile(
-                  leading: Icon(Icons.attach_money, color: ModernTheme.oasisGreen),
-                  title: Text('Tarifas y Precios'),
-                  subtitle: Text('Configurar tarifas base y comisiones'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.account_balance_wallet, color: ModernTheme.oasisGreen),
+                  title: const Text('Tarifas y Precios'),
+                  subtitle: const Text('Configurar tarifas base y comisiones'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () => Navigator.pushNamed(context, '/admin/settings'),
                 ),
-                Divider(height: 1),
+                const Divider(height: 1),
                 ListTile(
-                  leading: Icon(Icons.map, color: ModernTheme.primaryBlue),
-                  title: Text('Zonas y Cobertura'),
-                  subtitle: Text('Gestionar áreas de servicio'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.map, color: ModernTheme.primaryBlue),
+                  title: const Text('Zonas y Cobertura'),
+                  subtitle: const Text('Gestionar áreas de servicio'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () => Navigator.pushNamed(context, '/admin/settings'),
                 ),
-                Divider(height: 1),
+                const Divider(height: 1),
                 ListTile(
-                  leading: Icon(Icons.local_offer, color: ModernTheme.primaryOrange),
-                  title: Text('Promociones'),
-                  subtitle: Text('Códigos y descuentos activos'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.local_offer, color: ModernTheme.primaryOrange),
+                  title: const Text('Promociones'),
+                  subtitle: const Text('Códigos y descuentos activos'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () => Navigator.pushNamed(context, '/admin/settings'),
                 ),
-                Divider(height: 1),
+                const Divider(height: 1),
                 ListTile(
-                  leading: Icon(Icons.notifications, color: ModernTheme.warning),
-                  title: Text('Notificaciones'),
-                  subtitle: Text('Configurar alertas y mensajes'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () => Navigator.pushNamed(context, '/admin/settings'),
+                  leading: const Icon(Icons.notifications, color: ModernTheme.warning),
+                  title: const Text('Notificaciones'),
+                  subtitle: const Text('Configurar alertas y mensajes'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () => Navigator.pushNamed(context, '/shared/notifications'),
                 ),
-                Divider(height: 1),
+                const Divider(height: 1),
                 ListTile(
-                  leading: Icon(Icons.security, color: ModernTheme.error),
-                  title: Text('Seguridad'),
-                  subtitle: Text('Políticas y permisos'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                  leading: const Icon(Icons.security, color: ModernTheme.error),
+                  title: const Text('Seguridad'),
+                  subtitle: const Text('Políticas y permisos'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: () => Navigator.pushNamed(context, '/admin/settings'),
                 ),
               ],
             ),
           ),
-          SizedBox(height: 24),
-          // Información del sistema
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ModernTheme.backgroundLight,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Versión del Sistema:'),
-                    Text('2.0.0', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Último Respaldo:'),
-                    Text('Hoy 3:00 AM', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Estado del Servidor:'),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: ModernTheme.success.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Operativo',
-                        style: TextStyle(
-                          color: ModernTheme.success,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           // Botón para ir a configuración completa
           ElevatedButton.icon(
             onPressed: () => Navigator.pushNamed(context, '/admin/settings'),
-            icon: Icon(Icons.settings),
-            label: Text('Configuración Completa del Sistema'),
+            icon: const Icon(Icons.settings),
+            label: const Text('Configuración Completa del Sistema'),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.oasisGreen,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),

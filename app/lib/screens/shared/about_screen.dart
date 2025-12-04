@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
 class AboutScreen extends StatefulWidget {
   final String? userType; // 'passenger', 'driver', 'admin'
@@ -56,20 +57,20 @@ class _AboutScreenState extends State<AboutScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Acerca de Oasis Taxi',
           style: TextStyle(
-            color: Colors.white,
+            color: context.onPrimaryText,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.share, color: Colors.white),
+            icon: Icon(Icons.share, color: context.onPrimaryText),
             onPressed: _shareApp,
           ),
         ],
@@ -145,7 +146,7 @@ class _AboutScreenState extends State<AboutScreen>
                   child: Icon(
                     Icons.local_taxi,
                     size: 60,
-                    color: Colors.white,
+                    color: context.onPrimaryText,
                   ),
                 ),
                 SizedBox(height: 24),
@@ -156,7 +157,7 @@ class _AboutScreenState extends State<AboutScreen>
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
                 SizedBox(height: 8),
@@ -166,7 +167,7 @@ class _AboutScreenState extends State<AboutScreen>
                   'Tu oasis de movilidad urbana',
                   style: TextStyle(
                     fontSize: 16,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -269,7 +270,7 @@ class _AboutScreenState extends State<AboutScreen>
     return _buildSection(
       'Información Legal',
       Icons.gavel,
-      Colors.purple,
+      ModernTheme.warning,
       [
         _buildActionTile(
           'Términos y Condiciones',
@@ -308,7 +309,7 @@ class _AboutScreenState extends State<AboutScreen>
     return _buildSection(
       'Contacto y Soporte',
       Icons.contact_support,
-      Colors.orange,
+      ModernTheme.warning,
       [
         _buildActionTile(
           'Soporte al Cliente',
@@ -348,7 +349,7 @@ class _AboutScreenState extends State<AboutScreen>
     return _buildSection(
       'Información Técnica',
       Icons.settings,
-      Colors.indigo,
+      ModernTheme.primaryBlue,
       [
         _buildInfoTile(
           'Framework',
@@ -389,7 +390,7 @@ class _AboutScreenState extends State<AboutScreen>
     return _buildSection(
       'Síguenos',
       Icons.share,
-      Colors.pink,
+      ModernTheme.error,
       [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -397,25 +398,25 @@ class _AboutScreenState extends State<AboutScreen>
             _buildSocialButton(
               'Facebook',
               Icons.facebook,
-              Colors.blue,
+              ModernTheme.primaryBlue,
               _openFacebook,
             ),
             _buildSocialButton(
               'Twitter',
               Icons.connect_without_contact,
-              Colors.lightBlue,
+              ModernTheme.info,
               _openTwitter,
             ),
             _buildSocialButton(
               'Instagram',
               Icons.camera_alt,
-              Colors.purple,
+              ModernTheme.warning,
               _openInstagram,
             ),
             _buildSocialButton(
               'LinkedIn',
               Icons.work,
-              Colors.blueAccent,
+              ModernTheme.primaryBlue,
               _openLinkedIn,
             ),
           ],
@@ -425,7 +426,7 @@ class _AboutScreenState extends State<AboutScreen>
           child: Text(
             '@OasisTaxiPE',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 16,
               fontWeight: FontWeight.w500,
             ),
@@ -459,11 +460,11 @@ class _AboutScreenState extends State<AboutScreen>
         Container(
           margin: EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.surfaceColor,
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Theme.of(context).shadowColor.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset: Offset(0, 2),
               ),
@@ -493,7 +494,7 @@ class _AboutScreenState extends State<AboutScreen>
         subtitle,
         style: TextStyle(
           fontSize: 13,
-          color: ModernTheme.textSecondary,
+          color: context.secondaryText,
           height: 1.4,
         ),
       ),
@@ -518,7 +519,7 @@ class _AboutScreenState extends State<AboutScreen>
         subtitle,
         style: TextStyle(
           fontSize: 13,
-          color: ModernTheme.textSecondary,
+          color: context.secondaryText,
         ),
       ),
       trailing: onTap != null ? Icon(Icons.arrow_forward_ios, size: 16) : null,
@@ -550,7 +551,7 @@ class _AboutScreenState extends State<AboutScreen>
           name,
           style: TextStyle(
             fontSize: 12,
-            color: ModernTheme.textSecondary,
+            color: context.secondaryText,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -617,7 +618,7 @@ class _AboutScreenState extends State<AboutScreen>
           ),
           shape: BoxShape.circle,
         ),
-        child: Icon(Icons.local_taxi, size: 32, color: Colors.white),
+        child: Icon(Icons.local_taxi, size: 32, color: context.onPrimaryText),
       ),
     );
   }
@@ -711,7 +712,7 @@ class _AboutScreenState extends State<AboutScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('• ', style: TextStyle(color: ModernTheme.textSecondary)),
+              Text('• ', style: TextStyle(color: context.secondaryText)),
               Expanded(
                 child: Text(
                   change,
@@ -768,9 +769,9 @@ class _AboutScreenState extends State<AboutScreen>
         backgroundColor: ModernTheme.oasisGreen,
         title: Text(
           title,
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: context.onPrimaryText),
         ),
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: context.onPrimaryText),
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),
@@ -782,14 +783,14 @@ class _AboutScreenState extends State<AboutScreen>
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             SizedBox(height: 16),
             Text(
               'Última actualización: ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -799,7 +800,7 @@ class _AboutScreenState extends State<AboutScreen>
               style: TextStyle(
                 fontSize: 14,
                 height: 1.6,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
           ],

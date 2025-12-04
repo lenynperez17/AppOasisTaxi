@@ -168,12 +168,36 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   void _listenToRideUpdates() {
     FirebaseService().listenToRideUpdates(widget.rideId, (ride) {
       if (mounted) {
+        // Verificar si el viaje se completó para navegar a la pantalla de resumen
+        if (ride.status == 'completed' && _currentRide?.status != 'completed') {
+          // Navegar a la pantalla de viaje completado
+          Navigator.pushReplacementNamed(
+            context,
+            '/trip-completed',
+            arguments: {'tripId': widget.rideId},
+          );
+          return;
+        }
+
+        // Verificar si el viaje fue cancelado
+        if (ride.status == 'cancelled' && _currentRide?.status != 'cancelled') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('El viaje ha sido cancelado'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          Navigator.pop(context);
+          return;
+        }
+
         setState(() {
           _currentRide = ride;
           _updateStatus();
           _setupMapMarkers();
         });
-        
+
         // Por ahora no hay ubicación del conductor en TripModel
         // Se actualizará dinámicamente desde Firebase
       }
@@ -676,11 +700,11 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
+              color: Theme.of(context).shadowColor.withValues(alpha: 0.1),
               blurRadius: 10,
               offset: const Offset(0, 5),
             ),
@@ -711,6 +735,8 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -719,9 +745,9 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                           const SizedBox(width: 4),
                           Text(
                             _currentRide?.vehicleInfo?['driverRating']?.toStringAsFixed(1) ?? '5.0',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                             ),
                           ),
                         ],
@@ -730,10 +756,12 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                         const SizedBox(height: 4),
                         Text(
                           '${_currentRide?.vehicleInfo?['model']} - ${_currentRide?.vehicleInfo?['plate']}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey,
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ],
@@ -746,7 +774,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                       icon: const Icon(Icons.phone),
                       style: IconButton.styleFrom(
                         backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -755,7 +783,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                       icon: const Icon(Icons.chat),
                       style: IconButton.styleFrom(
                         backgroundColor: accentColor,
-                        foregroundColor: Colors.white,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       ),
                     ),
                   ],
@@ -799,12 +827,12 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.location_on,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                         size: 24,
                       ),
                     ),
@@ -818,8 +846,8 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                   children: [
                     Text(
                       _currentStatus,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -828,7 +856,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                     Text(
                       'ETA: $_estimatedArrival',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                         fontSize: 14,
                       ),
                     ),
@@ -838,15 +866,15 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  _distanceToDestination > 0 
+                  _distanceToDestination > 0
                       ? '${_distanceToDestination.toStringAsFixed(1)} km'
                       : '...',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -859,17 +887,17 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.1),
+                color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.my_location, color: Colors.white, size: 20),
+                  Icon(Icons.my_location, color: Theme.of(context).colorScheme.onPrimary, size: 20),
                   const SizedBox(width: 8),
                   Text(
                     'Distancia al punto de recogida: ${_distanceToPickup.toStringAsFixed(1)} km',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
                   ),
@@ -890,7 +918,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
+              color: Theme.of(context).shadowColor.withValues(alpha: 0.1),
               blurRadius: 10,
               offset: const Offset(0, 5),
             ),
@@ -947,7 +975,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                 label: const Text('Cancelar'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -964,7 +992,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
               label: const Text('Emergencia'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -976,7 +1004,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
           FloatingActionButton(
             onPressed: _centerMapOnRoute,
             backgroundColor: primaryColor,
-            child: const Icon(Icons.my_location, color: Colors.white),
+            child: Icon(Icons.my_location, color: Theme.of(context).colorScheme.onPrimary),
           ),
         ],
       ),
@@ -986,18 +1014,18 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Seguimiento de Viaje',
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.onPrimary,
           ),
         ),
         backgroundColor: primaryColor,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
         actions: [
           if (_showDriverInfo)
             IconButton(

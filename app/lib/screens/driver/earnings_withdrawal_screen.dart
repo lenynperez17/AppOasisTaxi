@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 // ignore_for_file: library_private_types_in_public_api
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/payment_service.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/loading_overlay.dart';
 
+import '../../utils/logger.dart';
 /// PANTALLA DE RETIRO DE GANANCIAS - CONDUCTORES OASIS TAXI
 /// ========================================================
 /// 
@@ -52,6 +54,8 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   final _withdrawalAmountController = TextEditingController();
   final _accountNumberController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _accountHolderNameController = TextEditingController();
+  final _documentNumberController = TextEditingController();
   
   String _selectedWithdrawalMethod = 'bank_transfer';
   String _selectedBank = 'interbank';
@@ -79,6 +83,8 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     _withdrawalAmountController.dispose();
     _accountNumberController.dispose();
     _phoneController.dispose();
+    _accountHolderNameController.dispose();
+    _documentNumberController.dispose();
     super.dispose();
   }
 
@@ -144,68 +150,98 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     }
   }
 
+  // ✅ Cargar historial de ganancias real desde Firebase
   Future<void> _loadEarningsHistory() async {
     try {
-      // Simular datos de ejemplo - en producción vendría del backend
-      _earningsHistory = [
-        EarningsPeriod(
-          period: 'Hoy',
-          earnings: 156.50,
-          trips: 12,
-          hours: 8.5,
-        ),
-        EarningsPeriod(
-          period: 'Ayer',
-          earnings: 189.25,
-          trips: 15,
-          hours: 10.0,
-        ),
-        EarningsPeriod(
-          period: 'Esta semana',
-          earnings: 987.75,
-          trips: 78,
-          hours: 45.5,
-        ),
-        EarningsPeriod(
-          period: 'Mes pasado',
-          earnings: 3245.80,
-          trips: 256,
-          hours: 180.0,
-        ),
-      ];
+      // ✅ Consultar rides completados agrupados por período
+      final now = DateTime.now();
+      final periods = <String, EarningsPeriod>{};
+
+      // Últimas 4 semanas
+      for (int i = 0; i < 4; i++) {
+        final weekStart = now.subtract(Duration(days: (i + 1) * 7));
+        final weekEnd = now.subtract(Duration(days: i * 7));
+
+        final ridesSnapshot = await FirebaseFirestore.instance
+            .collection('rides')
+            .where('driverId', isEqualTo: widget.driverId)
+            .where('status', isEqualTo: 'completed')
+            .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(weekStart))
+            .where('completedAt', isLessThan: Timestamp.fromDate(weekEnd))
+            .get();
+
+        double weekEarnings = 0.0;
+        double weekHours = 0.0;
+
+        for (var doc in ridesSnapshot.docs) {
+          final data = doc.data();
+          final fare = (data['fare'] ?? data['estimatedFare'] ?? 0.0) as num;
+          weekEarnings += fare.toDouble();
+
+          if (data['startedAt'] != null && data['completedAt'] != null) {
+            final startedAt = (data['startedAt'] as Timestamp).toDate();
+            final completedAt = (data['completedAt'] as Timestamp).toDate();
+            final duration = completedAt.difference(startedAt);
+            weekHours += duration.inMinutes / 60.0;
+          }
+        }
+
+        final periodName = i == 0
+            ? 'Esta semana'
+            : i == 1
+                ? 'Semana pasada'
+                : 'Hace ${i + 1} semanas';
+
+        periods[periodName] = EarningsPeriod(
+          period: periodName,
+          earnings: weekEarnings,
+          trips: ridesSnapshot.docs.length,
+          hours: weekHours,
+        );
+      }
+
+      setState(() {
+        _earningsHistory = periods.values.toList();
+      });
     } catch (e) {
+      AppLogger.error('❌ Error cargando historial de ganancias: $e');
       _showErrorSnackBar('Error cargando historial: $e');
     }
   }
 
+  // ✅ Cargar historial de retiros real desde Firebase
   Future<void> _loadWithdrawalHistory() async {
     try {
-      // Simular historial de retiros
-      _withdrawalHistory = [
-        WithdrawalHistory(
-          id: 'w001',
-          amount: 500.0,
-          fee: 3.0,
-          netAmount: 497.0,
-          method: 'Transferencia Bancaria',
-          destination: 'BCP ****1234',
-          status: 'Completado',
-          processedAt: DateTime.now().subtract(const Duration(days: 2)),
-          createdAt: DateTime.now().subtract(const Duration(days: 2)),
-        ),
-        WithdrawalHistory(
-          id: 'w002',
-          amount: 250.0,
-          fee: 1.0,
-          netAmount: 249.0,
-          method: 'Yape',
-          destination: '987654321',
-          status: 'Completado',
-          processedAt: DateTime.now().subtract(const Duration(days: 5)),
-          createdAt: DateTime.now().subtract(const Duration(days: 5)),
-        ),
-      ];
+      // ✅ Consultar colección withdrawals filtrada por driverId
+      final withdrawalsSnapshot = await FirebaseFirestore.instance
+          .collection('withdrawals')
+          .where('driverId', isEqualTo: widget.driverId)
+          .orderBy('createdAt', descending: true)
+          .limit(50) // Últimos 50 retiros
+          .get();
+
+      final withdrawals = <WithdrawalHistory>[];
+
+      for (var doc in withdrawalsSnapshot.docs) {
+        final data = doc.data();
+        withdrawals.add(WithdrawalHistory(
+          id: doc.id,
+          amount: (data['amount'] ?? 0.0).toDouble(),
+          fee: (data['fee'] ?? 0.0).toDouble(),
+          netAmount: (data['netAmount'] ?? 0.0).toDouble(),
+          method: data['method'] ?? 'bank_transfer',
+          destination: data['destination'] ?? '',
+          status: data['status'] ?? 'Procesando',
+          createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          processedAt: (data['processedAt'] as Timestamp?)?.toDate(),
+        ));
+      }
+
+      setState(() {
+        _withdrawalHistory = withdrawals;
+      });
     } catch (e) {
+      AppLogger.error('❌ Error cargando historial de retiros: $e');
       _showErrorSnackBar('Error cargando historial de retiros: $e');
     }
   }
@@ -248,45 +284,95 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   }
 
   Future<void> _processBankTransfer() async {
-    // Simular procesamiento de transferencia bancaria
-    await Future.delayed(const Duration(seconds: 2));
-    
-    // En producción, aquí se integraría con el sistema bancario
+    // 🏦 Procesamiento REAL con MercadoPago Money Out API
+    debugPrint('🏦 Procesando transferencia bancaria con MercadoPago...');
+
+    final result = await _paymentService.requestWithdrawal(
+      driverId: widget.driverId,
+      amount: _withdrawalAmount,
+      method: 'bank_transfer',
+      bankName: _selectedBank,
+      accountNumber: _accountNumberController.text,
+      accountHolderName: _accountHolderNameController.text,
+      accountHolderDocumentNumber: _documentNumberController.text,
+      accountHolderDocumentType: 'DNI',
+    );
+
+    if (!result.success) {
+      throw Exception(result.error ?? 'Error procesando transferencia bancaria');
+    }
+
+    debugPrint('✅ Transferencia bancaria procesada: ${result.withdrawalId}');
+
     await _firebaseService.analytics.logEvent(
       name: 'driver_withdrawal_bank_transfer',
       parameters: {
         'driver_id': widget.driverId,
         'amount': _withdrawalAmount,
         'bank': _selectedBank,
-        'account_number': _accountNumberController.text,
+        'withdrawal_id': result.withdrawalId ?? '',
       },
     );
   }
 
   Future<void> _processYapeWithdrawal() async {
-    // Simular procesamiento con Yape
-    await Future.delayed(const Duration(seconds: 1));
-    
+    // 📱 Procesamiento REAL con MercadoPago Money Out API - Yape
+    debugPrint('📱 Procesando retiro Yape con MercadoPago...');
+
+    final result = await _paymentService.requestWithdrawal(
+      driverId: widget.driverId,
+      amount: _withdrawalAmount,
+      method: 'yape',
+      phoneNumber: _phoneController.text,
+      accountHolderName: _accountHolderNameController.text,
+      accountHolderDocumentNumber: _documentNumberController.text,
+      accountHolderDocumentType: 'DNI',
+    );
+
+    if (!result.success) {
+      throw Exception(result.error ?? 'Error procesando retiro Yape');
+    }
+
+    debugPrint('✅ Retiro Yape procesado: ${result.withdrawalId}');
+
     await _firebaseService.analytics.logEvent(
       name: 'driver_withdrawal_yape',
       parameters: {
         'driver_id': widget.driverId,
         'amount': _withdrawalAmount,
         'phone': _phoneController.text,
+        'withdrawal_id': result.withdrawalId ?? '',
       },
     );
   }
 
   Future<void> _processPlinWithdrawal() async {
-    // Simular procesamiento con Plin
-    await Future.delayed(const Duration(seconds: 1));
-    
+    // 💸 Procesamiento REAL con MercadoPago Money Out API - Plin
+    debugPrint('💸 Procesando retiro Plin con MercadoPago...');
+
+    final result = await _paymentService.requestWithdrawal(
+      driverId: widget.driverId,
+      amount: _withdrawalAmount,
+      method: 'plin',
+      phoneNumber: _phoneController.text,
+      accountHolderName: _accountHolderNameController.text,
+      accountHolderDocumentNumber: _documentNumberController.text,
+      accountHolderDocumentType: 'DNI',
+    );
+
+    if (!result.success) {
+      throw Exception(result.error ?? 'Error procesando retiro Plin');
+    }
+
+    debugPrint('✅ Retiro Plin procesado: ${result.withdrawalId}');
+
     await _firebaseService.analytics.logEvent(
       name: 'driver_withdrawal_plin',
       parameters: {
         'driver_id': widget.driverId,
         'amount': _withdrawalAmount,
         'phone': _phoneController.text,
+        'withdrawal_id': result.withdrawalId ?? '',
       },
     );
   }
@@ -296,8 +382,9 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   // ============================================================================
 
   bool _validateWithdrawal() {
+    // Validaciones de monto
     if (_withdrawalAmount < _minWithdrawal) {
-      _showErrorSnackBar('El monto mínimo de retiro es S/$_minWithdrawal');
+      _showErrorSnackBar('El monto mínimo de retiro es S/. $_minWithdrawal');
       return false;
     }
 
@@ -307,20 +394,41 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     }
 
     if (_withdrawalAmount > _maxDailyWithdrawal) {
-      _showErrorSnackBar('El monto máximo diario de retiro es S/$_maxDailyWithdrawal');
+      _showErrorSnackBar('El monto máximo diario de retiro es S/. $_maxDailyWithdrawal');
       return false;
     }
 
+    // Validaciones de datos del titular (requeridos por MercadoPago)
+    if (_accountHolderNameController.text.isEmpty) {
+      _showErrorSnackBar('Ingresa el nombre del titular de la cuenta');
+      return false;
+    }
+
+    if (_documentNumberController.text.isEmpty) {
+      _showErrorSnackBar('Ingresa el número de DNI');
+      return false;
+    }
+
+    if (!RegExp(r'^[0-9]{8}$').hasMatch(_documentNumberController.text)) {
+      _showErrorSnackBar('El DNI debe tener 8 dígitos');
+      return false;
+    }
+
+    // Validaciones según método de retiro
     switch (_selectedWithdrawalMethod) {
       case 'bank_transfer':
         if (_accountNumberController.text.isEmpty) {
-          _showErrorSnackBar('Ingresa el número de cuenta');
+          _showErrorSnackBar('Ingresa el número de cuenta bancaria');
+          return false;
+        }
+        if (_accountNumberController.text.length < 13) {
+          _showErrorSnackBar('El número de cuenta debe tener al menos 13 dígitos');
           return false;
         }
         break;
       case 'yape':
       case 'plin':
-        if (_phoneController.text.isEmpty || 
+        if (_phoneController.text.isEmpty ||
             !RegExp(r'^9[0-9]{8}$').hasMatch(_phoneController.text)) {
           _showErrorSnackBar('Ingresa un número de teléfono válido (9XXXXXXXX)');
           return false;
@@ -344,7 +452,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('¿Confirmas el retiro de S/${_withdrawalAmount.toStringAsFixed(2)}?'),
+            Text('¿Confirmas el retiro de S/. ${_withdrawalAmount.toStringAsFixed(2)}?'),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -359,17 +467,17 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Monto a retirar:'),
-                      Text('S/${_withdrawalAmount.toStringAsFixed(2)}'),
+                      Text('S/. ${_withdrawalAmount.toStringAsFixed(2)}'),
                     ],
                   ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Comisión:'),
-                      Text('- S/${_withdrawalFee.toStringAsFixed(2)}'),
+                      Text('- S/. ${_withdrawalFee.toStringAsFixed(2)}'),
                     ],
                   ),
-                  const Divider(),
+                  Divider(color: Theme.of(context).dividerColor),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -378,7 +486,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                         style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'S/${_netAmount.toStringAsFixed(2)}',
+                        'S/. ${_netAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.green,
@@ -448,7 +556,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
               child: Column(
                 children: [
                   Text(
-                    'S/${_netAmount.toStringAsFixed(2)}',
+                    'S/. ${_netAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -491,6 +599,8 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     _withdrawalAmountController.clear();
     _accountNumberController.clear();
     _phoneController.clear();
+    _accountHolderNameController.clear();
+    _documentNumberController.clear();
     setState(() {
       _withdrawalAmount = 0.0;
       _withdrawalFee = 0.0;
@@ -536,18 +646,21 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.grey.shade50,
+      backgroundColor: colorScheme.surfaceContainerHighest,
       appBar: AppBar(
         title: const Text('💰 Mis Ganancias'),
         backgroundColor: Colors.green.shade600,
-        foregroundColor: Colors.white,
+        foregroundColor: colorScheme.onPrimary,
         elevation: 0,
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
+          indicatorColor: colorScheme.onPrimary,
+          labelColor: colorScheme.onPrimary,
+          unselectedLabelColor: colorScheme.onPrimary.withValues(alpha: 0.7),
           tabs: const [
             Tab(text: 'Dashboard'),
             Tab(text: 'Retirar'),
@@ -570,21 +683,24 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   }
 
   Widget _buildDashboardTab() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          _buildEarningsSummaryCard(),
+          _buildEarningsSummaryCard(colorScheme),
           const SizedBox(height: 16),
-          _buildEarningsHistoryCard(),
+          _buildEarningsHistoryCard(colorScheme),
           const SizedBox(height: 16),
-          _buildQuickStatsCard(),
+          _buildQuickStatsCard(colorScheme),
         ],
       ),
     );
   }
 
-  Widget _buildEarningsSummaryCard() {
+  Widget _buildEarningsSummaryCard(ColorScheme colorScheme) {
     return Card(
       elevation: 4,
       child: Padding(
@@ -613,15 +729,15 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
               ),
               child: Column(
                 children: [
-                  const Text(
+                  Text(
                     'Disponible para retiro',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
+                    style: TextStyle(color: colorScheme.onPrimary, fontSize: 16),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'S/${_availableForWithdrawal.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    'S/. ${_availableForWithdrawal.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: colorScheme.onPrimary,
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                     ),
@@ -635,17 +751,19 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                 Expanded(
                   child: _buildSummaryItem(
                     'Total Ganado',
-                    'S/${_totalEarnings.toStringAsFixed(2)}',
+                    'S/. ${_totalEarnings.toStringAsFixed(2)}',
                     Icons.trending_up,
                     Colors.blue,
+                    colorScheme,
                   ),
                 ),
                 Expanded(
                   child: _buildSummaryItem(
                     'Total Retirado',
-                    'S/${_totalWithdrawn.toStringAsFixed(2)}',
+                    'S/. ${_totalWithdrawn.toStringAsFixed(2)}',
                     Icons.download,
                     Colors.orange,
+                    colorScheme,
                   ),
                 ),
               ],
@@ -656,9 +774,10 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                 Expanded(
                   child: _buildSummaryItem(
                     'Pendientes',
-                    'S/${_pendingWithdrawals.toStringAsFixed(2)}',
+                    'S/. ${_pendingWithdrawals.toStringAsFixed(2)}',
                     Icons.schedule,
-                    Colors.grey,
+                    colorScheme.surfaceContainerHighest,
+                    colorScheme,
                   ),
                 ),
                 Expanded(
@@ -668,7 +787,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                     label: const Text('Retirar'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                      foregroundColor: colorScheme.onPrimary,
                     ),
                   ),
                 ),
@@ -680,7 +799,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildSummaryItem(String title, String value, IconData icon, Color color) {
+  Widget _buildSummaryItem(String title, String value, IconData icon, Color color, ColorScheme colorScheme) {
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -694,7 +813,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
           const SizedBox(height: 4),
           Text(
             title,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 12, color: colorScheme.surfaceContainerHighest),
             textAlign: TextAlign.center,
           ),
           Text(
@@ -711,7 +830,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildEarningsHistoryCard() {
+  Widget _buildEarningsHistoryCard(ColorScheme colorScheme) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -739,7 +858,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                   title: Text(period.period),
                   subtitle: Text('${period.trips} viajes • ${period.hours} horas'),
                   trailing: Text(
-                    'S/${period.earnings.toStringAsFixed(2)}',
+                    'S/. ${period.earnings.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -755,8 +874,8 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildQuickStatsCard() {
-    final avgPerTrip = _earningsHistory.isNotEmpty 
+  Widget _buildQuickStatsCard(ColorScheme colorScheme) {
+    final avgPerTrip = _earningsHistory.isNotEmpty
       ? _earningsHistory.first.earnings / _earningsHistory.first.trips
       : 0.0;
     final avgPerHour = _earningsHistory.isNotEmpty
@@ -779,17 +898,19 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                 Expanded(
                   child: _buildStatItem(
                     'Promedio por viaje',
-                    'S/${avgPerTrip.toStringAsFixed(2)}',
+                    'S/. ${avgPerTrip.toStringAsFixed(2)}',
                     Icons.directions_car,
                     Colors.blue,
+                    colorScheme,
                   ),
                 ),
                 Expanded(
                   child: _buildStatItem(
                     'Promedio por hora',
-                    'S/${avgPerHour.toStringAsFixed(2)}',
+                    'S/. ${avgPerHour.toStringAsFixed(2)}',
                     Icons.schedule,
                     Colors.orange,
+                    colorScheme,
                   ),
                 ),
               ],
@@ -800,7 +921,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildStatItem(String title, String value, IconData icon, Color color) {
+  Widget _buildStatItem(String title, String value, IconData icon, Color color, ColorScheme colorScheme) {
     return Container(
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -814,7 +935,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
           const SizedBox(height: 8),
           Text(
             title,
-            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 14, color: colorScheme.surfaceContainerHighest),
             textAlign: TextAlign.center,
           ),
           Text(
@@ -832,12 +953,15 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   }
 
   Widget _buildWithdrawalTab() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildAvailableBalanceCard(),
+          _buildAvailableBalanceCard(colorScheme),
           const SizedBox(height: 16),
           _buildWithdrawalMethodCard(),
           const SizedBox(height: 16),
@@ -845,15 +969,15 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
           const SizedBox(height: 16),
           _buildDestinationCard(),
           const SizedBox(height: 16),
-          _buildWithdrawalSummaryCard(),
+          _buildWithdrawalSummaryCard(colorScheme),
           const SizedBox(height: 24),
-          _buildProcessWithdrawalButton(),
+          _buildProcessWithdrawalButton(colorScheme),
         ],
       ),
     );
   }
 
-  Widget _buildAvailableBalanceCard() {
+  Widget _buildAvailableBalanceCard(ColorScheme colorScheme) {
     return Card(
       color: Colors.green.shade50,
       child: Padding(
@@ -866,12 +990,12 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Saldo Disponible',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                    style: TextStyle(fontSize: 16, color: colorScheme.surfaceContainerHighest),
                   ),
                   Text(
-                    'S/${_availableForWithdrawal.toStringAsFixed(2)}',
+                    'S/. ${_availableForWithdrawal.toStringAsFixed(2)}',
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
@@ -879,10 +1003,10 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                     ),
                   ),
                   Text(
-                    'Mínimo: S/$_minWithdrawal • Máximo diario: S/$_maxDailyWithdrawal',
+                    'Mínimo: S/. $_minWithdrawal • Máximo diario: S/. $_maxDailyWithdrawal',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey.shade600,
+                      color: colorScheme.surfaceContainerHighest,
                     ),
                   ),
                 ],
@@ -995,9 +1119,9 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                 FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
               ],
               decoration: const InputDecoration(
-                labelText: 'Monto (S/)',
+                labelText: 'Monto (S/.)',
                 hintText: '0.00',
-                prefixText: 'S/ ',
+                prefixText: 'S/. ',
                 border: OutlineInputBorder(),
                 suffixIcon: Icon(Icons.money),
               ),
@@ -1069,7 +1193,44 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Destino',
+              'Datos del Titular',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            // Campos obligatorios para todos los métodos (requeridos por MercadoPago)
+            TextField(
+              controller: _accountHolderNameController,
+              keyboardType: TextInputType.name,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nombre Completo del Titular',
+                hintText: 'Juan Pérez García',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.person),
+                helperText: 'Nombre como aparece en tu DNI',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _documentNumberController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(8),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Número de DNI',
+                hintText: '12345678',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.credit_card),
+                helperText: 'DNI de 8 dígitos',
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 16),
+            const Text(
+              'Destino del Retiro',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -1105,6 +1266,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                   hintText: '1234567890123456',
                   border: OutlineInputBorder(),
                   suffixIcon: Icon(Icons.account_balance),
+                  helperText: 'Cuenta bancaria destino',
                 ),
               ),
             ] else ...[
@@ -1131,7 +1293,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildWithdrawalSummaryCard() {
+  Widget _buildWithdrawalSummaryCard(ColorScheme colorScheme) {
     if (_withdrawalAmount <= 0) return const SizedBox.shrink();
 
     return Card(
@@ -1150,17 +1312,17 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Monto a retirar:'),
-                Text('S/${_withdrawalAmount.toStringAsFixed(2)}'),
+                Text('S/. ${_withdrawalAmount.toStringAsFixed(2)}'),
               ],
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Comisión (${_getMethodDisplayName(_selectedWithdrawalMethod)}):'),
-                Text('- S/${_withdrawalFee.toStringAsFixed(2)}'),
+                Text('- S/. ${_withdrawalFee.toStringAsFixed(2)}'),
               ],
             ),
-            const Divider(),
+            Divider(color: Theme.of(context).dividerColor),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1169,7 +1331,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  'S/${_netAmount.toStringAsFixed(2)}',
+                  'S/. ${_netAmount.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1185,7 +1347,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                   : 'Procesamiento: Instantáneo',
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.grey.shade600,
+                color: colorScheme.surfaceContainerHighest,
               ),
             ),
           ],
@@ -1194,8 +1356,8 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
     );
   }
 
-  Widget _buildProcessWithdrawalButton() {
-    final isEnabled = _withdrawalAmount >= _minWithdrawal && 
+  Widget _buildProcessWithdrawalButton(ColorScheme colorScheme) {
+    final isEnabled = _withdrawalAmount >= _minWithdrawal &&
                      _withdrawalAmount <= _availableForWithdrawal &&
                      !_isLoading;
 
@@ -1205,11 +1367,11 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
         onPressed: isEnabled ? _processWithdrawal : null,
         icon: const Icon(Icons.download),
         label: Text(
-          'Procesar Retiro${_netAmount > 0 ? ' (S/${_netAmount.toStringAsFixed(2)})' : ''}',
+          'Procesar Retiro${_netAmount > 0 ? ' (S/. ${_netAmount.toStringAsFixed(2)})' : ''}',
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
+          foregroundColor: colorScheme.onPrimary,
           padding: const EdgeInsets.symmetric(vertical: 16),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
@@ -1218,22 +1380,25 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
   }
 
   Widget _buildHistoryTab() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
           if (_withdrawalHistory.isEmpty)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(32),
+                padding: const EdgeInsets.all(32),
                 child: Center(
                   child: Column(
                     children: [
-                      Icon(Icons.history, size: 64, color: Colors.grey),
-                      SizedBox(height: 16),
+                      Icon(Icons.history, size: 64, color: colorScheme.surfaceContainerHighest),
+                      const SizedBox(height: 16),
                       Text(
                         'No tienes retiros previos',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                        style: TextStyle(fontSize: 16, color: colorScheme.surfaceContainerHighest),
                       ),
                     ],
                   ),
@@ -1260,7 +1425,7 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                     statusIcon = Icons.cancel;
                     break;
                   default:
-                    statusColor = Colors.grey;
+                    statusColor = colorScheme.surfaceContainerHighest;
                     statusIcon = Icons.help;
                 }
 
@@ -1271,13 +1436,13 @@ class _EarningsWithdrawalScreenState extends State<EarningsWithdrawalScreen>
                       backgroundColor: statusColor.withValues(alpha: 0.2),
                       child: Icon(statusIcon, color: statusColor),
                     ),
-                    title: Text('S/${withdrawal.amount.toStringAsFixed(2)}'),
+                    title: Text('S/. ${withdrawal.amount.toStringAsFixed(2)}'),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('${withdrawal.method} • ${withdrawal.destination}'),
                         Text(
-                          'Recibido: S/${withdrawal.netAmount.toStringAsFixed(2)} • '
+                          'Recibido: S/. ${withdrawal.netAmount.toStringAsFixed(2)} • '
                           '${withdrawal.createdAt.day}/${withdrawal.createdAt.month}/${withdrawal.createdAt.year}',
                           style: const TextStyle(fontSize: 12),
                         ),

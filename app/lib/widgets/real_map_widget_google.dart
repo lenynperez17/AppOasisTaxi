@@ -227,7 +227,7 @@ class _RealMapWidgetState extends State<RealMapWidget> {
             right: 16,
             child: FloatingActionButton(
               mini: true,
-              backgroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.surface,
               onPressed: () {
                 if (_currentPosition != null) {
                   _animateToPosition(_currentPosition!);
@@ -235,7 +235,7 @@ class _RealMapWidgetState extends State<RealMapWidget> {
               },
               child: Icon(
                 Icons.my_location,
-                color: Color(0xFF4F46E5),
+                color: Theme.of(context).colorScheme.primary,
               ),
             ),
           ),
@@ -244,13 +244,13 @@ class _RealMapWidgetState extends State<RealMapWidget> {
         if (_currentPosition == null && widget.showCurrentLocation)
           Center(
             child: Container(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
                     blurRadius: 10,
                   ),
                 ],
@@ -259,13 +259,13 @@ class _RealMapWidgetState extends State<RealMapWidget> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
+                    valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Obteniendo ubicación...',
                     style: TextStyle(
-                      color: Colors.grey[700],
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 14,
                     ),
                   ),

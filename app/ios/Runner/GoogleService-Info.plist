@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- 🚖 OASIS TAXI PERÚ - Configuración Firebase iOS REAL -->
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>850366375349-km293vmd6an7lv4dqq8odr03gl5mqodm.apps.googleusercontent.com</string>
+	<string>747030072271-9s3d31dadde9bipp954jbpp0stc92k12.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.850366375349-km293vmd6an7lv4dqq8odr03gl5mqodm</string>
+	<string>com.googleusercontent.apps.747030072271-9s3d31dadde9bipp954jbpp0stc92k12</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>747030072271-2rva4tau134pc075i7rc995lgescavug.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
-	<string>AIzaSyDBHSo6DtRF0quk1NWcLyutvxkOxsS4e6Q</string>
+	<string>AIzaSyBdwktxZJBpUuKzEzrPMyEpFXIKY4p-UFc</string>
 	<key>GCM_SENDER_ID</key>
-	<string>850366375349</string>
+	<string>747030072271</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>com.oasistaxis.app</string>
 	<key>PROJECT_ID</key>
-	<string>oasis-taxi-peru</string>
+	<string>app-oasis-taxi</string>
 	<key>STORAGE_BUCKET</key>
-	<string>oasis-taxi-peru.firebasestorage.app</string>
+	<string>app-oasis-taxi.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -30,8 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:850366375349:ios:0a7783bb6ba3b216ff65fc</string>
-	<key>DATABASE_URL</key>
-	<string>https://oasis-taxi-peru-default-rtdb.firebaseio.com</string>
+	<string>1:747030072271:ios:41418181e11cd237f560ba</string>
 </dict>
 </plist>

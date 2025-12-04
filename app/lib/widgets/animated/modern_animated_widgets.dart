@@ -127,7 +127,7 @@ class _AnimatedPulseButtonState extends State<AnimatedPulseButton>
                     width: 24,
                     height: 24,
                     child: CircularProgressIndicator(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onPrimary,
                       strokeWidth: 2,
                     ),
                   ),
@@ -139,7 +139,7 @@ class _AnimatedPulseButtonState extends State<AnimatedPulseButton>
                     if (widget.icon != null) ...[
                       Icon(
                         widget.icon,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                         size: 20,
                       ),
                       SizedBox(width: 6),
@@ -148,7 +148,7 @@ class _AnimatedPulseButtonState extends State<AnimatedPulseButton>
                       child: Text(
                         widget.text,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.onPrimary,
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
                         ),
@@ -236,11 +236,11 @@ class _AnimatedElevatedCardState extends State<AnimatedElevatedCard>
             scale: _isPressed ? 0.98 : 1.0,
             child: Container(
               decoration: BoxDecoration(
-                color: widget.color ?? Colors.white,
+                color: widget.color ?? Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(widget.borderRadius),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                     blurRadius: 10 + _elevationAnimation.value,
                     offset: Offset(0, 5 + _elevationAnimation.value / 2),
                     spreadRadius: _elevationAnimation.value / 5,
@@ -337,7 +337,7 @@ class _ModernLoadingIndicatorState extends State<ModernLoadingIndicator>
               child: Padding(
                 padding: EdgeInsets.all(widget.size * 0.15),
                 child: CircularProgressIndicator(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onPrimary,
                   strokeWidth: 3,
                 ),
               ),
@@ -428,7 +428,7 @@ class _AnimatedFloatingActionMenuState
                       mini: true,
                       backgroundColor: item.color ?? ModernTheme.primaryBlue,
                       onPressed: _isExpanded ? item.onPressed : null,
-                      child: Icon(item.icon, color: Colors.white),
+                      child: Icon(item.icon, color: Theme.of(context).colorScheme.onPrimary),
                     ),
                   ),
                 ),
@@ -446,7 +446,7 @@ class _AnimatedFloatingActionMenuState
                 angle: _expandAnimation.value * math.pi / 4,
                 child: Icon(
                   widget.mainIcon,
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onPrimary,
                 ),
               );
             },
@@ -536,12 +536,12 @@ class _PriceNegotiationSliderState extends State<PriceNegotiationSlider>
                 decoration: BoxDecoration(
                   gradient: ModernTheme.primaryGradient,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: ModernTheme.buttonShadow,
+                  boxShadow: ModernTheme.getButtonShadow(context),
                 ),
                 child: Text(
-                  'S/ ${_currentPrice.toStringAsFixed(2)}',
+                  'S/. ${_currentPrice.toStringAsFixed(2)}',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.onPrimary,
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
@@ -554,7 +554,7 @@ class _PriceNegotiationSliderState extends State<PriceNegotiationSlider>
         SliderTheme(
           data: SliderTheme.of(context).copyWith(
             activeTrackColor: ModernTheme.primaryOrange,
-            inactiveTrackColor: Colors.grey.shade300,
+            inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
             trackHeight: 6,
             thumbColor: ModernTheme.primaryOrange,
             thumbShape: RoundSliderThumbShape(enabledThumbRadius: 12),
@@ -577,14 +577,14 @@ class _PriceNegotiationSliderState extends State<PriceNegotiationSlider>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'S/ ${widget.minPrice.toStringAsFixed(2)}',
+              'S/. ${widget.minPrice.toStringAsFixed(2)}',
               style: TextStyle(
                 color: ModernTheme.textSecondary,
                 fontSize: 12,
               ),
             ),
             Text(
-              'Precio sugerido: S/ ${widget.suggestedPrice.toStringAsFixed(2)}',
+              'Precio sugerido: S/. ${widget.suggestedPrice.toStringAsFixed(2)}',
               style: TextStyle(
                 color: ModernTheme.success,
                 fontSize: 12,
@@ -592,7 +592,7 @@ class _PriceNegotiationSliderState extends State<PriceNegotiationSlider>
               ),
             ),
             Text(
-              'S/ ${widget.maxPrice.toStringAsFixed(2)}',
+              'S/. ${widget.maxPrice.toStringAsFixed(2)}',
               style: TextStyle(
                 color: ModernTheme.textSecondary,
                 fontSize: 12,

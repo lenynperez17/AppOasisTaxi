@@ -1,24 +1,26 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:googleapis_auth/auth_io.dart';
-import 'dart:convert';
-import '../models/user_model.dart';
-import '../config/fcm_config.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'firebase_service.dart';
 
-/// Servicio FCM V1 API - Implementación completa y funcional
+/// ✅ Servicio FCM SEGURO - Notificaciones enviadas desde Cloud Functions
+///
+/// ⚠️ CAMBIO DE ARQUITECTURA DE SEGURIDAD:
+/// ANTES: La app Flutter tenía service-account.json y enviaba notificaciones directamente (INSEGURO)
+/// AHORA: Las notificaciones se envían desde Cloud Functions en el servidor (SEGURO)
+///
+/// VENTAJAS:
+/// - ✅ Service Account NO está en el APK (no puede ser extraído)
+/// - ✅ Mayor seguridad: permisos de admin solo en servidor
+/// - ✅ Mejor escalabilidad: Cloud Functions escala automáticamente
+/// - ✅ Logs centralizados en Firebase Console
 class FCMService {
   static final FCMService _instance = FCMService._internal();
   factory FCMService() => _instance;
   FCMService._internal();
 
   final FirebaseService _firebaseService = FirebaseService();
-
-  // Cache del access token para no regenerarlo en cada request
-  String? _cachedAccessToken;
-  DateTime? _tokenExpiry;
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   /// Inicializar servicio FCM
   Future<void> initialize() async {
@@ -38,488 +40,359 @@ class FCMService {
     }
   }
 
-  /// Obtener Access Token OAuth2 para FCM V1 API
-  Future<String?> _getAccessToken() async {
-    try {
-      // Si el token está en cache y no ha expirado, usarlo
-      if (_cachedAccessToken != null && _tokenExpiry != null) {
-        if (DateTime.now().isBefore(_tokenExpiry!)) {
-          return _cachedAccessToken;
-        }
-      }
-
-      // Cargar Service Account JSON desde assets
-      final serviceAccountJson = await rootBundle.loadString(
-        FCMConfig.serviceAccountPath,
-      );
-      final accountCredentials = ServiceAccountCredentials.fromJson(
-        json.decode(serviceAccountJson),
-      );
-
-      // Obtener cliente autenticado
-      final client = await clientViaServiceAccount(
-        accountCredentials,
-        FCMConfig.scopes,
-      );
-
-      // Obtener access token
-      final accessToken = client.credentials.accessToken.data;
-
-      // Cachear token (expira en ~1 hora, usar 50 min para seguridad)
-      _cachedAccessToken = accessToken;
-      _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
-
-      client.close();
-
-      debugPrint('✅ Access Token obtenido exitosamente');
-      return accessToken;
-    } catch (e) {
-      debugPrint('❌ Error obteniendo Access Token: $e');
-      debugPrint('⚠️ Asegúrate de tener service-account.json en assets/');
-      await _firebaseService.recordError(e, StackTrace.current);
-      return null;
-    }
-  }
-
-  /// Enviar notificación usando FCM V1 API
-  Future<bool> _sendFCMNotification({
-    required String fcmToken,
+  /// ✅ Enviar notificación usando Cloud Function (SEGURO)
+  ///
+  /// Esta función llama a la Cloud Function `sendPushNotification` que:
+  /// 1. Valida permisos en el servidor
+  /// 2. Obtiene el token FCM del usuario desde Firestore
+  /// 3. Envía la notificación usando Firebase Admin SDK (con service-account del servidor)
+  Future<bool> _sendNotificationViaCloudFunction({
+    required String userId,
     required String title,
     required String body,
     required Map<String, dynamic> data,
     String? imageUrl,
-    AndroidConfig? androidConfig,
-    IOSConfig? iosConfig,
   }) async {
     try {
-      // Validar token FCM
-      if (!isValidFCMToken(fcmToken)) {
-        debugPrint('❌ Token FCM inválido');
-        return false;
-      }
+      debugPrint('📲 Enviando notificación vía Cloud Function...');
+      debugPrint('   Usuario: $userId');
+      debugPrint('   Título: $title');
 
-      // Obtener Access Token OAuth2
-      final accessToken = await _getAccessToken();
-      if (accessToken == null) {
-        debugPrint('❌ No se pudo obtener Access Token');
-        return false;
-      }
+      final result = await _functions.httpsCallable('sendPushNotification').call({
+        'userId': userId,
+        'title': title,
+        'body': body,
+        'data': data,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+      });
 
-      // Construir payload FCM V1 (estructura diferente a Legacy)
-      final Map<String, dynamic> message = {
-        'token': fcmToken,
-        'notification': {
-          'title': title,
-          'body': body,
-          if (imageUrl != null) 'image': imageUrl,
-        },
-        'data': {
-          ...data,
-          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-          'timestamp': DateTime.now().toIso8601String(),
-        },
-      };
+      final success = result.data['success'] == true;
 
-      // Configuración Android
-      if (androidConfig != null) {
-        message['android'] = {
-          'priority': 'high',
-          'notification': {
-            'channel_id': androidConfig.channelId,
-            if (androidConfig.color != null) 'color': androidConfig.color,
-            if (androidConfig.icon != null) 'icon': androidConfig.icon,
-            'sound': 'default',
-          },
-        };
-      }
-
-      // Configuración iOS
-      if (iosConfig != null) {
-        message['apns'] = {
-          'payload': {
-            'aps': {
-              if (iosConfig.sound != null) 'sound': iosConfig.sound,
-              if (iosConfig.badge != null) 'badge': iosConfig.badge,
-              if (iosConfig.contentAvailable) 'content-available': 1,
-            },
-          },
-        };
-      }
-
-      final payload = {'message': message};
-
-      // Enviar request HTTP POST a FCM V1
-      debugPrint('📤 Enviando notificación FCM V1...');
-      final response = await http.post(
-        Uri.parse(FCMConfig.fcmEndpoint),
-        headers: FCMConfig.getHeaders(accessToken),
-        body: json.encode(payload),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = json.decode(response.body);
-        debugPrint('✅ Notificación enviada: ${responseData['name']}');
-        return true;
+      if (success) {
+        debugPrint('✅ Notificación enviada exitosamente');
+        debugPrint('   Message ID: ${result.data['messageId']}');
       } else {
-        debugPrint('❌ Error ${response.statusCode}: ${response.body}');
-        return false;
+        debugPrint('❌ Error en respuesta de Cloud Function');
       }
-    } catch (e, stackTrace) {
-      debugPrint('❌ Excepción enviando notificación: $e');
-      await _firebaseService.recordError(e, stackTrace);
+
+      return success;
+    } catch (e) {
+      debugPrint('❌ Error llamando a Cloud Function: $e');
+      await _firebaseService.recordError(e, StackTrace.current);
       return false;
     }
   }
 
-  /// Enviar notificación a conductor
-  Future<bool> sendRideNotificationToDriver({
-    required String driverFcmToken,
+  /// Validar formato de token FCM
+  bool isValidFCMToken(String token) {
+    return token.isNotEmpty && token.length > 100;
+  }
+
+  /// Enviar notificación de nuevo viaje a conductor
+  Future<bool> sendTripRequestToDriver({
+    required String driverId,
     required String tripId,
-    required String pickupAddress,
-    required String destinationAddress,
+    required String passengerName,
+    required String origin,
+    required String destination,
     required double estimatedFare,
-    required double estimatedDistance,
-    String? passengerName,
   }) async {
-    return await _sendFCMNotification(
-      fcmToken: driverFcmToken,
-      title: '¡Nueva solicitud de viaje!',
-      body: '${passengerName ?? "Un pasajero"} solicita viaje desde $pickupAddress',
+    return await _sendNotificationViaCloudFunction(
+      userId: driverId,
+      title: 'Nuevo viaje disponible',
+      body: '$passengerName solicita un viaje de $origin a $destination',
       data: {
-        'type': 'ride_request',
+        'type': 'trip_request',
         'tripId': tripId,
-        'pickupAddress': pickupAddress,
-        'destinationAddress': destinationAddress,
+        'passengerId': passengerName,
+        'origin': origin,
+        'destination': destination,
         'estimatedFare': estimatedFare.toString(),
-        'estimatedDistance': estimatedDistance.toString(),
-        'passengerName': passengerName ?? '',
+        'action': 'open_trip_details',
       },
-      androidConfig: AndroidConfig(
-        channelId: 'oasis_taxi_rides',
-        color: '#4CAF50',
-      ),
     );
   }
 
-  /// Enviar notificación a múltiples conductores
-  Future<List<String>> sendRideNotificationToMultipleDrivers({
-    required List<UserModel> drivers,
+  /// Notificar al pasajero que el conductor aceptó
+  Future<bool> sendTripAcceptedToPassenger({
+    required String passengerId,
     required String tripId,
-    required String pickupAddress,
-    required String destinationAddress,
-    required double estimatedFare,
-    required double estimatedDistance,
-    String? passengerName,
+    required String driverName,
+    required String vehicleInfo,
+    required String estimatedArrival,
   }) async {
-    final List<String> successfulTokens = [];
-    final driversWithTokens = drivers.where((d) =>
-      d.fcmToken != null && isValidFCMToken(d.fcmToken!)
-    ).toList();
-
-    debugPrint('📱 Enviando a ${driversWithTokens.length} conductores');
-
-    for (final driver in driversWithTokens) {
-      final success = await sendRideNotificationToDriver(
-        driverFcmToken: driver.fcmToken!,
-        tripId: tripId,
-        pickupAddress: pickupAddress,
-        destinationAddress: destinationAddress,
-        estimatedFare: estimatedFare,
-        estimatedDistance: estimatedDistance,
-        passengerName: passengerName,
-      );
-
-      if (success) successfulTokens.add(driver.fcmToken!);
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-
-    debugPrint('✅ Enviadas: ${successfulTokens.length}/${driversWithTokens.length}');
-    return successfulTokens;
+    return await _sendNotificationViaCloudFunction(
+      userId: passengerId,
+      title: '¡Conductor encontrado!',
+      body: '$driverName ($vehicleInfo) está en camino. Llegada estimada: $estimatedArrival',
+      data: {
+        'type': 'trip_accepted',
+        'tripId': tripId,
+        'driverName': driverName,
+        'vehicleInfo': vehicleInfo,
+        'action': 'open_tracking',
+      },
+    );
   }
 
-  /// Actualización de estado del viaje
-  Future<bool> sendTripStatusUpdate({
-    required String userFcmToken,
+  /// Notificar que el conductor llegó al punto de recogida
+  Future<bool> sendDriverArrivedToPassenger({
+    required String passengerId,
     required String tripId,
-    required String status,
-    String? driverName,
-    String? vehicleInfo,
-    Map<String, dynamic> customData = const {},
+    required String driverName,
   }) async {
-    String title = 'Actualización de viaje';
-    String body = 'Tu viaje ha sido actualizado';
+    return await _sendNotificationViaCloudFunction(
+      userId: passengerId,
+      title: 'Tu conductor ha llegado',
+      body: '$driverName está esperándote en el punto de recogida',
+      data: {
+        'type': 'driver_arrived',
+        'tripId': tripId,
+        'action': 'open_tracking',
+      },
+    );
+  }
 
-    switch (status.toLowerCase()) {
-      case 'accepted':
-        title = '¡Viaje aceptado!';
-        body = '${driverName ?? "Tu conductor"} ha aceptado el viaje';
-        break;
-      case 'arrived':
-        title = '¡Tu conductor llegó!';
-        body = '${driverName ?? "El conductor"} está esperándote';
-        break;
-      case 'started':
-        title = '¡Viaje iniciado!';
-        body = 'En camino a tu destino';
-        break;
-      case 'completed':
-        title = '¡Viaje completado!';
-        body = 'Has llegado a tu destino';
-        break;
-      case 'cancelled':
-        title = 'Viaje cancelado';
-        body = 'Tu viaje ha sido cancelado';
-        break;
-    }
+  /// Notificar inicio del viaje
+  Future<bool> sendTripStartedNotification({
+    required String userId,
+    required String tripId,
+    required String userType,
+  }) async {
+    final title = userType == 'passenger'
+        ? 'Viaje iniciado'
+        : 'Viaje en curso';
+    final body = userType == 'passenger'
+        ? 'Tu viaje ha comenzado. ¡Disfruta el trayecto!'
+        : 'El pasajero ha abordado. Viaje en curso.';
 
-    return await _sendFCMNotification(
-      fcmToken: userFcmToken,
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
       title: title,
       body: body,
       data: {
-        'type': 'trip_status_update',
+        'type': 'trip_started',
         'tripId': tripId,
-        'status': status,
-        'driverName': driverName ?? '',
-        'vehicleInfo': vehicleInfo ?? '',
-        ...customData,
+        'action': 'open_tracking',
       },
-      androidConfig: AndroidConfig(channelId: 'oasis_taxi_rides'),
     );
   }
 
-  /// Notificación personalizada
-  Future<bool> sendCustomNotification({
-    required String userFcmToken,
+  /// Notificar finalización del viaje
+  Future<bool> sendTripCompletedNotification({
+    required String userId,
+    required String tripId,
+    required double finalFare,
+    required String userType,
+  }) async {
+    final title = 'Viaje completado';
+    final body = userType == 'passenger'
+        ? 'Tu viaje ha finalizado. Total: S/. ${finalFare.toStringAsFixed(2)}'
+        : 'Viaje completado exitosamente. Ganancia: S/. ${finalFare.toStringAsFixed(2)}';
+
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
+      title: title,
+      body: body,
+      data: {
+        'type': 'trip_completed',
+        'tripId': tripId,
+        'finalFare': finalFare.toString(),
+        'action': 'open_rating',
+      },
+    );
+  }
+
+  /// Notificar cancelación de viaje
+  Future<bool> sendTripCancelledNotification({
+    required String userId,
+    required String tripId,
+    required String reason,
+    required String userType,
+  }) async {
+    final title = 'Viaje cancelado';
+    final body = userType == 'passenger'
+        ? 'Tu viaje ha sido cancelado. Motivo: $reason'
+        : 'El pasajero canceló el viaje. Motivo: $reason';
+
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
+      title: title,
+      body: body,
+      data: {
+        'type': 'trip_cancelled',
+        'tripId': tripId,
+        'reason': reason,
+        'action': 'close_trip',
+      },
+    );
+  }
+
+  /// Notificar nuevo mensaje en el chat
+  Future<bool> sendChatMessageNotification({
+    required String userId,
+    required String senderName,
+    required String message,
+    required String chatId,
+  }) async {
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
+      title: 'Nuevo mensaje de $senderName',
+      body: message,
+      data: {
+        'type': 'chat_message',
+        'chatId': chatId,
+        'senderName': senderName,
+        'action': 'open_chat',
+      },
+    );
+  }
+
+  /// Notificar cambio en el estado de verificación del conductor
+  Future<bool> sendDriverVerificationStatusNotification({
+    required String driverId,
+    required String status,
+    String? rejectionReason,
+  }) async {
+    final title = status == 'approved'
+        ? '¡Verificación aprobada!'
+        : 'Verificación pendiente';
+    final body = status == 'approved'
+        ? 'Tu cuenta de conductor ha sido aprobada. ¡Puedes comenzar a aceptar viajes!'
+        : rejectionReason ?? 'Tu verificación está siendo revisada.';
+
+    return await _sendNotificationViaCloudFunction(
+      userId: driverId,
+      title: title,
+      body: body,
+      data: {
+        'type': 'verification_status',
+        'status': status,
+        if (rejectionReason != null) 'reason': rejectionReason,
+        'action': 'open_profile',
+      },
+    );
+  }
+
+  /// Notificación de promoción disponible
+  Future<bool> sendPromotionNotification({
+    required String userId,
+    required String promoTitle,
+    required String promoDescription,
+    required String promoCode,
+  }) async {
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
+      title: '🎉 $promoTitle',
+      body: promoDescription,
+      data: {
+        'type': 'promotion',
+        'promoCode': promoCode,
+        'action': 'open_promotions',
+      },
+    );
+  }
+
+  /// Notificación genérica
+  Future<bool> sendGenericNotification({
+    required String userId,
     required String title,
     required String body,
-    Map<String, dynamic> data = const {},
+    Map<String, dynamic>? data,
     String? imageUrl,
   }) async {
-    return await _sendFCMNotification(
-      fcmToken: userFcmToken,
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
       title: title,
       body: body,
-      data: {'type': 'custom', ...data},
+      data: data ?? {},
       imageUrl: imageUrl,
     );
   }
 
-  /// Notificación promocional
-  Future<bool> sendPromotionalNotification({
-    required String userFcmToken,
-    required String promoCode,
-    required String discount,
-    required String expiryDate,
-  }) async {
-    return await _sendFCMNotification(
-      fcmToken: userFcmToken,
-      title: '🎉 ¡Nueva promoción disponible!',
-      body: 'Usa el código $promoCode y obtén $discount de descuento',
-      data: {
-        'type': 'promotion',
-        'promoCode': promoCode,
-        'discount': discount,
-        'expiryDate': expiryDate,
-      },
-      androidConfig: AndroidConfig(channelId: 'oasis_taxi_promotions'),
-    );
-  }
+  // ============================================
+  // MÉTODOS ADICIONALES (compatibilidad)
+  // ============================================
 
-  /// Limpiar tokens inválidos
-  Future<int> cleanupInvalidTokens() async {
+  /// Obtener token FCM del dispositivo actual
+  Future<String?> getDeviceFCMToken() async {
     try {
-      int cleanedCount = 0;
-      final usersSnapshot = await _firebaseService.firestore
-          .collection('users')
-          .where('fcmToken', isNull: false)
-          .get();
-
-      for (final doc in usersSnapshot.docs) {
-        final token = doc.data()['fcmToken'] as String?;
-        if (token != null && !isValidFCMToken(token)) {
-          await doc.reference.update({'fcmToken': null});
-          cleanedCount++;
-        }
-      }
-
-      debugPrint('✅ Limpiados $cleanedCount tokens');
-      return cleanedCount;
+      return await FirebaseMessaging.instance.getToken();
     } catch (e) {
-      debugPrint('❌ Error limpiando tokens: $e');
-      return 0;
-    }
-  }
-
-  /// Alerta de emergencia
-  Future<bool> sendEmergencyAlert({
-    required String emergencyContactToken,
-    required String passengerName,
-    required String currentLocation,
-    required String tripId,
-  }) async {
-    return await _sendFCMNotification(
-      fcmToken: emergencyContactToken,
-      title: '🚨 ALERTA DE EMERGENCIA',
-      body: '$passengerName necesita ayuda urgente en $currentLocation',
-      data: {
-        'type': 'emergency',
-        'passengerName': passengerName,
-        'location': currentLocation,
-        'tripId': tripId,
-        'priority': 'urgent',
-      },
-      androidConfig: AndroidConfig(
-        channelId: 'oasis_taxi_emergency',
-        color: '#FF0000',
-      ),
-    );
-  }
-
-  /// Confirmación de pago
-  Future<bool> sendPaymentSuccess({
-    required String userFcmToken,
-    required String tripId,
-    required double amount,
-    required String paymentMethod,
-  }) async {
-    return await _sendFCMNotification(
-      fcmToken: userFcmToken,
-      title: '✅ Pago procesado',
-      body: 'Se procesó el pago de S/$amount con $paymentMethod',
-      data: {
-        'type': 'payment_success',
-        'tripId': tripId,
-        'amount': amount.toString(),
-        'paymentMethod': paymentMethod,
-      },
-      androidConfig: AndroidConfig(channelId: 'oasis_taxi_payments'),
-    );
-  }
-
-  /// Conductor llegó
-  Future<bool> sendDriverArrivedToPassenger({
-    required String passengerToken,
-    required String driverName,
-    required String vehicleInfo,
-  }) async {
-    return await _sendFCMNotification(
-      fcmToken: passengerToken,
-      title: '🚗 ¡Tu conductor llegó!',
-      body: '$driverName está esperándote en su $vehicleInfo',
-      data: {
-        'type': 'driver_arrived',
-        'driverName': driverName,
-        'vehicleInfo': vehicleInfo,
-      },
-      androidConfig: AndroidConfig(channelId: 'oasis_taxi_rides'),
-    );
-  }
-
-  /// Estadísticas del servicio
-  Future<Map<String, dynamic>> getServiceStats() async {
-    try {
-      final usersWithTokens = await _firebaseService.firestore
-          .collection('users')
-          .where('fcmToken', isNull: false)
-          .count()
-          .get();
-
-      return {
-        'status': 'active',
-        'users_with_tokens': usersWithTokens.count,
-        'api_version': 'V1',
-        'last_check': DateTime.now().toIso8601String(),
-      };
-    } catch (e) {
-      return {'status': 'error', 'error': e.toString()};
-    }
-  }
-
-  void dispose() {
-    _cachedAccessToken = null;
-    _tokenExpiry = null;
-  }
-
-  // ===== MÉTODOS ESTÁTICOS =====
-
-  static bool isValidFCMToken(String? token) {
-    if (token == null || token.isEmpty) return false;
-    return token.length > 50 && !token.contains(' ');
-  }
-
-  static Future<String?> getDeviceFCMToken() async {
-    try {
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) {
-        debugPrint('✅ Token: ${token.substring(0, 20)}...');
-      }
-      return token;
-    } catch (e) {
-      debugPrint('❌ Error obteniendo token: $e');
+      debugPrint('❌ Error obteniendo FCM token: $e');
       return null;
     }
   }
 
-  static Future<bool> subscribeToTopic(String topic) async {
+  /// Suscribirse a un topic de FCM
+  Future<void> subscribeToTopic(String topic) async {
     try {
       await FirebaseMessaging.instance.subscribeToTopic(topic);
-      debugPrint('✅ Suscrito a: $topic');
-      return true;
+      debugPrint('✅ Suscrito al topic: $topic');
     } catch (e) {
-      debugPrint('❌ Error suscripción: $e');
-      return false;
+      debugPrint('❌ Error suscribiéndose al topic $topic: $e');
     }
   }
 
-  static Future<bool> unsubscribeFromTopic(String topic) async {
+  /// Desuscribirse de un topic de FCM
+  Future<void> unsubscribeFromTopic(String topic) async {
     try {
       await FirebaseMessaging.instance.unsubscribeFromTopic(topic);
-      debugPrint('✅ Desuscrito de: $topic');
-      return true;
+      debugPrint('✅ Desuscrito del topic: $topic');
     } catch (e) {
-      debugPrint('❌ Error desuscripción: $e');
-      return false;
+      debugPrint('❌ Error desuscribiéndose del topic $topic: $e');
     }
   }
 
+  /// Enviar notificación de estado de viaje (genérico)
   Future<bool> sendTripStatusNotification({
-    required String userFcmToken,
+    required String userId,
     required String tripId,
     required String status,
-    Map<String, dynamic>? additionalData,
+    String? message,
   }) async {
-    return await sendTripStatusUpdate(
-      userFcmToken: userFcmToken,
-      tripId: tripId,
-      status: status,
-      customData: additionalData ?? {},
+    return await _sendNotificationViaCloudFunction(
+      userId: userId,
+      title: 'Actualización de viaje',
+      body: message ?? 'El estado del viaje ha cambiado a: $status',
+      data: {
+        'type': 'trip_status',
+        'tripId': tripId,
+        'status': status,
+        'action': 'open_tracking',
+      },
     );
   }
-}
 
-/// Configuración Android
-class AndroidConfig {
-  final String channelId;
-  final String? color;
-  final String? icon;
+  /// Enviar notificación a múltiples conductores
+  Future<Map<String, bool>> sendRideNotificationToMultipleDrivers({
+    required List<String> driverIds,
+    required String tripId,
+    required String passengerName,
+    required String origin,
+    required String destination,
+    required int estimatedFare,
+  }) async {
+    final results = <String, bool>{};
 
-  AndroidConfig({
-    required this.channelId,
-    this.color,
-    this.icon,
-  });
-}
+    for (final driverId in driverIds) {
+      final success = await sendTripRequestToDriver(
+        driverId: driverId,
+        tripId: tripId,
+        passengerName: passengerName,
+        origin: origin,
+        destination: destination,
+        estimatedFare: estimatedFare.toDouble(),
+      );
+      results[driverId] = success;
+    }
 
-/// Configuración iOS
-class IOSConfig {
-  final String? sound;
-  final int? badge;
-  final bool contentAvailable;
+    return results;
+  }
 
-  IOSConfig({
-    this.sound = 'default',
-    this.badge,
-    this.contentAvailable = false,
-  });
+  /// Limpiar tokens inválidos (stub - manejado por Cloud Functions)
+  Future<void> cleanupInvalidTokens() async {
+    debugPrint('ℹ️ Limpieza de tokens manejada por Cloud Functions');
+    // No-op: La limpieza de tokens se hace en el servidor
+  }
 }

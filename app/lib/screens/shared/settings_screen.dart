@@ -1,6 +1,10 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart'; // ✅ NUEVO: Para usar PreferencesProvider
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../providers/preferences_provider.dart'; // ✅ NUEVO: Provider de preferencias
+import '../../providers/auth_provider.dart'; // ✅ NUEVO: Provider de autenticación para cambio de contraseña
 
 class SettingsScreen extends StatefulWidget {
   final String? userType; // 'passenger', 'driver', 'admin'
@@ -12,15 +16,20 @@ class SettingsScreen extends StatefulWidget {
   _SettingsScreenState createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> 
+class _SettingsScreenState extends State<SettingsScreen>
     with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  
+
+  // ✅ NUEVO: Control de double-trigger para dark mode
+  bool _isDarkModeChanging = false;
+  DateTime? _lastDarkModeChange;
+
   // General settings
   bool _notificationsEnabled = true;
   bool _locationServices = true;
   bool _darkMode = false;
+  bool _darkModeEnabled = false; // ✅ NUEVO: Estado local para el switch de modo oscuro
   String _language = 'es';
   String _currency = 'PEN';
   
@@ -58,17 +67,24 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    
+
+    // ✅ NUEVO: Inicializar modo oscuro desde el provider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        _darkModeEnabled = context.read<PreferencesProvider>().darkMode;
+      });
+    });
+
     _fadeController = AnimationController(
       duration: Duration(milliseconds: 600),
       vsync: this,
     );
-    
+
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
       curve: Curves.easeIn,
     );
-    
+
     _fadeController.forward();
   }
   
@@ -81,20 +97,20 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Configuración',
           style: TextStyle(
-            color: Colors.white,
+            color: context.onPrimaryText,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.restore, color: Colors.white),
+            icon: Icon(Icons.restore, color: context.onPrimaryText),
             onPressed: _resetToDefaults,
           ),
         ],
@@ -115,13 +131,8 @@ class _SettingsScreenState extends State<SettingsScreen>
                     [
                       _buildLanguageTile(),
                       _buildCurrencyTile(),
-                      _buildSwitchTile(
-                        'Modo Oscuro',
-                        'Cambiar apariencia de la app',
-                        Icons.dark_mode,
-                        _darkMode,
-                        (value) => setState(() => _darkMode = value),
-                      ),
+                      // ✅ Dark Mode sin Consumer para evitar double-trigger
+                      _buildDarkModeTile(),
                       _buildSwitchTile(
                         'Servicios de Ubicación',
                         'Permitir acceso a tu ubicación',
@@ -136,7 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _buildSection(
                     'Notificaciones',
                     Icons.notifications,
-                    Colors.orange,
+                    ModernTheme.warning,
                     [
                       _buildSwitchTile(
                         'Notificaciones Push',
@@ -188,7 +199,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _buildSection(
                     'Privacidad',
                     Icons.privacy_tip,
-                    Colors.purple,
+                    ModernTheme.warning,
                     [
                       _buildSwitchTile(
                         'Compartir Ubicación',
@@ -313,7 +324,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _buildSection(
                     'Datos y Almacenamiento',
                     Icons.storage,
-                    Colors.teal,
+                    ModernTheme.info,
                     [
                       _buildSwitchTile(
                         'Sincronizar Solo con Wi-Fi',
@@ -354,7 +365,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _buildSection(
                     'Soporte y Acerca de',
                     Icons.help,
-                    Colors.indigo,
+                    ModernTheme.primaryBlue,
                     [
                       _buildActionTile(
                         'Centro de Ayuda',
@@ -394,7 +405,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   _buildSection(
                     'Gestión de Cuenta',
                     Icons.account_circle,
-                    Colors.grey,
+                    ModernTheme.accentGray,
                     [
                       _buildActionTile(
                         'Cerrar Sesión',
@@ -421,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                     child: Text(
                       'Oasis Taxi v1.0.0 (Build 100)',
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                         fontSize: 12,
                       ),
                       textAlign: TextAlign.center,
@@ -462,11 +473,11 @@ class _SettingsScreenState extends State<SettingsScreen>
         Container(
           margin: EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Theme.of(context).shadowColor.withValues(alpha: 0.05),
                 blurRadius: 5,
                 offset: Offset(0, 2),
               ),
@@ -478,6 +489,57 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
   
+  // ✅ CORREGIDO: Dark Mode con throttle para prevenir double-trigger
+  Widget _buildDarkModeTile() {
+    return ListTile(
+      leading: Container(
+        padding: EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.dark_mode, color: ModernTheme.oasisGreen, size: 20),
+      ),
+      title: Text(
+        'Modo Oscuro',
+        style: TextStyle(fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        'Cambiar apariencia de la app',
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
+      ),
+      trailing: Switch.adaptive(
+        value: _darkModeEnabled,
+        onChanged: _isDarkModeChanging ? null : (bool newValue) {
+          // ✅ SOLUCION DEFINITIVA: onChanged = null mientras se procesa para desactivar el switch completamente
+          print('🌙 Switch tocado con valor: $newValue');
+
+          // Establecer flag INMEDIATAMENTE de forma SÍNCRONA antes de cualquier operación
+          setState(() {
+            _isDarkModeChanging = true;
+            _darkModeEnabled = newValue;
+          });
+          print('🚫 Switch BLOQUEADO - procesando cambio...');
+
+          // Actualizar provider (sin await para no bloquear UI)
+          context.read<PreferencesProvider>().setDarkMode(newValue).then((_) {
+            print('✅ Cambio completado');
+            // Liberar flag después de completar
+            Future.delayed(Duration(milliseconds: 300), () {
+              if (mounted) {
+                setState(() {
+                  _isDarkModeChanging = false;
+                });
+                print('🔓 Switch DESBLOQUEADO');
+              }
+            });
+          });
+        },
+        activeColor: ModernTheme.oasisGreen,
+      ),
+    );
+  }
+
   Widget _buildSwitchTile(String title, String subtitle, IconData icon, bool value, Function(bool) onChanged) {
     return ListTile(
       leading: Container(
@@ -494,7 +556,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
       subtitle: Text(
         subtitle,
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Switch(
         value: value,
@@ -523,7 +585,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
       subtitle: Text(
         subtitle,
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Icon(Icons.arrow_forward_ios, size: 16),
       onTap: onTap,
@@ -535,10 +597,10 @@ class _SettingsScreenState extends State<SettingsScreen>
       leading: Container(
         padding: EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: ModernTheme.textSecondary.withValues(alpha: 0.1),
+          color: context.secondaryText.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, color: ModernTheme.textSecondary, size: 20),
+        child: Icon(icon, color: context.secondaryText, size: 20),
       ),
       title: Text(
         title,
@@ -547,7 +609,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       trailing: Text(
         value,
         style: TextStyle(
-          color: ModernTheme.textSecondary,
+          color: context.secondaryText,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -570,7 +632,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
       subtitle: Text(
         _language == 'es' ? 'Español' : 'English',
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Icon(Icons.arrow_forward_ios, size: 16),
       onTap: _showLanguageDialog,
@@ -585,15 +647,15 @@ class _SettingsScreenState extends State<SettingsScreen>
           color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(Icons.attach_money, color: ModernTheme.oasisGreen, size: 20),
+        child: Icon(Icons.account_balance_wallet, color: ModernTheme.oasisGreen, size: 20), // ✅ Cambiado de attach_money ($) a wallet
       ),
       title: Text(
         'Moneda',
         style: TextStyle(fontWeight: FontWeight.w500),
       ),
       subtitle: Text(
-        _currency == 'PEN' ? 'Soles (S/)' : 'Dólares (\$)',
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        'Soles (S/) - Moneda de Perú',
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Icon(Icons.arrow_forward_ios, size: 16),
       onTap: _showCurrencyDialog,
@@ -616,7 +678,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
       subtitle: Text(
         'Bloquear después de $_autoLockTime minutos',
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -657,7 +719,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
       subtitle: Text(
         _getMapStyleText(),
-        style: TextStyle(fontSize: 12, color: ModernTheme.textSecondary),
+        style: TextStyle(fontSize: 12, color: context.secondaryText),
       ),
       trailing: Icon(Icons.arrow_forward_ios, size: 16),
       onTap: _showMapStyleDialog,
@@ -727,7 +789,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Seleccionar Moneda'),
+        title: Text('Moneda Configurada'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -735,29 +797,11 @@ class _SettingsScreenState extends State<SettingsScreen>
               leading: Radio<String>(
                 value: 'PEN',
                 groupValue: _currency,
-                onChanged: (value) {
-                  setState(() => _currency = value!);
-                  Navigator.pop(context);
-                },
+                onChanged: null, // ✅ Deshabilitado - solo PEN disponible
               ),
               title: Text('Soles Peruanos (S/)'),
+              subtitle: Text('Moneda fija para Perú'),
               onTap: () {
-                setState(() => _currency = 'PEN');
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: Radio<String>(
-                value: 'USD',
-                groupValue: _currency,
-                onChanged: (value) {
-                  setState(() => _currency = value!);
-                  Navigator.pop(context);
-                },
-              ),
-              title: Text('Dólares Americanos (\$)'),
-              onTap: () {
-                setState(() => _currency = 'USD');
                 Navigator.pop(context);
               },
             ),
@@ -899,10 +943,141 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
   
   void _changePassword() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Redirigiendo a cambio de contraseña...'),
-        backgroundColor: ModernTheme.info,
+    final currentPasswordController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Text('Cambiar Contraseña'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: currentPasswordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Contraseña Actual',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: Icon(Icons.lock_outline),
+                ),
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: newPasswordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Nueva Contraseña',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: Icon(Icons.lock),
+                  helperText: 'Mín. 8 caracteres, mayúsculas, minúsculas, números y símbolos',
+                  helperMaxLines: 2,
+                ),
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: confirmPasswordController,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Confirmar Nueva Contraseña',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: Icon(Icons.check_circle_outline),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              currentPasswordController.dispose();
+              newPasswordController.dispose();
+              confirmPasswordController.dispose();
+              Navigator.pop(context);
+            },
+            child: Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              // Validar que las contraseñas coincidan
+              if (newPasswordController.text != confirmPasswordController.text) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Las contraseñas no coinciden'),
+                    backgroundColor: ModernTheme.error,
+                  ),
+                );
+                return;
+              }
+
+              // Validar fortaleza de contraseña
+              final password = newPasswordController.text;
+              if (password.length < 8 ||
+                  !password.contains(RegExp(r'[A-Z]')) ||
+                  !password.contains(RegExp(r'[a-z]')) ||
+                  !password.contains(RegExp(r'[0-9]')) ||
+                  !password.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'))) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('La contraseña debe tener al menos 8 caracteres con mayúsculas, minúsculas, números y caracteres especiales'),
+                    backgroundColor: ModernTheme.error,
+                    duration: Duration(seconds: 5),
+                  ),
+                );
+                return;
+              }
+
+              // Llamar a authProvider.changePassword()
+              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+              final success = await authProvider.changePassword(
+                currentPasswordController.text,
+                newPasswordController.text,
+              );
+
+              // Dispose controllers
+              currentPasswordController.dispose();
+              newPasswordController.dispose();
+              confirmPasswordController.dispose();
+
+              navigator.pop();
+
+              // Mostrar resultado real
+              if (success) {
+                scaffoldMessenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Contraseña actualizada exitosamente'),
+                    backgroundColor: ModernTheme.success,
+                  ),
+                );
+              } else {
+                scaffoldMessenger.showSnackBar(
+                  SnackBar(
+                    content: Text(authProvider.errorMessage ?? 'Error al cambiar contraseña'),
+                    backgroundColor: ModernTheme.error,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.oasisGreen,
+            ),
+            child: Text('Cambiar'),
+          ),
+        ],
       ),
     );
   }

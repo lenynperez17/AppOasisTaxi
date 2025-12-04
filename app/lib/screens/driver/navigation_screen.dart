@@ -4,6 +4,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
 class NavigationScreen extends StatefulWidget {
   final Map<String, dynamic>? tripData;
@@ -262,12 +263,17 @@ class _NavigationScreenState extends State<NavigationScreen>
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.volume_up, color: Colors.white),
+            Icon(Icons.volume_up, color: Theme.of(context).colorScheme.surface),
             SizedBox(width: 8),
-            Expanded(child: Text(_currentInstruction)),
+            Expanded(
+              child: Text(
+                _currentInstruction,
+                style: TextStyle(color: Theme.of(context).colorScheme.surface),
+              ),
+            ),
           ],
         ),
-        backgroundColor: ModernTheme.primaryBlue,
+        backgroundColor: Theme.of(context).primaryColor,
         duration: Duration(seconds: 3),
       ),
     );
@@ -306,7 +312,7 @@ class _NavigationScreenState extends State<NavigationScreen>
             SizedBox(height: 16),
             Row(
               children: [
-                Icon(Icons.route, size: 20, color: ModernTheme.textSecondary),
+                Icon(Icons.route, size: 20, color: context.secondaryText),
                 SizedBox(width: 8),
                 Text('${(_totalDistance / 1000).toStringAsFixed(1)} km'),
               ],
@@ -314,7 +320,7 @@ class _NavigationScreenState extends State<NavigationScreen>
             SizedBox(height: 8),
             Row(
               children: [
-                Icon(Icons.timer, size: 20, color: ModernTheme.textSecondary),
+                Icon(Icons.timer, size: 20, color: context.secondaryText),
                 SizedBox(width: 8),
                 Text('${(_totalTime / 60).round()} min'),
               ],
@@ -422,12 +428,12 @@ class _NavigationScreenState extends State<NavigationScreen>
             left: 16,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 shape: BoxShape.circle,
-                boxShadow: ModernTheme.cardShadow,
+                boxShadow: ModernTheme.getCardShadow(context),
               ),
               child: IconButton(
-                icon: Icon(Icons.arrow_back, color: ModernTheme.textPrimary),
+                icon: Icon(Icons.arrow_back, color: context.primaryText),
                 onPressed: () => Navigator.pop(context),
               ),
             ),
@@ -444,7 +450,7 @@ class _NavigationScreenState extends State<NavigationScreen>
       decoration: BoxDecoration(
         color: ModernTheme.oasisGreen,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: ModernTheme.floatingShadow,
+        boxShadow: ModernTheme.getFloatingShadow(context),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -455,14 +461,14 @@ class _NavigationScreenState extends State<NavigationScreen>
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   _currentInstructionIndex < _instructions.length
                       ? _instructions[_currentInstructionIndex].turnIcon
                       : Icons.location_on,
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   size: 28,
                 ),
               ),
@@ -474,7 +480,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                     Text(
                       _currentInstruction,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -485,7 +491,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                         Text(
                           '${_distanceToNext.round()} m',
                           style: TextStyle(
-                            color: Colors.white70,
+                            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
                             fontSize: 16,
                           ),
                         ),
@@ -493,7 +499,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                         Text(
                           '$_estimatedTime seg',
                           style: TextStyle(
-                            color: Colors.white70,
+                            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
                             fontSize: 16,
                           ),
                         ),
@@ -510,7 +516,7 @@ class _NavigationScreenState extends State<NavigationScreen>
             margin: EdgeInsets.only(top: 12),
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.3),
+              color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(2),
             ),
             child: AnimatedBuilder(
@@ -519,7 +525,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                 return LinearProgressIndicator(
                   value: (_currentInstructionIndex + 1) / _instructions.length,
                   backgroundColor: Colors.transparent,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.surface),
                 );
               },
             ),
@@ -532,9 +538,9 @@ class _NavigationScreenState extends State<NavigationScreen>
   Widget _buildInstructionPanel() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-        boxShadow: ModernTheme.floatingShadow,
+        boxShadow: ModernTheme.getFloatingShadow(context),
       ),
       padding: EdgeInsets.all(20),
       child: Column(
@@ -545,7 +551,7 @@ class _NavigationScreenState extends State<NavigationScreen>
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey.shade300,
+              color: context.secondaryText.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -563,7 +569,7 @@ class _NavigationScreenState extends State<NavigationScreen>
               Container(
                 width: 1,
                 height: 40,
-                color: Colors.grey.shade300,
+                color: context.secondaryText.withValues(alpha: 0.3),
               ),
               _buildInfoItem(
                 Icons.timer,
@@ -573,7 +579,7 @@ class _NavigationScreenState extends State<NavigationScreen>
               Container(
                 width: 1,
                 height: 40,
-                color: Colors.grey.shade300,
+                color: context.secondaryText.withValues(alpha: 0.3),
               ),
               _buildInfoItem(
                 Icons.speed,
@@ -589,13 +595,13 @@ class _NavigationScreenState extends State<NavigationScreen>
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: ModernTheme.backgroundLight,
+                color: context.surfaceColor,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   Icon(Icons.subdirectory_arrow_right, 
-                    color: ModernTheme.textSecondary),
+                    color: context.secondaryText),
                   SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -604,7 +610,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                         Text(
                           'Luego:',
                           style: TextStyle(
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                             fontSize: 12,
                           ),
                         ),
@@ -633,7 +639,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                   label: Text(_isNavigating ? 'Navegando...' : 'Iniciar'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ModernTheme.oasisGreen,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.surface,
                     padding: EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -648,7 +654,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                 label: Text('Cancelar'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ModernTheme.error,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.surface,
                   padding: EdgeInsets.symmetric(vertical: 16, horizontal: 24),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -672,14 +678,14 @@ class _NavigationScreenState extends State<NavigationScreen>
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: ModernTheme.textPrimary,
+            color: context.primaryText,
           ),
         ),
         Text(
           label,
           style: TextStyle(
             fontSize: 12,
-            color: ModernTheme.textSecondary,
+            color: context.secondaryText,
           ),
         ),
       ],
@@ -689,9 +695,9 @@ class _NavigationScreenState extends State<NavigationScreen>
   Widget _buildFloatingButton(IconData icon, VoidCallback onPressed) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         shape: BoxShape.circle,
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: IconButton(
         icon: Icon(icon, color: ModernTheme.oasisGreen),

@@ -1,7 +1,18 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:csv/csv.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../core/utils/currency_formatter.dart';
+import '../../utils/logger.dart';
 
 class TransactionsHistoryScreen extends StatefulWidget {
   const TransactionsHistoryScreen({super.key});
@@ -22,120 +33,22 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
   String _selectedFilter = 'all';
   DateTimeRange? _selectedDateRange;
   String _searchQuery = '';
-  
-  // Transactions data
-  final List<Transaction> _transactions = [
-    Transaction(
-      id: 'T001',
-      type: TransactionType.trip,
-      date: DateTime.now().subtract(Duration(hours: 2)),
-      amount: 45.50,
-      status: TransactionStatus.completed,
-      passenger: 'María García',
-      pickup: 'Av. Principal 123',
-      destination: 'Centro Comercial Plaza',
-      distance: 8.5,
-      duration: 25,
-      paymentMethod: 'Efectivo',
-      commission: 9.10,
-      netEarnings: 36.40,
-    ),
-    Transaction(
-      id: 'T002',
-      type: TransactionType.trip,
-      date: DateTime.now().subtract(Duration(hours: 5)),
-      amount: 32.00,
-      status: TransactionStatus.completed,
-      passenger: 'Carlos López',
-      pickup: 'Calle 45 #678',
-      destination: 'Aeropuerto Internacional',
-      distance: 15.2,
-      duration: 35,
-      paymentMethod: 'Tarjeta',
-      commission: 6.40,
-      netEarnings: 25.60,
-    ),
-    Transaction(
-      id: 'T003',
-      type: TransactionType.withdrawal,
-      date: DateTime.now().subtract(Duration(days: 1)),
-      amount: 500.00,
-      status: TransactionStatus.completed,
-      withdrawalMethod: 'Transferencia Bancaria',
-      bankAccount: '****1234',
-    ),
-    Transaction(
-      id: 'T004',
-      type: TransactionType.trip,
-      date: DateTime.now().subtract(Duration(days: 1)),
-      amount: 28.75,
-      status: TransactionStatus.cancelled,
-      passenger: 'Ana Martínez',
-      pickup: 'Plaza Central',
-      destination: 'Universidad Nacional',
-      cancellationReason: 'Pasajero no se presentó',
-      cancellationFee: 5.00,
-    ),
-    Transaction(
-      id: 'T005',
-      type: TransactionType.bonus,
-      date: DateTime.now().subtract(Duration(days: 2)),
-      amount: 100.00,
-      status: TransactionStatus.completed,
-      bonusType: 'Meta semanal cumplida',
-      description: 'Completaste 50 viajes esta semana',
-    ),
-    Transaction(
-      id: 'T006',
-      type: TransactionType.trip,
-      date: DateTime.now().subtract(Duration(days: 2)),
-      amount: 52.25,
-      status: TransactionStatus.completed,
-      passenger: 'Luis Torres',
-      pickup: 'Hotel Marriott',
-      destination: 'Distrito Financiero',
-      distance: 12.3,
-      duration: 28,
-      paymentMethod: 'Billetera Digital',
-      commission: 10.45,
-      netEarnings: 41.80,
-      tip: 5.00,
-    ),
-    Transaction(
-      id: 'T007',
-      type: TransactionType.refund,
-      date: DateTime.now().subtract(Duration(days: 3)),
-      amount: -15.00,
-      status: TransactionStatus.completed,
-      refundReason: 'Cobro duplicado',
-      originalTransaction: 'T004',
-    ),
-    Transaction(
-      id: 'T008',
-      type: TransactionType.trip,
-      date: DateTime.now().subtract(Duration(days: 3)),
-      amount: 38.50,
-      status: TransactionStatus.completed,
-      passenger: 'Elena Rodríguez',
-      pickup: 'Centro Histórico',
-      destination: 'Zona Industrial',
-      distance: 18.7,
-      duration: 42,
-      paymentMethod: 'Efectivo',
-      commission: 7.70,
-      netEarnings: 30.80,
-    ),
-  ];
-  
-  // Summary data
+
+  // ✅ Transacciones reales desde Firebase (inicialmente vacío)
+  final List<Transaction> _transactions = [];
+
+  // ✅ Resumen real calculado desde transacciones (inicialmente 0)
   final Map<String, dynamic> _summary = {
-    'totalEarnings': 1245.50,
-    'totalTrips': 142,
-    'totalWithdrawals': 500.00,
-    'pendingBalance': 745.50,
-    'thisWeek': 456.75,
-    'lastWeek': 788.75,
+    'totalEarnings': 0.0,
+    'totalTrips': 0,
+    'totalWithdrawals': 0.0,
+    'pendingBalance': 0.0,
+    'thisWeek': 0.0,
+    'lastWeek': 0.0,
   };
+
+  // ✅ Loading state
+  bool _isLoading = true;
   
   @override
   void initState() {
@@ -163,6 +76,140 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
     
     _fadeController.forward();
     _slideController.forward();
+
+    // ✅ Cargar transacciones desde Firebase
+    _loadTransactionsFromFirebase();
+  }
+
+  // ✅ NUEVO: Cargar transacciones reales desde Firebase
+  Future<void> _loadTransactionsFromFirebase() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        AppLogger.warning('⚠️ No hay usuario autenticado en transactions_history');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final driverId = currentUser.uid;
+      final now = DateTime.now();
+      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+      final lastWeekStart = startOfWeek.subtract(Duration(days: 7));
+
+      // ✅ Cargar viajes completados
+      final ridesSnapshot = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('driverId', isEqualTo: driverId)
+          .where('status', isEqualTo: 'completed')
+          .orderBy('completedAt', descending: true)
+          .limit(100)
+          .get();
+
+      // ✅ Cargar retiros
+      final withdrawalsSnapshot = await FirebaseFirestore.instance
+          .collection('withdrawals')
+          .where('driverId', isEqualTo: driverId)
+          .where('status', whereIn: ['completed', 'pending'])
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+
+      final List<Transaction> loadedTransactions = [];
+      double totalEarnings = 0.0;
+      int totalTrips = 0;
+      double totalWithdrawals = 0.0;
+      double thisWeek = 0.0;
+      double lastWeek = 0.0;
+
+      // ✅ Procesar viajes
+      for (var doc in ridesSnapshot.docs) {
+        final data = doc.data();
+        final completedAt = (data['completedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final fare = (data['fare'] ?? data['estimatedFare'] ?? 0.0) as num;
+        final commission = fare * 0.20; // 20% comisión
+        final netEarnings = fare - commission;
+
+        totalEarnings += netEarnings.toDouble();
+        totalTrips++;
+
+        if (completedAt.isAfter(startOfWeek)) {
+          thisWeek += netEarnings.toDouble();
+        } else if (completedAt.isAfter(lastWeekStart) && completedAt.isBefore(startOfWeek)) {
+          lastWeek += netEarnings.toDouble();
+        }
+
+        loadedTransactions.add(Transaction(
+          id: doc.id,
+          type: TransactionType.trip,
+          date: completedAt,
+          amount: netEarnings.toDouble(),
+          status: TransactionStatus.completed,
+          passenger: data['passengerName'],
+          pickup: data['pickupAddress'],
+          destination: data['destinationAddress'],
+          distance: (data['distance'] as num?)?.toDouble(),
+          duration: (data['duration'] as num?)?.toInt(),
+          paymentMethod: data['paymentMethod'],
+          commission: commission.toDouble(),
+          netEarnings: netEarnings.toDouble(),
+          tip: (data['tip'] as num?)?.toDouble(),
+        ));
+      }
+
+      // ✅ Procesar retiros
+      for (var doc in withdrawalsSnapshot.docs) {
+        final data = doc.data();
+        final createdAt = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final amount = (data['amount'] ?? 0.0) as num;
+
+        totalWithdrawals += amount.toDouble();
+
+        loadedTransactions.add(Transaction(
+          id: doc.id,
+          type: TransactionType.withdrawal,
+          date: createdAt,
+          amount: -amount.toDouble(), // Negativo porque es un retiro
+          status: data['status'] == 'completed'
+              ? TransactionStatus.completed
+              : TransactionStatus.pending,
+          withdrawalMethod: data['method'],
+          bankAccount: data['bankAccount'],
+        ));
+      }
+
+      // ✅ Ordenar transacciones por fecha (más reciente primero)
+      loadedTransactions.sort((a, b) => b.date.compareTo(a.date));
+
+      // ✅ Calcular balance pendiente
+      final pendingBalance = totalEarnings - totalWithdrawals;
+
+      setState(() {
+        _transactions.clear();
+        _transactions.addAll(loadedTransactions);
+        _summary['totalEarnings'] = totalEarnings;
+        _summary['totalTrips'] = totalTrips;
+        _summary['totalWithdrawals'] = totalWithdrawals;
+        _summary['pendingBalance'] = pendingBalance;
+        _summary['thisWeek'] = thisWeek;
+        _summary['lastWeek'] = lastWeek;
+        _isLoading = false;
+      });
+
+      AppLogger.info('✅ Cargadas ${loadedTransactions.length} transacciones desde Firebase');
+    } catch (e) {
+      AppLogger.error('❌ Error cargando transacciones: $e');
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error cargando transacciones: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
   }
   
   @override
@@ -211,24 +258,24 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Historial de Transacciones',
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.onPrimary,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.download, color: Colors.white),
+            icon: Icon(Icons.download, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: _exportTransactions,
           ),
           IconButton(
-            icon: Icon(Icons.filter_list, color: Colors.white),
+            icon: Icon(Icons.filter_list, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: _showFilterDialog,
           ),
         ],
@@ -278,7 +325,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           _buildSummaryCard(
             'Total Ganado',
             (_summary['totalEarnings'] as double).toCurrency(),
-            Icons.attach_money,
+            Icons.account_balance_wallet, // ✅ Cambiado de attach_money ($) a wallet
             ModernTheme.primaryBlue,
             false,
           ),
@@ -286,14 +333,14 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
             'Viajes',
             '${_summary['totalTrips']}',
             Icons.directions_car,
-            Colors.orange,
+            Theme.of(context).colorScheme.tertiary,
             false,
           ),
           _buildSummaryCard(
             'Retiros',
             (_summary['totalWithdrawals'] as double).toCurrency(),
             Icons.money_off,
-            Colors.purple,
+            Theme.of(context).colorScheme.secondary,
             false,
           ),
         ],
@@ -310,40 +357,52 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           child: Container(
             width: 140,
             margin: EdgeInsets.only(right: 12),
-            padding: EdgeInsets.all(16),
+            padding: EdgeInsets.all(12), // ✅ CORRECCIÓN: Reducir padding de 16 a 12
             decoration: BoxDecoration(
-              color: highlight ? color : Colors.white,
+              color: highlight ? color : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: ModernTheme.cardShadow,
+              boxShadow: ModernTheme.getCardShadow(context),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   icon,
-                  color: highlight ? Colors.white : color,
-                  size: 28,
+                  color: highlight ? Theme.of(context).colorScheme.onPrimary : color,
+                  size: 22, // ✅ CORRECCIÓN: Reducir de 24 a 22
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      value,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: highlight ? Colors.white : ModernTheme.textPrimary,
+                SizedBox(height: 6), // ✅ CORRECCIÓN: Reducir de 8 a 6
+                Flexible( // ✅ CRÍTICO: Envolver en Flexible para permitir ajuste
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: 16, // ✅ CORRECCIÓN: Reducir de 18 a 16
+                          fontWeight: FontWeight.bold,
+                          color: highlight ? Theme.of(context).colorScheme.onPrimary : context.primaryText,
+                          height: 1.2, // ✅ CRÍTICO: Reducir line-height
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1, // ✅ CRÍTICO: Limitar a 1 línea
                       ),
-                    ),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: highlight ? Colors.white70 : ModernTheme.textSecondary,
+                      SizedBox(height: 2),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 9, // ✅ CORRECCIÓN: Reducir de 10 a 9
+                          color: highlight ? Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.70) : context.secondaryText,
+                          height: 1.2, // ✅ CRÍTICO: Reducir line-height
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1, // ✅ CRÍTICO: Limitar a 1 línea
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -359,11 +418,11 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Theme.of(context).shadowColor.withValues(alpha: 0.05),
               blurRadius: 5,
               offset: Offset(0, 2),
             ),
@@ -373,7 +432,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           decoration: InputDecoration(
             hintText: 'Buscar por ID, pasajero o dirección...',
             border: InputBorder.none,
-            icon: Icon(Icons.search, color: ModernTheme.textSecondary),
+            icon: Icon(Icons.search, color: context.secondaryText),
             suffixIcon: _searchQuery.isNotEmpty
                 ? IconButton(
                     icon: Icon(Icons.clear, size: 20),
@@ -421,7 +480,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
             Icon(
               icon,
               size: 16,
-              color: isSelected ? Colors.white : ModernTheme.textSecondary,
+              color: isSelected ? Theme.of(context).colorScheme.onPrimary : context.secondaryText,
             ),
             SizedBox(width: 4),
             Text(label),
@@ -431,9 +490,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           setState(() => _selectedFilter = value);
         },
         selectedColor: ModernTheme.oasisGreen,
-        checkmarkColor: Colors.white,
+        checkmarkColor: Theme.of(context).colorScheme.onPrimary,
         labelStyle: TextStyle(
-          color: isSelected ? Colors.white : ModernTheme.textSecondary,
+          color: isSelected ? Theme.of(context).colorScheme.onPrimary : context.secondaryText,
         ),
       ),
     );
@@ -448,13 +507,13 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
             Icon(
               Icons.receipt_long,
               size: 64,
-              color: ModernTheme.textSecondary.withValues(alpha: 0.5),
+              color: context.secondaryText.withValues(alpha: 0.5),
             ),
             SizedBox(height: 16),
             Text(
               'No hay transacciones',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontSize: 16,
               ),
             ),
@@ -490,7 +549,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                 dateKey,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                 ),
               ),
             ),
@@ -506,9 +565,9 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: InkWell(
         onTap: () => _showTransactionDetails(transaction),
@@ -536,6 +595,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _getTransactionTitle(transaction),
@@ -543,14 +603,18 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 4),
                     Text(
                       _getTransactionSubtitle(transaction),
                       style: TextStyle(
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                         fontSize: 12,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (transaction.status == TransactionStatus.cancelled)
                       Container(
@@ -576,6 +640,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
               // Amount
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     '${transaction.amount >= 0 ? '+' : ''}${transaction.amount.abs().toCurrency()}',
@@ -584,21 +649,27 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                       fontWeight: FontWeight.bold,
                       color: transaction.amount >= 0 ? ModernTheme.success : ModernTheme.error,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (transaction.netEarnings != null)
                     Text(
                       'Neto: ${transaction.netEarnings!.toCurrency()}',
                       style: TextStyle(
                         fontSize: 11,
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   Text(
                     _formatTime(transaction.date),
                     style: TextStyle(
                       fontSize: 11,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -648,13 +719,13 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
       case TransactionType.trip:
         return ModernTheme.primaryBlue;
       case TransactionType.withdrawal:
-        return Colors.purple;
+        return Theme.of(context).colorScheme.secondary;
       case TransactionType.bonus:
         return ModernTheme.oasisGreen;
       case TransactionType.refund:
         return ModernTheme.error;
       case TransactionType.commission:
-        return Colors.orange;
+        return Theme.of(context).colorScheme.tertiary;
     }
   }
   
@@ -695,11 +766,11 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.0),
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
@@ -710,7 +781,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
+                color: Theme.of(context).dividerColor,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -747,7 +818,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                         Text(
                           'ID: ${transaction.id}',
                           style: TextStyle(
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                             fontSize: 12,
                           ),
                         ),
@@ -842,7 +913,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                       label: Text('Compartir'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: ModernTheme.primaryBlue,
-                        foregroundColor: Colors.white,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
                         padding: EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -861,7 +932,7 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
                       label: Text('Reportar'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: ModernTheme.error,
-                        foregroundColor: Colors.white,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
                         padding: EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -887,14 +958,14 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: ModernTheme.textPrimary,
+            color: context.primaryText,
           ),
         ),
         SizedBox(height: 12),
         Container(
           padding: EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: ModernTheme.backgroundLight,
+            color: context.surfaceColor,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
@@ -911,18 +982,28 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: ModernTheme.textSecondary,
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: context.secondaryText,
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: bold ? FontWeight.bold : FontWeight.w500,
-              color: bold ? ModernTheme.oasisGreen : ModernTheme.textPrimary,
+          SizedBox(width: 8), // ✅ Espaciado entre label y value
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.bold : FontWeight.w500,
+                color: bold ? ModernTheme.oasisGreen : context.primaryText,
+              ),
+              textAlign: TextAlign.right, // ✅ Alinear a la derecha
+              overflow: TextOverflow.ellipsis, // ✅ Cortar texto largo con ...
+              maxLines: 1, // ✅ Forzar una sola línea
             ),
           ),
         ],
@@ -993,11 +1074,354 @@ class _TransactionsHistoryScreenState extends State<TransactionsHistoryScreen>
     );
   }
   
-  void _exportTransactions() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Exportando transacciones...'),
-        backgroundColor: ModernTheme.info,
+  void _exportTransactions() async {
+    try {
+      // Mostrar diálogo para elegir formato
+      final format = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Exportar Transacciones'),
+          content: Text('¿En qué formato deseas exportar las transacciones?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'csv'),
+              child: Text('CSV'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'pdf'),
+              child: Text('PDF'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancelar'),
+            ),
+          ],
+        ),
+      );
+
+      if (format == null) return;
+
+      // Exportar según formato
+      if (format == 'csv') {
+        await _exportToCSV();
+      } else if (format == 'pdf') {
+        await _exportToPDF();
+      }
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al exportar: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _exportToCSV() async {
+    try {
+      // Generar archivo CSV de transacciones
+      final List<List<dynamic>> csvData = [
+        ['HISTORIAL DE TRANSACCIONES - OASIS TAXI'],
+        ['Fecha de generación', DateTime.now().toString().split('.')[0]],
+        [],
+        ['RESUMEN'],
+        ['Métrica', 'Valor'],
+        ['Total Transacciones', _filteredTransactions.length],
+        ['Balance Pendiente', (_summary['pendingBalance'] as double).toCurrency()],
+        ['Total Ganado', (_summary['totalEarnings'] as double).toCurrency()],
+        ['Total Viajes', _summary['totalTrips']],
+        ['Total Retiros', (_summary['totalWithdrawals'] as double).toCurrency()],
+        [],
+        ['DETALLE DE TRANSACCIONES'],
+        ['ID', 'Fecha', 'Hora', 'Tipo', 'Pasajero', 'Pickup', 'Destino', 'Monto', 'Método Pago', 'Estado'],
+      ];
+
+      if (_filteredTransactions.isEmpty) {
+        csvData.add(['No hay transacciones registradas']);
+      } else {
+        for (var transaction in _filteredTransactions) {
+          final sign = transaction.amount >= 0 ? '+' : '-';
+          final amountValue = transaction.amount.abs().toCurrency();
+          final passengerName = transaction.passenger ?? 'N/A';
+          final pickupLocation = transaction.pickup ?? 'N/A';
+          final destinationLocation = transaction.destination ?? 'N/A';
+          final paymentMethodType = transaction.paymentMethod ?? 'N/A';
+          final statusText = transaction.status == TransactionStatus.completed ? 'Completado' : 'Cancelado';
+
+          csvData.add([
+            transaction.id,
+            _getDateKey(transaction.date),
+            _formatTime(transaction.date),
+            _getTransactionTitle(transaction),
+            passengerName,
+            pickupLocation,
+            destinationLocation,
+            '$sign$amountValue',
+            paymentMethodType,
+            statusText,
+          ]);
+        }
+      }
+
+      // Convertir a CSV
+      String csvString = const ListToCsvConverter().convert(csvData);
+
+      // Obtener directorio temporal
+      final directory = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final filePath = '${directory.path}/transacciones_oasis_$timestamp.csv';
+
+      // Escribir archivo
+      final file = File(filePath);
+      await file.writeAsString(csvString);
+
+      // Compartir archivo usando share_plus
+      await Share.shareXFiles(
+        [XFile(filePath)],
+        subject: 'Historial de Transacciones - Oasis Taxi',
+        text: 'Historial de transacciones generado el ${DateTime.now().toString().split('.')[0]}',
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary),
+              SizedBox(width: 12),
+              Expanded(child: Text('Archivo CSV generado exitosamente')),
+            ],
+          ),
+          backgroundColor: ModernTheme.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al exportar CSV: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _exportToPDF() async {
+    try {
+      // Cargar fuentes custom con soporte Unicode completo
+      final fontRegular = await rootBundle.load('assets/fonts/Roboto-Regular.ttf');
+      final fontBold = await rootBundle.load('assets/fonts/Roboto-Bold.ttf');
+      final ttfRegular = pw.Font.ttf(fontRegular);
+      final ttfBold = pw.Font.ttf(fontBold);
+
+      // Generar archivo PDF de transacciones
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return [
+              // Título
+              pw.Container(
+                padding: const pw.EdgeInsets.all(20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromHex('#28A745'),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'HISTORIAL DE TRANSACCIONES',
+                      style: pw.TextStyle(
+                        font: ttfBold,
+                        color: PdfColors.white,
+                        fontSize: 24,
+                      ),
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      'OASIS TAXI',
+                      style: pw.TextStyle(
+                        font: ttfRegular,
+                        color: PdfColors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Información general
+              pw.Text(
+                'Fecha de generación: ${DateTime.now().toString().split('.')[0]}',
+                style: pw.TextStyle(font: ttfRegular, fontSize: 12),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Resumen
+              pw.Text(
+                'RESUMEN',
+                style: pw.TextStyle(
+                  font: ttfBold,
+                  fontSize: 16,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                children: [
+                  _buildPdfRow('Total Transacciones', '${_filteredTransactions.length}', true, ttfRegular, ttfBold),
+                  _buildPdfRow('Balance Pendiente', (_summary['pendingBalance'] as double).toCurrency(), false, ttfRegular, ttfBold),
+                  _buildPdfRow('Total Ganado', (_summary['totalEarnings'] as double).toCurrency(), true, ttfRegular, ttfBold),
+                  _buildPdfRow('Total Viajes', '${_summary['totalTrips']}', false, ttfRegular, ttfBold),
+                  _buildPdfRow('Total Retiros', (_summary['totalWithdrawals'] as double).toCurrency(), true, ttfRegular, ttfBold),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+
+              // Transacciones
+              pw.Text(
+                'DETALLE DE TRANSACCIONES',
+                style: pw.TextStyle(
+                  font: ttfBold,
+                  fontSize: 16,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+
+              if (_filteredTransactions.isEmpty)
+                pw.Text('No hay transacciones registradas', style: pw.TextStyle(font: ttfRegular, fontSize: 12))
+              else
+                pw.Table(
+                  border: pw.TableBorder.all(color: PdfColors.grey300),
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(2), // Descripción
+                    1: const pw.FlexColumnWidth(1.5), // Fecha
+                    2: const pw.FlexColumnWidth(1), // Monto
+                  },
+                  children: [
+                    pw.TableRow(
+                      decoration: pw.BoxDecoration(color: PdfColor.fromHex('#28A745')),
+                      children: [
+                        _buildPdfHeaderCell('Descripción', ttfBold),
+                        _buildPdfHeaderCell('Fecha', ttfBold),
+                        _buildPdfHeaderCell('Monto', ttfBold),
+                      ],
+                    ),
+                    ..._filteredTransactions.take(50).map((transaction) {
+                      final sign = transaction.amount >= 0 ? '+' : '-';
+                      final amountValue = transaction.amount.abs().toCurrency();
+                      return pw.TableRow(
+                        children: [
+                          _buildPdfCell(_getTransactionTitle(transaction), ttfRegular),
+                          _buildPdfCell(_getDateKey(transaction.date), ttfRegular),
+                          _buildPdfCell(
+                            '$sign$amountValue',
+                            ttfRegular,
+                          ),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+
+              if (_filteredTransactions.length > 50)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(top: 10),
+                  child: pw.Text(
+                    'Mostrando las primeras 50 transacciones de ${_filteredTransactions.length} totales',
+                    style: pw.TextStyle(font: ttfRegular, fontSize: 10, fontStyle: pw.FontStyle.italic),
+                  ),
+                ),
+            ];
+          },
+        ),
+      );
+
+      // Guardar PDF en archivo temporal
+      final directory = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final filePath = '${directory.path}/transacciones_oasis_$timestamp.pdf';
+      final file = File(filePath);
+      await file.writeAsBytes(await pdf.save());
+
+      // Compartir archivo usando share_plus
+      await Share.shareXFiles(
+        [XFile(filePath)],
+        subject: 'Historial de Transacciones - Oasis Taxi',
+        text: 'Historial de transacciones generado el ${DateTime.now().toString().split('.')[0]}',
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary),
+              SizedBox(width: 12),
+              Expanded(child: Text('Archivo PDF generado exitosamente')),
+            ],
+          ),
+          backgroundColor: ModernTheme.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al exportar PDF: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
+  // Funciones helper para generar tabla PDF
+  pw.TableRow _buildPdfRow(String label, String value, bool isEven, pw.Font fontRegular, pw.Font fontBold) {
+    return pw.TableRow(
+      decoration: isEven
+        ? pw.BoxDecoration(color: PdfColors.grey100)
+        : null,
+      children: [
+        pw.Padding(
+          padding: const pw.EdgeInsets.all(8),
+          child: pw.Text(label, style: pw.TextStyle(font: fontRegular)),
+        ),
+        pw.Padding(
+          padding: const pw.EdgeInsets.all(8),
+          child: pw.Text(value, style: pw.TextStyle(font: fontBold)),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildPdfHeaderCell(String text, pw.Font font) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(8),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          font: font,
+          color: PdfColors.white,
+          fontSize: 10,
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildPdfCell(String text, pw.Font font) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(6),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(font: font, fontSize: 9),
       ),
     );
   }

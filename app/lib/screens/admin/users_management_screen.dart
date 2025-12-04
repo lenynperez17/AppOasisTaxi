@@ -38,79 +38,103 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
 
   // Cargar usuarios reales desde Firebase
   Future<void> _loadUsersFromFirebase() async {
-    // ✅ CORREGIDO: Verificar mounted antes de obtener messenger
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      // ✅ CORREGIDO: Verificar mounted antes de setState
       if (!mounted) return;
       setState(() => _isLoading = true);
+
+      debugPrint('👥 Cargando usuarios desde Firebase...');
 
       // Obtener usuarios desde Firebase
       final QuerySnapshot snapshot = await _firestore
           .collection('users')
           .orderBy('createdAt', descending: true)
-          .get();
+          .get()
+          .catchError((e) {
+        debugPrint('❌ Error en query de usuarios: $e');
+        throw e;
+      });
+
+      debugPrint('✅ Usuarios obtenidos: ${snapshot.docs.length}');
 
       final List<User> loadedUsers = [];
 
       for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-
-        // Calcular número de viajes del usuario
-        int tripCount = 0;
-        double avgRating = 0.0;
-
-        // Obtener estadísticas de viajes según el rol
-        if (data['role'] == 'driver') {
-          final tripsSnapshot = await _firestore
-              .collection('rides')
-              .where('driverId', isEqualTo: doc.id)
-              .where('status', isEqualTo: 'completed')
-              .get();
-          tripCount = tripsSnapshot.size;
-
-          // Calcular rating promedio
-          if (tripsSnapshot.docs.isNotEmpty) {
-            double totalRating = 0;
-            int ratingCount = 0;
-            for (var trip in tripsSnapshot.docs) {
-              if (trip.data()['rating'] != null) {
-                totalRating += trip.data()['rating'];
-                ratingCount++;
-              }
-            }
-            avgRating = ratingCount > 0 ? totalRating / ratingCount : 4.5;
-          } else {
-            avgRating = 4.5;
+        try {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data == null) {
+            debugPrint('⚠️ Usuario ${doc.id} sin datos');
+            continue;
           }
-        } else {
-          final tripsSnapshot = await _firestore
-              .collection('rides')
-              .where('passengerId', isEqualTo: doc.id)
-              .where('status', isEqualTo: 'completed')
-              .get();
-          tripCount = tripsSnapshot.size;
-          avgRating = data['rating'] ?? 4.5;
-        }
 
-        loadedUsers.add(User(
-          id: doc.id,
-          name: data['name'] ?? 'Sin nombre',
-          email: data['email'] ?? '',
-          phone: data['phone'] ?? '',
-          type: data['role'] == 'driver' ? 'Conductor' : 'Pasajero',
-          status: data['isActive'] == true ? 'Activo' :
-                  data['isSuspended'] == true ? 'Suspendido' : 'Inactivo',
-          registrationDate: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          lastLogin: (data['lastLogin'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          trips: tripCount,
-          rating: avgRating,
-        ));
+          // Usar campos correctos de Firestore
+          final userType = data['userType'] ?? data['role'] ?? 'passenger';
+          final fullName = data['fullName'] ?? data['name'] ?? 'Sin nombre';
+          final isDriver = userType == 'driver' ||
+                           (data['availableRoles'] as List?)?.contains('driver') == true;
+
+          // Calcular número de viajes del usuario
+          int tripCount = data['totalTrips'] ?? 0;
+          double avgRating = (data['rating'] ?? 0.0).toDouble();
+
+          // Si no tiene totalTrips en el modelo, intentar contarlos (opcional)
+          if (tripCount == 0) {
+            try {
+              final tripsSnapshot = await _firestore
+                  .collection('trips')
+                  .where(isDriver ? 'driverId' : 'passengerId', isEqualTo: doc.id)
+                  .where('status', isEqualTo: 'completed')
+                  .limit(1)
+                  .get()
+                  .timeout(Duration(seconds: 2));
+              tripCount = tripsSnapshot.size;
+            } catch (e) {
+              debugPrint('⚠️ No se pudo contar trips para ${doc.id}: $e');
+            }
+          }
+
+          // Determinar tipo de usuario para mostrar
+          String displayType = 'Pasajero';
+          if (userType == 'admin') {
+            displayType = 'Admin';
+          } else if (isDriver) {
+            displayType = 'Conductor';
+          }
+
+          // Determinar estado
+          String status = 'Inactivo';
+          if (data['isActive'] == true) {
+            status = 'Activo';
+          } else if (data['isSuspended'] == true || data['disabled'] == true) {
+            status = 'Suspendido';
+          }
+
+          loadedUsers.add(User(
+            id: doc.id,
+            name: fullName,
+            email: data['email'] ?? '',
+            phone: data['phone'] ?? data['phoneNumber'] ?? '',
+            type: displayType,
+            status: status,
+            registrationDate: (data['createdAt'] as Timestamp?)?.toDate() ??
+                             DateTime.now(),
+            lastLogin: (data['lastLogin'] as Timestamp?)?.toDate() ??
+                      DateTime.now(),
+            trips: tripCount,
+            rating: avgRating,
+          ));
+
+          debugPrint('✅ Usuario procesado: $fullName ($displayType)');
+        } catch (e) {
+          debugPrint('⚠️ Error procesando usuario ${doc.id}: $e');
+          continue;
+        }
       }
 
-      // ✅ CORREGIDO: Verificar mounted antes de setState
+      debugPrint('✅ Total usuarios procesados: ${loadedUsers.length}');
+
       if (!mounted) return;
       setState(() {
         _users = loadedUsers;
@@ -118,14 +142,18 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
         _isLoading = false;
       });
 
-    } catch (e) {
-      print('Error cargando usuarios: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error crítico cargando usuarios: $e');
+      debugPrint('📍 Stack: $stackTrace');
+
       if (!mounted) return;
       setState(() => _isLoading = false);
+
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Error al cargar usuarios: $e'),
+          content: Text('Error al cargar usuarios: ${e.toString()}'),
           backgroundColor: ModernTheme.error,
+          duration: Duration(seconds: 5),
         ),
       );
     }
@@ -161,7 +189,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
         showBackButton: true,
         actions: [
           IconButton(
-            icon: Icon(Icons.add, color: Colors.white),
+            icon: Icon(Icons.add, color: ModernTheme.textLight),
             onPressed: _showAddUserDialog,
           ),
         ],
@@ -171,7 +199,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
           // Barra de búsqueda y filtros
           Container(
             padding: EdgeInsets.all(16),
-            color: Colors.white,
+            color: ModernTheme.cardBackground,
             child: Column(
               children: [
                 // Campo de búsqueda
@@ -218,10 +246,10 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatCard('Total', _users.length.toString(), Icons.people, Colors.blue),
-                _buildStatCard('Activos', _users.where((u) => u.status == 'Activo').length.toString(), Icons.check_circle, Colors.green),
-                _buildStatCard('Suspendidos', _users.where((u) => u.status == 'Suspendido').length.toString(), Icons.warning, Colors.orange),
-                _buildStatCard('Inactivos', _users.where((u) => u.status == 'Inactivo').length.toString(), Icons.cancel, Colors.grey),
+                _buildStatCard('Total', _users.length.toString(), Icons.people, ModernTheme.primaryBlue),
+                _buildStatCard('Activos', _users.where((u) => u.status == 'Activo').length.toString(), Icons.check_circle, ModernTheme.success),
+                _buildStatCard('Suspendidos', _users.where((u) => u.status == 'Suspendido').length.toString(), Icons.warning, ModernTheme.warning),
+                _buildStatCard('Inactivos', _users.where((u) => u.status == 'Inactivo').length.toString(), Icons.cancel, ModernTheme.textSecondary),
               ],
             ),
           ),
@@ -373,11 +401,14 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          user.name,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        Expanded(
+                          child: Text(
+                            user.name,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         SizedBox(width: 8),
@@ -492,7 +523,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
                           value: 'suspend',
                           child: Row(
                             children: [
-                              Icon(Icons.block, size: 20, color: Colors.orange),
+                              Icon(Icons.block, size: 20, color: ModernTheme.warning),
                               SizedBox(width: 8),
                               Text('Suspender'),
                             ],
@@ -503,7 +534,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
                           value: 'activate',
                           child: Row(
                             children: [
-                              Icon(Icons.check_circle, size: 20, color: Colors.green),
+                              Icon(Icons.check_circle, size: 20, color: ModernTheme.success),
                               SizedBox(width: 8),
                               Text('Activar'),
                             ],
@@ -513,7 +544,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete, size: 20, color: Colors.red),
+                            Icon(Icons.delete, size: 20, color: ModernTheme.error),
                             SizedBox(width: 8),
                             Text('Eliminar'),
                           ],
@@ -635,46 +666,317 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
         children: [
           Icon(icon, size: 20, color: ModernTheme.textSecondary),
           SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: ModernTheme.textSecondary,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: ModernTheme.textSecondary,
+                  ),
                 ),
-              ),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
+  // ✅ IMPLEMENTADO: Agregar nuevo usuario
   void _showAddUserDialog() {
-    // Implementar diálogo para agregar usuario
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Función para agregar usuario'),
-        backgroundColor: ModernTheme.oasisGreen,
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController emailController = TextEditingController();
+    final TextEditingController phoneController = TextEditingController();
+    final TextEditingController passwordController = TextEditingController();
+    String selectedRole = 'Pasajero';
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(Icons.person_add, color: ModernTheme.oasisGreen),
+              SizedBox(width: 12),
+              Text('Agregar Usuario'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Nombre completo',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: Icon(Icons.email),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: phoneController,
+                  decoration: InputDecoration(
+                    labelText: 'Teléfono',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: passwordController,
+                  decoration: InputDecoration(
+                    labelText: 'Contraseña',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: Icon(Icons.lock),
+                  ),
+                  obscureText: true,
+                ),
+                SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedRole,
+                  decoration: InputDecoration(
+                    labelText: 'Tipo de usuario',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: Icon(Icons.work),
+                  ),
+                  items: ['Pasajero', 'Conductor'].map((String role) {
+                    return DropdownMenuItem<String>(
+                      value: role,
+                      child: Text(role),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setDialogState(() {
+                      selectedRole = newValue!;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+                final email = emailController.text.trim();
+                final phone = phoneController.text.trim();
+                final password = passwordController.text.trim();
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(context);
+
+                if (name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Por favor completa todos los campos'),
+                      backgroundColor: ModernTheme.error,
+                    ),
+                  );
+                  return;
+                }
+
+                if (password.length < 6) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('La contraseña debe tener al menos 6 caracteres'),
+                      backgroundColor: ModernTheme.error,
+                    ),
+                  );
+                  return;
+                }
+
+                navigator.pop();
+
+                try {
+                  final newUserRef = _firestore.collection('users').doc();
+                  await newUserRef.set({
+                    'id': newUserRef.id,
+                    'name': name,
+                    'fullName': name,
+                    'email': email,
+                    'phone': phone,
+                    'role': selectedRole == 'Conductor' ? 'driver' : 'passenger',
+                    'userType': selectedRole == 'Conductor' ? 'driver' : 'passenger',
+                    'isActive': true,
+                    'isSuspended': false,
+                    'isVerified': false,
+                    'emailVerified': false,
+                    'phoneVerified': false,
+                    'createdAt': FieldValue.serverTimestamp(),
+                    'lastLogin': FieldValue.serverTimestamp(),
+                    'rating': 5.0,
+                    'totalTrips': 0,
+                  });
+
+                  if (!mounted) return;
+
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Usuario agregado exitosamente'),
+                      backgroundColor: ModernTheme.success,
+                    ),
+                  );
+
+                  _loadUsersFromFirebase();
+                } catch (e) {
+                  if (!mounted) return;
+
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Error al agregar usuario: $e'),
+                      backgroundColor: ModernTheme.error,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+              child: Text('Agregar'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
+  // ✅ IMPLEMENTADO: Editar usuario existente
   void _showEditUserDialog(User user) {
-    // Implementar diálogo para editar usuario
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Editando a ${user.name}'),
-        backgroundColor: ModernTheme.oasisGreen,
+    final TextEditingController nameController = TextEditingController(text: user.name);
+    final TextEditingController emailController = TextEditingController(text: user.email);
+    final TextEditingController phoneController = TextEditingController(text: user.phone);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.edit, color: ModernTheme.oasisGreen),
+            SizedBox(width: 12),
+            Text('Editar Usuario'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: 'Nombre completo',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: Icon(Icons.person),
+                ),
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: emailController,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: Icon(Icons.email),
+                ),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              SizedBox(height: 16),
+              TextField(
+                controller: phoneController,
+                decoration: InputDecoration(
+                  labelText: 'Teléfono',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: Icon(Icons.phone),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final email = emailController.text.trim();
+              final phone = phoneController.text.trim();
+              final messenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(context);
+
+              if (name.isEmpty || email.isEmpty || phone.isEmpty) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Por favor completa todos los campos'),
+                    backgroundColor: ModernTheme.error,
+                  ),
+                );
+                return;
+              }
+
+              navigator.pop();
+
+              try {
+                await _firestore.collection('users').doc(user.id).update({
+                  'name': name,
+                  'fullName': name,
+                  'email': email,
+                  'phone': phone,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                });
+
+                if (!mounted) return;
+
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Usuario actualizado exitosamente'),
+                    backgroundColor: ModernTheme.success,
+                  ),
+                );
+
+                _loadUsersFromFirebase();
+              } catch (e) {
+                if (!mounted) return;
+
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Error al actualizar usuario: $e'),
+                    backgroundColor: ModernTheme.error,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+            child: Text('Guardar'),
+          ),
+        ],
       ),
     );
   }

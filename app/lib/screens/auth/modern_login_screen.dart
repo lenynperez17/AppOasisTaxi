@@ -4,11 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
 import 'package:email_validator/email_validator.dart';
+import '../../generated/l10n/app_localizations.dart'; // ✅ NUEVO: Import de localizaciones
 import '../../core/theme/modern_theme.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../providers/auth_provider.dart';
 import '../../config/oauth_config.dart'; // Para validación estricta
 import 'phone_verification_screen.dart';
+import '../../utils/logger.dart'; // ✅ CRÍTICO: Import de AppLogger
 
 class ModernLoginScreen extends StatefulWidget {
   const ModernLoginScreen({super.key});
@@ -39,7 +41,6 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
   
   bool _isLoading = false;
   bool _obscurePassword = true;
-  String _userType = 'passenger';
   bool _usePhoneLogin = true; // Toggle entre teléfono y email
   int _failedAttempts = 0;
   DateTime? _lastFailedAttempt;
@@ -114,28 +115,38 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
   }
 
   Future<void> _login() async {
+    AppLogger.critical('🚀🚀🚀 _login INICIADO');
+    AppLogger.critical('📧 Usando login por: ${_usePhoneLogin ? "TELÉFONO" : "EMAIL"}');
+
     if (_formKey.currentState!.validate()) {
-      // Verificar intentos fallidos (rate limiting)
+      AppLogger.critical('✅ Validación de formulario OK');
+
+      // Verificar intentos fallidos (rate limiting) - REDUCIDO A 5 MINUTOS
       if (_failedAttempts >= 5 && _lastFailedAttempt != null) {
+        AppLogger.warning('⚠️ Verificando rate limiting... intentos fallidos: $_failedAttempts');
         final timeSinceLastAttempt = DateTime.now().difference(_lastFailedAttempt!);
-        if (timeSinceLastAttempt.inMinutes < 30) {
-          final remainingTime = 30 - timeSinceLastAttempt.inMinutes;
+        if (timeSinceLastAttempt.inMinutes < 5) {
+          final remainingTime = 5 - timeSinceLastAttempt.inMinutes;
+          AppLogger.error('❌ BLOQUEADO por rate limiting. Tiempo restante: $remainingTime minutos');
           _showErrorMessage(
-            'Demasiados intentos fallidos. Intenta de nuevo en $remainingTime minutos.',
+            AppLocalizations.of(context)!.tooManyAttempts(remainingTime),
           );
           return;
         } else {
-          _failedAttempts = 0; // Reset después de 30 minutos
+          AppLogger.info('✅ Rate limiting expirado, reseteando intentos');
+          _failedAttempts = 0; // Reset después de 5 minutos
+          _lastFailedAttempt = null;
         }
       }
-      
+
+      AppLogger.critical('🔄 Iniciando proceso de autenticación...');
       setState(() => _isLoading = true);
-      
+
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      
+
       try {
         bool success = false;
-        
+
         if (_usePhoneLogin) {
           // Login con teléfono - VALIDACIÓN ESTRICTA OBLIGATORIA
           final phone = _phoneController.text.trim();
@@ -143,8 +154,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
           // CRÍTICO: Usar validación centralizada y estricta
           if (!ValidationPatterns.isValidPeruMobile(phone)) {
             _showErrorMessage(
-              'Número inválido. Debe ser peruano móvil: 9XXXXXXXX\n'
-              'Operadores válidos: Claro, Movistar, Entel'
+              AppLocalizations.of(context)!.invalidPhoneDetails
             );
             setState(() => _isLoading = false);
             return;
@@ -154,7 +164,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
           final operatorCode = phone.substring(0, 2);
           final validOperators = {'90', '91', '92', '93', '94', '95', '96', '97', '98', '99'};
           if (!validOperators.contains(operatorCode)) {
-            _showErrorMessage('Operador móvil no reconocido. Use números de Claro, Movistar o Entel.');
+            _showErrorMessage(AppLocalizations.of(context)!.operatorNotRecognized);
             setState(() => _isLoading = false);
             return;
           }
@@ -175,45 +185,110 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
         } else {
           // Login con email
           final email = _emailController.text.trim();
-          
+          AppLogger.critical('📧 Intentando login con email: $email');
+
           // Validar email profesional
           if (!EmailValidator.validate(email)) {
-            _showErrorMessage('Email inválido');
+            AppLogger.error('❌ Email inválido');
+            _showErrorMessage(AppLocalizations.of(context)!.email);
             setState(() => _isLoading = false);
             return;
           }
-          
+
+          AppLogger.critical('📧 Email válido, llamando a authProvider.login...');
           success = await authProvider.login(email, _passwordController.text);
+          AppLogger.critical('📧 authProvider.login retornó: $success');
         }
-        
+
         if (!mounted) return;
-        
+
         if (success) {
+          AppLogger.critical('🎉🎉🎉 LOGIN EXITOSO!');
+
           // Reset intentos fallidos
           _failedAttempts = 0;
           _lastFailedAttempt = null;
-          
+
           // Vibración de éxito
           HapticFeedback.mediumImpact();
-          
+
           // Verificar si el email está verificado
           if (!authProvider.emailVerified && !_usePhoneLogin) {
-            _showErrorMessage(
-              'Por favor verifica tu email antes de continuar. Revisa tu bandeja de entrada.',
+            AppLogger.warning('⚠️ Email NO verificado, navegando a verificación');
+
+            // Mostrar mensaje informativo
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Tu email no está verificado. Te llevaremos a verificarlo.'),
+                backgroundColor: ModernTheme.warning,
+                duration: Duration(seconds: 2),
+              ),
             );
+
             setState(() => _isLoading = false);
+
+            // Navegar a la pantalla de verificación de email
+            Navigator.pushNamed(
+              context,
+              '/email-verification',
+              arguments: _emailController.text.trim(),
+            );
             return;
           }
-          
-          // Navegar según el tipo de usuario
-          if (_userType == 'passenger') {
-            Navigator.pushReplacementNamed(context, '/passenger/home');
-          } else if (_userType == 'driver') {
-            Navigator.pushReplacementNamed(context, '/driver/home');
-          } else if (_userType == 'admin') {
-            Navigator.pushReplacementNamed(context, '/admin/dashboard');
+
+          AppLogger.critical('✅ Email verificado o login con teléfono');
+
+          // ✅ FIX: Navegar según el currentMode/activeMode REAL del usuario autenticado
+          // NO usar el toggle _userType del UI - ese solo es para el formulario
+          final user = authProvider.currentUser!;
+          AppLogger.critical('👤 Usuario actual: ${user.email.isNotEmpty ? user.email : user.phone}');
+          AppLogger.critical('👤 isAdmin: ${user.isAdmin}');
+          AppLogger.critical('👤 userType: ${user.userType}');
+          AppLogger.critical('👤 activeMode: ${user.activeMode}');
+
+          String route;
+
+          if (user.isAdmin) {
+            // Admin siempre va al dashboard
+            route = '/admin/dashboard';
+            AppLogger.critical('🔐 Usuario ADMIN → Navegando a: $route');
+          } else {
+            // Usuario dual o single: usar activeMode (currentMode si existe, sino userType)
+            final mode = user.activeMode; // Usa currentMode si existe, sino userType
+            AppLogger.critical('🎭 Modo activo determinado: $mode');
+
+            if (mode == 'driver') {
+              // Verificar si el conductor tiene documentos aprobados
+              if (user.documentVerified) {
+                route = '/driver/home';
+                AppLogger.critical('🚗 Conductor APROBADO → Navegando a: $route');
+              } else {
+                // Conductor sin documentos aprobados
+                final driverStatus = user.driverStatus ?? 'pending_documents';
+
+                if (driverStatus == 'pending_approval') {
+                  // Ya envió documentos, puede usar como pasajero mientras espera
+                  route = '/passenger/home';
+                  AppLogger.critical('🚗 Conductor ESPERANDO APROBACIÓN → Navegando a: $route');
+                } else {
+                  // Conductor nuevo, debe subir documentos
+                  route = '/upgrade-to-driver';
+                  AppLogger.critical('🚗 Conductor NUEVO → Navegando a: $route');
+                }
+              }
+            } else {
+              // Default: modo pasajero (passenger o cualquier otro)
+              route = '/passenger/home';
+              AppLogger.critical('🚶 Usuario PASAJERO → Navegando a: $route');
+            }
           }
+
+          AppLogger.critical('🧭 NAVEGANDO A: $route');
+          Navigator.pushReplacementNamed(context, route);
+          AppLogger.critical('✅ Navigator.pushReplacementNamed EJECUTADO');
         } else {
+          AppLogger.error('❌ Login FALLIDO');
+          AppLogger.error('❌ Error: ${authProvider.errorMessage}');
           // Incrementar intentos fallidos
           _failedAttempts++;
           _lastFailedAttempt = DateTime.now();
@@ -222,20 +297,19 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
           HapticFeedback.heavyImpact();
           
           // Mostrar mensaje de error específico
-          final errorMsg = authProvider.errorMessage ?? 'Error al iniciar sesión';
+          final errorMsg = authProvider.errorMessage ?? AppLocalizations.of(context)!.loginError;
           _showErrorMessage(errorMsg);
-          
+
           // Si la cuenta está bloqueada
           if (authProvider.isAccountLocked) {
             _showErrorMessage(
-              'Tu cuenta ha sido bloqueada temporalmente por seguridad. '
-              'Intenta de nuevo más tarde o contacta soporte.',
+              AppLocalizations.of(context)!.accountLocked,
             );
           }
         }
       } catch (e) {
         if (!mounted) return;
-        _showErrorMessage('Error inesperado: $e');
+        _showErrorMessage(AppLocalizations.of(context)!.unexpectedError(e.toString()));
       } finally {
         if (mounted) {
           setState(() => _isLoading = false);
@@ -250,7 +324,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.error_outline, color: Colors.white),
+            Icon(Icons.error_outline, color: Theme.of(context).colorScheme.onError),
             SizedBox(width: 12),
             Expanded(child: Text(message)),
           ],
@@ -269,33 +343,72 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
     // VERIFICACIÓN DE CONFIGURACIÓN OAUTH
     if (!OAuthConfig.isGoogleConfigured) {
       _showErrorMessage(
-        'Google Sign-In no configurado.\n'
-        'Contacta al administrador del sistema.'
+        AppLocalizations.of(context)!.googleSignInNotConfigured
       );
       return;
     }
-    
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     try {
       setState(() => _isLoading = true);
       HapticFeedback.selectionClick();
-      
+
       final success = await authProvider.signInWithGoogle();
-      
+
       if (!mounted) return;
-      
+
       if (success) {
         HapticFeedback.mediumImpact();
-        Navigator.pushReplacementNamed(context, '/passenger/home');
+
+        // ✅ NUEVO: Verificar si necesita completar perfil
+        if (authProvider.needsProfileCompletion()) {
+          AppLogger.info('Usuario necesita completar perfil después de Google Sign-In');
+          Navigator.pushReplacementNamed(
+            context,
+            '/auth/complete-profile',
+            arguments: {'loginMethod': 'google'},
+          );
+          return;
+        }
+
+        // ✅ FIX: Navegar según el currentMode REAL del usuario autenticado
+        final user = authProvider.currentUser!;
+        String route;
+
+        if (user.isAdmin) {
+          route = '/admin/dashboard';
+        } else {
+          final mode = user.activeMode;
+          if (mode == 'driver') {
+            // Verificar si el conductor tiene documentos aprobados
+            if (user.documentVerified) {
+              route = '/driver/home';
+              AppLogger.critical('🚗 [Google] Conductor APROBADO → Navegando a: $route');
+            } else {
+              final driverStatus = user.driverStatus ?? 'pending_documents';
+              if (driverStatus == 'pending_approval') {
+                route = '/passenger/home';
+                AppLogger.critical('🚗 [Google] Conductor ESPERANDO → Navegando a: $route');
+              } else {
+                route = '/upgrade-to-driver';
+                AppLogger.critical('🚗 [Google] Conductor NUEVO → Navegando a: $route');
+              }
+            }
+          } else {
+            route = '/passenger/home';
+          }
+        }
+
+        Navigator.pushReplacementNamed(context, route);
       } else {
         _showErrorMessage(
-          authProvider.errorMessage ?? 
-          'Error al iniciar sesión con Google. Intenta nuevamente.'
+          authProvider.errorMessage ??
+          AppLocalizations.of(context)!.googleSignInError
         );
       }
     } catch (e) {
       if (!mounted) return;
-      _showErrorMessage('Error con Google Sign-In: $e');
+      _showErrorMessage(AppLocalizations.of(context)!.unexpectedError('Google Sign-In: $e'));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -307,33 +420,72 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
     // VERIFICACIÓN DE CONFIGURACIÓN OAUTH
     if (!OAuthConfig.isFacebookConfigured) {
       _showErrorMessage(
-        'Facebook Login no configurado.\n'
-        'Contacta al administrador del sistema.'
+        AppLocalizations.of(context)!.facebookLoginNotConfigured
       );
       return;
     }
-    
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     try {
       setState(() => _isLoading = true);
       HapticFeedback.selectionClick();
-      
+
       final success = await authProvider.signInWithFacebook();
-      
+
       if (!mounted) return;
-      
+
       if (success) {
         HapticFeedback.mediumImpact();
-        Navigator.pushReplacementNamed(context, '/passenger/home');
+
+        // ✅ NUEVO: Verificar si necesita completar perfil
+        if (authProvider.needsProfileCompletion()) {
+          AppLogger.info('Usuario necesita completar perfil después de Facebook Sign-In');
+          Navigator.pushReplacementNamed(
+            context,
+            '/auth/complete-profile',
+            arguments: {'loginMethod': 'facebook'},
+          );
+          return;
+        }
+
+        // ✅ FIX: Navegar según el currentMode REAL del usuario autenticado
+        final user = authProvider.currentUser!;
+        String route;
+
+        if (user.isAdmin) {
+          route = '/admin/dashboard';
+        } else {
+          final mode = user.activeMode;
+          if (mode == 'driver') {
+            // Verificar si el conductor tiene documentos aprobados
+            if (user.documentVerified) {
+              route = '/driver/home';
+              AppLogger.critical('🚗 [Facebook] Conductor APROBADO → Navegando a: $route');
+            } else {
+              final driverStatus = user.driverStatus ?? 'pending_documents';
+              if (driverStatus == 'pending_approval') {
+                route = '/passenger/home';
+                AppLogger.critical('🚗 [Facebook] Conductor ESPERANDO → Navegando a: $route');
+              } else {
+                route = '/upgrade-to-driver';
+                AppLogger.critical('🚗 [Facebook] Conductor NUEVO → Navegando a: $route');
+              }
+            }
+          } else {
+            route = '/passenger/home';
+          }
+        }
+
+        Navigator.pushReplacementNamed(context, route);
       } else {
         _showErrorMessage(
-          authProvider.errorMessage ?? 
-          'Error al iniciar sesión con Facebook. Intenta nuevamente.'
+          authProvider.errorMessage ??
+          AppLocalizations.of(context)!.facebookSignInError
         );
       }
     } catch (e) {
       if (!mounted) return;
-      _showErrorMessage('Error al iniciar sesión con Facebook: $e');
+      _showErrorMessage(AppLocalizations.of(context)!.unexpectedError('Facebook: $e'));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -345,33 +497,72 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
     // VERIFICACIÓN DE CONFIGURACIÓN OAUTH
     if (!OAuthConfig.isAppleConfigured) {
       _showErrorMessage(
-        'Apple Sign-In no configurado.\n'
-        'Contacta al administrador del sistema.'
+        AppLocalizations.of(context)!.appleSignInNotConfigured
       );
       return;
     }
-    
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     try {
       setState(() => _isLoading = true);
       HapticFeedback.selectionClick();
-      
+
       final success = await authProvider.signInWithApple();
-      
+
       if (!mounted) return;
-      
+
       if (success) {
         HapticFeedback.mediumImpact();
-        Navigator.pushReplacementNamed(context, '/passenger/home');
+
+        // ✅ NUEVO: Verificar si necesita completar perfil
+        if (authProvider.needsProfileCompletion()) {
+          AppLogger.info('Usuario necesita completar perfil después de Apple Sign-In');
+          Navigator.pushReplacementNamed(
+            context,
+            '/auth/complete-profile',
+            arguments: {'loginMethod': 'apple'},
+          );
+          return;
+        }
+
+        // ✅ FIX: Navegar según el currentMode REAL del usuario autenticado
+        final user = authProvider.currentUser!;
+        String route;
+
+        if (user.isAdmin) {
+          route = '/admin/dashboard';
+        } else {
+          final mode = user.activeMode;
+          if (mode == 'driver') {
+            // Verificar si el conductor tiene documentos aprobados
+            if (user.documentVerified) {
+              route = '/driver/home';
+              AppLogger.critical('🚗 [Apple] Conductor APROBADO → Navegando a: $route');
+            } else {
+              final driverStatus = user.driverStatus ?? 'pending_documents';
+              if (driverStatus == 'pending_approval') {
+                route = '/passenger/home';
+                AppLogger.critical('🚗 [Apple] Conductor ESPERANDO → Navegando a: $route');
+              } else {
+                route = '/upgrade-to-driver';
+                AppLogger.critical('🚗 [Apple] Conductor NUEVO → Navegando a: $route');
+              }
+            }
+          } else {
+            route = '/passenger/home';
+          }
+        }
+
+        Navigator.pushReplacementNamed(context, route);
       } else {
         _showErrorMessage(
-          authProvider.errorMessage ?? 
-          'Error al iniciar sesión con Apple. Intenta nuevamente.'
+          authProvider.errorMessage ??
+          AppLocalizations.of(context)!.appleSignInError
         );
       }
     } catch (e) {
       if (!mounted) return;
-      _showErrorMessage('Error al iniciar sesión con Apple: $e');
+      _showErrorMessage(AppLocalizations.of(context)!.unexpectedError('Apple: $e'));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -422,7 +613,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                     height: size,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.1),
+                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.1),
                     ),
                   ),
                 );
@@ -454,10 +645,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                               height: 120,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(20),
-                                color: Colors.white,
+                                color: Theme.of(context).colorScheme.surface,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.3),
+                                    color: Theme.of(context).shadowColor.withValues(alpha: 0.3),
                                     blurRadius: 25,
                                     spreadRadius: 8,
                                   ),
@@ -490,17 +681,17 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                     Text(
                       'OASIS TAXI',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 2,
                       ),
                     ),
-                    
+
                     Text(
-                      'Tu viaje, tu precio',
+                      AppLocalizations.of(context)!.tagline,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                         fontSize: 16,
                       ),
                     ),
@@ -516,146 +707,14 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                           child: Container(
                             padding: EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.surface,
                               borderRadius: BorderRadius.circular(24),
-                              boxShadow: ModernTheme.floatingShadow,
+                              boxShadow: ModernTheme.getFloatingShadow(context),
                             ),
                             child: Form(
                               key: _formKey,
                               child: Column(
                                 children: [
-                                  // Selector de tipo de usuario
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: ModernTheme.backgroundLight,
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: GestureDetector(
-                                                onTap: () => setState(() => _userType = 'passenger'),
-                                                child: AnimatedContainer(
-                                                  duration: Duration(milliseconds: 300),
-                                                  padding: EdgeInsets.symmetric(vertical: 16),
-                                                  decoration: BoxDecoration(
-                                                    color: _userType == 'passenger' 
-                                                      ? ModernTheme.oasisGreen 
-                                                      : Colors.transparent,
-                                                    borderRadius: BorderRadius.circular(16),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisAlignment: MainAxisAlignment.center,
-                                                    children: [
-                                                      Icon(
-                                                        Icons.person,
-                                                        color: _userType == 'passenger' 
-                                                          ? Colors.white 
-                                                          : ModernTheme.textSecondary,
-                                                        size: 20,
-                                                      ),
-                                                      SizedBox(width: 6),
-                                                      Text(
-                                                        'Pasajero',
-                                                        style: TextStyle(
-                                                          color: _userType == 'passenger' 
-                                                            ? Colors.white 
-                                                            : ModernTheme.textSecondary,
-                                                          fontWeight: FontWeight.w600,
-                                                          fontSize: 13,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: GestureDetector(
-                                                onTap: () => setState(() => _userType = 'driver'),
-                                                child: AnimatedContainer(
-                                                  duration: Duration(milliseconds: 300),
-                                                  padding: EdgeInsets.symmetric(vertical: 16),
-                                                  decoration: BoxDecoration(
-                                                    color: _userType == 'driver' 
-                                                      ? ModernTheme.oasisGreen 
-                                                      : Colors.transparent,
-                                                    borderRadius: BorderRadius.circular(16),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisAlignment: MainAxisAlignment.center,
-                                                    children: [
-                                                      Icon(
-                                                        Icons.directions_car,
-                                                        color: _userType == 'driver' 
-                                                          ? Colors.white 
-                                                          : ModernTheme.textSecondary,
-                                                        size: 20,
-                                                      ),
-                                                      SizedBox(width: 6),
-                                                      Text(
-                                                        'Conductor',
-                                                        style: TextStyle(
-                                                          color: _userType == 'driver' 
-                                                            ? Colors.white 
-                                                            : ModernTheme.textSecondary,
-                                                          fontWeight: FontWeight.w600,
-                                                          fontSize: 13,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        // Opción de Administrador
-                                        GestureDetector(
-                                          onTap: () => setState(() => _userType = 'admin'),
-                                          child: AnimatedContainer(
-                                            duration: Duration(milliseconds: 300),
-                                            margin: EdgeInsets.only(top: 8),
-                                            padding: EdgeInsets.symmetric(vertical: 16),
-                                            decoration: BoxDecoration(
-                                              color: _userType == 'admin' 
-                                                ? ModernTheme.oasisGreen 
-                                                : Colors.transparent,
-                                              borderRadius: BorderRadius.circular(16),
-                                            ),
-                                            child: Row(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Icon(
-                                                  Icons.admin_panel_settings,
-                                                  color: _userType == 'admin' 
-                                                    ? Colors.white 
-                                                    : ModernTheme.textSecondary,
-                                                  size: 20,
-                                                ),
-                                                SizedBox(width: 8),
-                                                Text(
-                                                  'Administrador',
-                                                  style: TextStyle(
-                                                    color: _userType == 'admin' 
-                                                      ? Colors.white 
-                                                      : ModernTheme.textSecondary,
-                                                    fontWeight: FontWeight.w600,
-                                                    fontSize: 14,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  
-                                  SizedBox(height: 20),
-                                  
                                   // Toggle entre teléfono y email
                                   Container(
                                     decoration: BoxDecoration(
@@ -678,23 +737,27 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                               ),
                                               child: Row(
                                                 mainAxisAlignment: MainAxisAlignment.center,
+                                                mainAxisSize: MainAxisSize.min,
                                                 children: [
                                                   Icon(
                                                     Icons.phone_android,
                                                     color: _usePhoneLogin
-                                                      ? Colors.white
+                                                      ? Theme.of(context).colorScheme.onPrimary
                                                       : ModernTheme.textSecondary,
-                                                    size: 18,
+                                                    size: 16,
                                                   ),
-                                                  SizedBox(width: 6),
-                                                  Text(
-                                                    'Teléfono',
-                                                    style: TextStyle(
-                                                      color: _usePhoneLogin
-                                                        ? Colors.white
-                                                        : ModernTheme.textSecondary,
-                                                      fontWeight: FontWeight.w600,
-                                                      fontSize: 13,
+                                                  SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      AppLocalizations.of(context)!.phone,
+                                                      style: TextStyle(
+                                                        color: _usePhoneLogin
+                                                          ? Theme.of(context).colorScheme.onPrimary
+                                                          : ModernTheme.textSecondary,
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 12,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
                                                     ),
                                                   ),
                                                 ],
@@ -716,23 +779,27 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                               ),
                                               child: Row(
                                                 mainAxisAlignment: MainAxisAlignment.center,
+                                                mainAxisSize: MainAxisSize.min,
                                                 children: [
                                                   Icon(
                                                     Icons.email,
                                                     color: !_usePhoneLogin
-                                                      ? Colors.white
+                                                      ? Theme.of(context).colorScheme.onPrimary
                                                       : ModernTheme.textSecondary,
-                                                    size: 18,
+                                                    size: 16,
                                                   ),
-                                                  SizedBox(width: 6),
-                                                  Text(
-                                                    'Email',
-                                                    style: TextStyle(
-                                                      color: !_usePhoneLogin
-                                                        ? Colors.white
-                                                        : ModernTheme.textSecondary,
-                                                      fontWeight: FontWeight.w600,
-                                                      fontSize: 13,
+                                                  SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      AppLocalizations.of(context)!.email,
+                                                      style: TextStyle(
+                                                        color: !_usePhoneLogin
+                                                          ? Theme.of(context).colorScheme.onPrimary
+                                                          : ModernTheme.textSecondary,
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 12,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
                                                     ),
                                                   ),
                                                 ],
@@ -759,8 +826,8 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                         LengthLimitingTextInputFormatter(9),
                                       ],
                                       decoration: InputDecoration(
-                                        labelText: 'Número de teléfono',
-                                        hintText: '999 999 999',
+                                        labelText: AppLocalizations.of(context)!.phoneNumber,
+                                        hintText: AppLocalizations.of(context)!.phoneHint,
                                         prefixIcon: Icon(Icons.phone, color: ModernTheme.primaryOrange),
                                         prefixText: '+51 ',
                                         border: OutlineInputBorder(
@@ -777,23 +844,23 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       ),
                                       validator: (value) {
                                         if (value == null || value.isEmpty) {
-                                          return 'Ingresa tu número de teléfono';
+                                          return AppLocalizations.of(context)!.enterPhoneNumber;
                                         }
-                                        
+
                                         // VALIDACIÓN ESTRICTA OBLIGATORIA
                                         if (!ValidationPatterns.isValidPeruMobile(value)) {
-                                          return 'Número peruano inválido\nFormato: 9XXXXXXXX';
+                                          return AppLocalizations.of(context)!.invalidPhoneNumber;
                                         }
-                                        
+
                                         // Verificar operador móvil válido
                                         if (value.length == 9) {
                                           final operatorCode = value.substring(0, 2);
                                           final validOperators = {'90', '91', '92', '93', '94', '95', '96', '97', '98', '99'};
                                           if (!validOperators.contains(operatorCode)) {
-                                            return 'Operador no válido\nUse Claro, Movistar o Entel';
+                                            return AppLocalizations.of(context)!.operatorNotValid;
                                           }
                                         }
-                                        
+
                                         return null;
                                       },
                                     )
@@ -806,7 +873,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       onFieldSubmitted: (_) => _passwordFocusNode.requestFocus(), // ✅ Avanza al campo de contraseña
                                       autocorrect: false,
                                       decoration: InputDecoration(
-                                        labelText: 'Email',
+                                        labelText: AppLocalizations.of(context)!.email,
                                         hintText: 'correo@ejemplo.com',
                                         prefixIcon: Icon(Icons.email, color: ModernTheme.primaryOrange),
                                         border: OutlineInputBorder(
@@ -823,10 +890,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       ),
                                       validator: (value) {
                                         if (value == null || value.isEmpty) {
-                                          return 'Ingresa tu email';
+                                          return AppLocalizations.of(context)!.email;
                                         }
                                         if (!EmailValidator.validate(value)) {
-                                          return 'Email inválido';
+                                          return AppLocalizations.of(context)!.email;
                                         }
                                         return null;
                                       },
@@ -843,8 +910,8 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       textInputAction: TextInputAction.done, // ✅ Botón Done en teclado
                                       onFieldSubmitted: (_) => _login(), // ✅ Ejecuta login al presionar Done
                                       decoration: InputDecoration(
-                                        labelText: 'Contraseña',
-                                        hintText: 'Mínimo 8 caracteres',
+                                        labelText: AppLocalizations.of(context)!.password,
+                                        hintText: AppLocalizations.of(context)!.passwordHint,
                                         prefixIcon: Icon(Icons.lock, color: ModernTheme.primaryOrange),
                                         suffixIcon: IconButton(
                                           icon: Icon(
@@ -868,10 +935,10 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       validator: (value) {
                                         if (!_usePhoneLogin) {
                                           if (value == null || value.isEmpty) {
-                                            return 'Ingresa tu contraseña';
+                                            return AppLocalizations.of(context)!.enterPassword;
                                           }
                                           if (value.length < 8) {
-                                            return 'La contraseña debe tener al menos 8 caracteres';
+                                            return AppLocalizations.of(context)!.passwordMinLength;
                                           }
                                         }
                                         return null;
@@ -888,7 +955,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                         Navigator.pushNamed(context, '/forgot-password');
                                       },
                                       child: Text(
-                                        '¿Olvidaste tu contraseña?',
+                                        AppLocalizations.of(context)!.forgotPassword,
                                         style: TextStyle(
                                           color: ModernTheme.oasisBlack,
                                           fontWeight: FontWeight.w600,
@@ -901,7 +968,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                   
                                   // Botón de inicio de sesión
                                   AnimatedPulseButton(
-                                    text: 'Iniciar Sesión',
+                                    text: AppLocalizations.of(context)!.signIn,
                                     icon: Icons.arrow_forward,
                                     isLoading: _isLoading,
                                     onPressed: _login,
@@ -916,7 +983,7 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                                       Padding(
                                         padding: EdgeInsets.symmetric(horizontal: 16),
                                         child: Text(
-                                          'O continúa con',
+                                          AppLocalizations.of(context)!.orContinueWith,
                                           style: TextStyle(color: ModernTheme.textSecondary),
                                         ),
                                       ),
@@ -962,17 +1029,17 @@ class _ModernLoginScreenState extends State<ModernLoginScreen>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          '¿No tienes cuenta? ',
-                          style: TextStyle(color: Colors.white),
+                          AppLocalizations.of(context)!.noAccount,
+                          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
                         ),
                         TextButton(
                           onPressed: () {
                             Navigator.pushNamed(context, '/register');
                           },
                           child: Text(
-                            'Regístrate',
+                            AppLocalizations.of(context)!.register,
                             style: TextStyle(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onPrimary,
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),

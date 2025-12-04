@@ -57,10 +57,10 @@ assets/service-account.json
 *.pem
 *.key
 
-# Environment files with secrets
+# Environment files with secrets - ⚠️ NUNCA COMMITEAR CREDENCIALES
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 
 # Temporary development files
 *_output.txt

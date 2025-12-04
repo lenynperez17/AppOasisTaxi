@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Cookies - Oasis Taxi</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2E7D32;
+            --primary-dark: #1B5E20;
+            --primary-light: #4CAF50;
+            --dark: #1a1a2e;
+            --gray: #6c757d;
+            --light: #f8f9fa;
+            --white: #ffffff;
+            --gradient: linear-gradient(135deg, #1B5E20 0%, #2E7D32 50%, #43A047 100%);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: var(--light); color: var(--dark); line-height: 1.8; }
+
+        .header {
+            background: var(--gradient);
+            color: white;
+            padding: 100px 5% 60px;
+            text-align: center;
+            position: relative;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -50px;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: var(--light);
+            border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+        }
+        .header-content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 30px;
+            transition: color 0.3s;
+        }
+        .back-link:hover { color: white; }
+        .back-link svg { width: 20px; height: 20px; }
+        .header h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 700; margin-bottom: 15px; }
+        .header p { font-size: 18px; opacity: 0.9; }
+        .update-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-size: 13px;
+            margin-top: 20px;
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+            position: relative;
+            z-index: 2;
+        }
+        .card {
+            background: var(--white);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h2 .icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, rgba(46, 125, 50, 0.1) 0%, rgba(76, 175, 80, 0.15) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        p { color: var(--gray); margin-bottom: 15px; }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        li {
+            color: var(--gray);
+            padding: 8px 0 8px 28px;
+            position: relative;
+        }
+        li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 16px;
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+        }
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background: var(--gradient);
+            color: white;
+            font-weight: 600;
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: rgba(46, 125, 50, 0.03); }
+
+        .footer {
+            background: var(--dark);
+            color: white;
+            padding: 30px 5%;
+            text-align: center;
+        }
+        .footer p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; }
+        .footer a { color: var(--primary-light); }
+
+        @media (max-width: 600px) {
+            .header { padding: 80px 5% 40px; }
+            .card { padding: 25px; border-radius: 16px; }
+            h2 { font-size: 20px; }
+            table { font-size: 14px; }
+            th, td { padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="index.html" class="back-link">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg>
+                Volver al inicio
+            </a>
+            <h1>Política de Cookies</h1>
+            <p>Cómo utilizamos cookies y tecnologías similares</p>
+            <span class="update-badge">Última actualización: Diciembre 2025</span>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="card">
+            <p>Esta política explica cómo Oasis Taxi utiliza cookies y tecnologías similares en nuestra aplicación móvil y sitio web para mejorar tu experiencia.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🍪</span> ¿Qué son las Cookies?</h2>
+            <p>Las cookies son pequeños archivos de texto que se almacenan en tu dispositivo cuando visitas un sitio web o usas una aplicación. Nos ayudan a mejorar tu experiencia y el funcionamiento de nuestros servicios.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🔧</span> Tecnologías que Utilizamos</h2>
+            <p>Además de cookies tradicionales, utilizamos:</p>
+            <ul>
+                <li><strong>Almacenamiento local:</strong> Para guardar preferencias en tu dispositivo</li>
+                <li><strong>Tokens de sesión:</strong> Para mantener tu sesión activa</li>
+                <li><strong>Identificadores de dispositivo:</strong> Para seguridad y prevención de fraude</li>
+                <li><strong>Firebase Analytics:</strong> Para análisis de uso</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📊</span> Tipos de Cookies</h2>
+            <table>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Propósito</th>
+                    <th>Duración</th>
+                </tr>
+                <tr>
+                    <td><strong>Esenciales</strong></td>
+                    <td>Funcionamiento básico, autenticación, seguridad</td>
+                    <td>Sesión / 1 año</td>
+                </tr>
+                <tr>
+                    <td><strong>Funcionales</strong></td>
+                    <td>Preferencias, idioma, ubicaciones frecuentes</td>
+                    <td>1 año</td>
+                </tr>
+                <tr>
+                    <td><strong>Analíticas</strong></td>
+                    <td>Entender cómo usas la app para mejorarla</td>
+                    <td>2 años</td>
+                </tr>
+                <tr>
+                    <td><strong>Rendimiento</strong></td>
+                    <td>Detectar errores y optimizar velocidad</td>
+                    <td>Sesión</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⚡</span> Cookies Esenciales</h2>
+            <p>Estas cookies son necesarias para el funcionamiento de la aplicación:</p>
+            <ul>
+                <li><strong>Autenticación:</strong> Mantener tu sesión iniciada</li>
+                <li><strong>Seguridad:</strong> Proteger tu cuenta contra accesos no autorizados</li>
+                <li><strong>Preferencias de viaje:</strong> Guardar direcciones frecuentes</li>
+                <li><strong>Estado del viaje:</strong> Mantener información del viaje activo</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📈</span> Cookies Analíticas</h2>
+            <p>Utilizamos Firebase Analytics y herramientas similares para:</p>
+            <ul>
+                <li>Entender qué funciones son más utilizadas</li>
+                <li>Identificar problemas técnicos</li>
+                <li>Mejorar la experiencia del usuario</li>
+                <li>Medir el rendimiento de la aplicación</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⚙️</span> Control de Cookies</h2>
+            <p>Puedes gestionar las cookies de las siguientes maneras:</p>
+            <ul>
+                <li><strong>En la app:</strong> Ajustes → Privacidad → Gestionar datos</li>
+                <li><strong>En tu dispositivo:</strong> Configuración del navegador o sistema operativo</li>
+                <li><strong>Analíticas:</strong> Puedes desactivar el seguimiento en la configuración de la app</li>
+            </ul>
+            <p><strong>Nota:</strong> Desactivar cookies esenciales puede afectar el funcionamiento de la aplicación.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🌐</span> Cookies de Terceros</h2>
+            <p>Algunos servicios de terceros pueden establecer sus propias cookies:</p>
+            <ul>
+                <li><strong>Google Maps:</strong> Para servicios de mapas y navegación</li>
+                <li><strong>Firebase:</strong> Para autenticación y análisis</li>
+                <li><strong>Procesadores de pago:</strong> Para transacciones seguras</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📧</span> Contacto</h2>
+            <p>Para preguntas sobre cookies:</p>
+            <ul>
+                <li>Email: <a href="mailto:privacidad@oasistaxis.com">privacidad@oasistaxis.com</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2025 Oasis Taxi. Todos los derechos reservados. | <a href="index.html">Inicio</a> | <a href="privacidad.html">Privacidad</a></p>
+    </footer>
+</body>
+</html>

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:http/http.dart' as http;
-import '../theme/app_theme.dart';
 import '../../utils/logger.dart';
 
 /// ✅ WIDGET CUSTOM: Resuelve problema de borrado del teclado
@@ -39,10 +38,21 @@ class CustomPlaceTextField extends StatefulWidget {
 class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
   Timer? _debounceTimer;
 
+  @override
+  void initState() {
+    super.initState();
+    AppLogger.critical('🏗️🏗️🏗️ CustomPlaceTextField INIT - API Key: ${widget.googleApiKey.substring(0, 10)}...${widget.googleApiKey.substring(widget.googleApiKey.length - 5)}');
+    AppLogger.critical('🏗️🏗️🏗️ Hint: ${widget.hintText}');
+    AppLogger.critical('🏗️🏗️🏗️ VERSIÓN: 2025-10-21-04:12 - CON onChanged LOG');
+  }
+
   /// ✅ Búsqueda de lugares con debounce para evitar llamadas excesivas al API
   Future<List<PlacePrediction>> _searchPlaces(String query) async {
+    AppLogger.critical('🔍 _searchPlaces LLAMADO con query: "$query" (longitud: ${query.length})');
+
     // Si el query está vacío, no hacer búsqueda
     if (query.isEmpty) {
+      AppLogger.critical('⚠️ Query vacío, retornando lista vacía');
       return [];
     }
 
@@ -56,28 +66,42 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         '&components=country:pe', // Limitado a Perú
       );
 
+      AppLogger.critical('🌐 Llamando API: ${url.toString().replaceAll(widget.googleApiKey, "***API_KEY***")}');
+
       final response = await http.get(url);
+
+      AppLogger.critical('📡 Respuesta recibida con statusCode: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+
+        AppLogger.critical('📦 Datos decodificados, status: ${data['status']}');
 
         if (data['status'] == 'OK') {
           final predictions = (data['predictions'] as List)
               .map((p) => PlacePrediction.fromJson(p))
               .toList();
 
-          AppLogger.info('Google Places: ${predictions.length} resultados para "$query"');
+          AppLogger.critical('✅ Google Places: ${predictions.length} resultados para "$query"');
+          for (var i = 0; i < predictions.length && i < 3; i++) {
+            AppLogger.critical('  ${i + 1}. ${predictions[i].description}');
+          }
           return predictions;
         } else {
-          AppLogger.warning('Google Places API status: ${data['status']}');
+          AppLogger.critical('⚠️ Google Places API status: ${data['status']}');
+          if (data['error_message'] != null) {
+            AppLogger.critical('❌ Error message: ${data['error_message']}');
+          }
           return [];
         }
       } else {
-        AppLogger.error('Google Places API error: ${response.statusCode}');
+        AppLogger.critical('❌ Google Places API error: ${response.statusCode}');
+        AppLogger.critical('❌ Response body: ${response.body}');
         return [];
       }
-    } catch (e) {
-      AppLogger.error('Error buscando lugares: $e');
+    } catch (e, stackTrace) {
+      AppLogger.critical('❌ Error buscando lugares: $e');
+      AppLogger.critical('❌ StackTrace: $stackTrace');
       return [];
     }
   }
@@ -100,7 +124,7 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         if (data['status'] == 'OK') {
           return PlaceDetails.fromJson(data['result']);
         } else {
-          AppLogger.warning('Place Details API status: ${data['status']}');
+          AppLogger.critical('Place Details API status: ${data['status']}');
           return null;
         }
       } else {
@@ -125,34 +149,39 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
       controller: widget.controller,
 
       /// ✅ CLAVE: debounceDuration evita llamadas excesivas al API
-      /// Espera 800ms después de que el usuario deja de escribir antes de buscar
-      debounceDuration: const Duration(milliseconds: 800),
+      /// Reducido a 500ms para respuesta más rápida (antes 800ms)
+      debounceDuration: const Duration(milliseconds: 500),
 
       /// ✅ suggestionsCallback: se llama para obtener sugerencias
       /// NO recrea el TextField, solo actualiza el Overlay
       suggestionsCallback: (search) async {
-        return await _searchPlaces(search);
+        AppLogger.critical('🔔 suggestionsCallback LLAMADO con search: "$search"');
+        final results = await _searchPlaces(search);
+        AppLogger.critical('🔔 suggestionsCallback RETORNA ${results.length} resultados');
+        return results;
       },
 
       /// ✅ itemBuilder: cómo mostrar cada sugerencia
       itemBuilder: (context, PlacePrediction suggestion) {
+        final colorScheme = Theme.of(context).colorScheme;
         return ListTile(
-          leading: const Icon(
+          leading: Icon(
             Icons.location_on,
-            color: AppTheme.primaryColor,
+            color: colorScheme.primary,
           ),
           title: Text(
             suggestion.mainText,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
+              color: colorScheme.onSurface,
             ),
           ),
           subtitle: Text(
             suggestion.secondaryText,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.grey,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         );
@@ -188,6 +217,9 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
           controller: controller,
           focusNode: focusNode,
           onTap: widget.onTap,
+          onChanged: (value) {
+            AppLogger.critical('⌨️ TextField onChanged: "$value" (longitud: ${value.length})');
+          },
           decoration: InputDecoration(
             hintText: widget.hintText,
             border: InputBorder.none,
@@ -206,17 +238,23 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         );
       },
 
+      /// ✅ CRÍTICO: Constraints para el overlay de sugerencias
+      /// Asegura que las sugerencias tengan espacio suficiente para mostrarse
+      constraints: const BoxConstraints(
+        maxHeight: 300, // Altura máxima del overlay
+      ),
+
       /// ✅ Configuración del Overlay de sugerencias
       hideOnEmpty: true,
       hideOnLoading: false,
       hideOnError: false,
 
       /// ✅ Mensaje cuando no hay resultados
-      emptyBuilder: (context) => const Padding(
-        padding: EdgeInsets.all(16.0),
+      emptyBuilder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Text(
           'No se encontraron lugares',
-          style: TextStyle(color: Colors.grey),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ),
 
@@ -237,11 +275,14 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         ),
       ),
 
-      /// ✅ Decoración del Overlay
+      /// ✅ Decoración mejorada del Overlay con sombra más visible
       decorationBuilder: (context, child) {
+        final colorScheme = Theme.of(context).colorScheme;
         return Material(
-          elevation: 4,
+          elevation: 8, // Aumentado de 4 a 8 para mejor visibilidad
           borderRadius: BorderRadius.circular(8),
+          color: colorScheme.surface, // Color de superficie adaptable al tema
+          shadowColor: colorScheme.shadow.withValues(alpha: 0.3), // ✅ Sombra más visible
           child: child,
         );
       },

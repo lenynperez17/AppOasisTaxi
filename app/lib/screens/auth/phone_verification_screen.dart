@@ -177,12 +177,12 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
         SnackBar(
           content: Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.white),
+              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.surface),
               SizedBox(width: 12),
               Text("Teléfono verificado exitosamente"),
             ],
           ),
-          backgroundColor: Colors.green,
+          backgroundColor: ModernTheme.success,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -191,19 +191,13 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
       );
       
       // Navegar según el contexto
-      if (widget.isRegistration) {
-        Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/welcome', 
-          (route) => false,
-        );
-      } else {
-        Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/passenger/home', 
-          (route) => false,
-        );
-      }
+      // ✅ CORREGIDO: Usar /passenger/home en lugar de /welcome (ruta inexistente)
+      // El registro siempre empieza como pasajero, luego puede cambiar a conductor
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/passenger/home',
+        (route) => false,
+      );
     } else {
       _errorController!.add(ErrorAnimationType.shake);
       HapticFeedback.heavyImpact();
@@ -257,7 +251,7 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.error_outline, color: Colors.white),
+            Icon(Icons.error_outline, color: Theme.of(context).colorScheme.surface),
             SizedBox(width: 12),
             Expanded(child: Text(message)),
           ],
@@ -386,7 +380,7 @@ class _PhoneVerificationScreenState extends State<PhoneVerificationScreen>
                         borderRadius: BorderRadius.circular(12),
                         fieldHeight: 55,
                         fieldWidth: 45,
-                        activeFillColor: Colors.white,
+                        activeFillColor: Theme.of(context).colorScheme.surface,
                         inactiveFillColor: ModernTheme.backgroundLight,
                         selectedFillColor: ModernTheme.oasisGreen.withValues(alpha: 0.1),
                         activeColor: ModernTheme.oasisGreen,

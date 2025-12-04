@@ -9,6 +9,7 @@ import '../models/notification_types.dart';
 class NotificationProvider extends ChangeNotifier {
   final NotificationService _notificationService = NotificationService();
   final FirebaseService _firebaseService = FirebaseService();
+  final FCMService _fcmService = FCMService();
   
   final List<NotificationData> _notifications = [];
   bool _notificationsEnabled = true;
@@ -48,7 +49,7 @@ class NotificationProvider extends ChangeNotifier {
     await _notificationService.initialize();
 
     // ✅ NUEVO: Obtener y cachear el token FCM real del dispositivo
-    _cachedFcmToken = await FCMService.getDeviceFCMToken();
+    _cachedFcmToken = await _fcmService.getDeviceFCMToken();
     if (_cachedFcmToken != null) {
       debugPrint('✅ Token FCM obtenido: ${_cachedFcmToken!.substring(0, 20)}...');
     }
@@ -222,8 +223,10 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
 
     // Suscribirse realmente al topic en Firebase
-    final success = await FCMService.subscribeToTopic(topic);
-    if (!success) {
+    try {
+      await _fcmService.subscribeToTopic(topic);
+      debugPrint('✅ Suscrito al topic: $topic');
+    } catch (e) {
       // Si falla, revertir el estado
       _subscribedTopics[topic] = false;
       notifyListeners();
@@ -236,8 +239,10 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
 
     // Desuscribirse realmente del topic en Firebase
-    final success = await FCMService.unsubscribeFromTopic(topic);
-    if (!success) {
+    try {
+      await _fcmService.unsubscribeFromTopic(topic);
+      debugPrint('✅ Desuscrito del topic: $topic');
+    } catch (e) {
       // Si falla, revertir el estado
       _subscribedTopics[topic] = true;
       notifyListeners();
@@ -411,7 +416,7 @@ class NotificationProvider extends ChangeNotifier {
       tripId: tripId,
       type: NotificationType.tripCompleted,
       title: '¡Viaje completado!',
-      body: 'Total: \$${totalFare.toStringAsFixed(2)} - $paymentMethod',
+      body: 'Total: S/. ${totalFare.toStringAsFixed(2)} - $paymentMethod',
       tripData: {
         'totalFare': totalFare,
         'paymentMethod': paymentMethod,
@@ -440,7 +445,7 @@ class NotificationProvider extends ChangeNotifier {
   /// Actualizar token FCM del usuario actual
   Future<void> updateUserFCMToken() async {
     try {
-      final token = await FCMService.getDeviceFCMToken();
+      final token = await _fcmService.getDeviceFCMToken();
       if (token != null && _firebaseService.currentUser != null) {
         await _firebaseService.firestore
             .collection('users')
@@ -458,25 +463,25 @@ class NotificationProvider extends ChangeNotifier {
   Future<void> subscribeToUserTypeTopics(String userType) async {
     try {
       // Tópicos base para todos los usuarios
-      await FCMService.subscribeToTopic('all_users');
-      await FCMService.subscribeToTopic('app_updates');
+      await _fcmService.subscribeToTopic('all_users');
+      await _fcmService.subscribeToTopic('app_updates');
       
       // Tópicos específicos por tipo de usuario
       switch (userType) {
         case 'passenger':
-          await FCMService.subscribeToTopic('passengers');
-          await FCMService.subscribeToTopic('passenger_promotions');
-          await FCMService.unsubscribeFromTopic('drivers');
+          await _fcmService.subscribeToTopic('passengers');
+          await _fcmService.subscribeToTopic('passenger_promotions');
+          await _fcmService.unsubscribeFromTopic('drivers');
           break;
         case 'driver':
-          await FCMService.subscribeToTopic('drivers');
-          await FCMService.subscribeToTopic('driver_updates');
-          await FCMService.unsubscribeFromTopic('passengers');
-          await FCMService.unsubscribeFromTopic('passenger_promotions');
+          await _fcmService.subscribeToTopic('drivers');
+          await _fcmService.subscribeToTopic('driver_updates');
+          await _fcmService.unsubscribeFromTopic('passengers');
+          await _fcmService.unsubscribeFromTopic('passenger_promotions');
           break;
         case 'admin':
-          await FCMService.subscribeToTopic('admins');
-          await FCMService.subscribeToTopic('system_alerts');
+          await _fcmService.subscribeToTopic('admins');
+          await _fcmService.subscribeToTopic('system_alerts');
           break;
       }
       

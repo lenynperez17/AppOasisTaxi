@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
-
 class OasisButton extends StatelessWidget {
   final String text;
   final VoidCallback? onPressed;
@@ -98,17 +96,23 @@ class OasisButton extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     final Widget child = Row(
       mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         if (isLoading) ...[
-          const SizedBox(
+          SizedBox(
             width: 20,
             height: 20,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                type == ButtonType.outlined || type == ButtonType.text
+                    ? colorScheme.primary
+                    : colorScheme.onPrimary,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -119,49 +123,49 @@ class OasisButton extends StatelessWidget {
         Text(text),
       ],
     );
-    
+
     switch (type) {
       case ButtonType.primary:
         return ElevatedButton(
           onPressed: isLoading ? null : onPressed,
           style: ElevatedButton.styleFrom(
             minimumSize: size ?? const Size(double.infinity, 56),
-            backgroundColor: AppTheme.primaryColor,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: AppTheme.primaryColor.withValues(alpha: 0.6),
+            backgroundColor: colorScheme.primary,
+            foregroundColor: colorScheme.onPrimary,
+            disabledBackgroundColor: colorScheme.primary.withValues(alpha: 0.6),
           ),
           child: child,
         );
-        
+
       case ButtonType.secondary:
         return ElevatedButton(
           onPressed: isLoading ? null : onPressed,
           style: ElevatedButton.styleFrom(
             minimumSize: size ?? const Size(double.infinity, 56),
-            backgroundColor: AppTheme.secondaryColor,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: AppTheme.secondaryColor.withValues(alpha: 0.6),
+            backgroundColor: colorScheme.secondary,
+            foregroundColor: colorScheme.onSecondary,
+            disabledBackgroundColor: colorScheme.secondary.withValues(alpha: 0.6),
           ),
           child: child,
         );
-        
+
       case ButtonType.outlined:
         return OutlinedButton(
           onPressed: isLoading ? null : onPressed,
           style: OutlinedButton.styleFrom(
             minimumSize: size ?? const Size(double.infinity, 56),
-            side: const BorderSide(color: AppTheme.primaryColor, width: 2),
-            foregroundColor: AppTheme.primaryColor,
+            side: BorderSide(color: colorScheme.primary, width: 2),
+            foregroundColor: colorScheme.primary,
           ),
           child: child,
         );
-        
+
       case ButtonType.text:
         return TextButton(
           onPressed: isLoading ? null : onPressed,
           style: TextButton.styleFrom(
             minimumSize: size ?? Size.zero,
-            foregroundColor: AppTheme.primaryColor,
+            foregroundColor: colorScheme.primary,
           ),
           child: child,
         );

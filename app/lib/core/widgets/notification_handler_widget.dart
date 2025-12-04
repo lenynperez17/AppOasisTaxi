@@ -108,7 +108,9 @@ class _NotificationHandlerWidgetState extends State<NotificationHandlerWidget> {
       // Obtener desde UserProvider si está disponible
       final userProvider = Provider.of<UserProvider>(context, listen: false);
       if (userProvider.currentUser != null) {
-        return userProvider.currentUser!.userType;
+        // ✅ DUAL-ACCOUNT: Usar activeMode en lugar de userType
+        // activeMode retorna el modo actual ('driver' o 'passenger') incluso para cuentas dual
+        return userProvider.currentUser!.activeMode;
       }
       
       // Fallback: determinar por claims personalizados
@@ -123,7 +125,7 @@ class _NotificationHandlerWidgetState extends State<NotificationHandlerWidget> {
   
   void _showDriverArrivedDialog() {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -194,7 +196,7 @@ class _NotificationHandlerWidgetState extends State<NotificationHandlerWidget> {
   
   void _handleEmergencyNotification() {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -216,7 +218,12 @@ class _NotificationHandlerWidgetState extends State<NotificationHandlerWidget> {
               Navigator.pop(context);
               Navigator.pushNamed(context, '/emergency/details');
             },
-            child: Text('Ver Emergencia', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Ver Emergencia',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onError,
+              ),
+            ),
           ),
         ],
       ),

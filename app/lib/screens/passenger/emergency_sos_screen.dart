@@ -5,6 +5,7 @@ import 'dart:async';
 import '../../services/emergency_service.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/loading_overlay.dart';
+import '../../core/theme/modern_theme.dart';
 
 /// PANTALLA DE EMERGENCIA SOS - OASIS TAXI
 /// =======================================
@@ -89,7 +90,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
     );
     _warningAnimation = ColorTween(
       begin: Colors.transparent,
-      end: Colors.red.withValues(alpha: 0.3),
+      end: ModernTheme.error.withValues(alpha: 0.3),
     ).animate(_warningController);
   }
 
@@ -309,7 +310,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             child: const Text('SÍ, ACTIVAR SOS'),
           ),
@@ -336,7 +337,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             child: const Text('SÍ, CANCELAR'),
           ),
@@ -385,7 +386,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: _emergencyActive ? Colors.red.shade700 : Colors.blue.shade600,
-        foregroundColor: Colors.white,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         elevation: 0,
       ),
       body: AnimatedBuilder(
@@ -452,20 +453,20 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
               child: InkWell(
                 borderRadius: BorderRadius.circular(125),
                 onTap: _isLoading ? null : _triggerSOS,
-                child: const Center(
+                child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
                         Icons.emergency,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         size: 80,
                       ),
                       SizedBox(height: 12),
                       Text(
                         'SOS',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 4,
@@ -475,7 +476,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
                       Text(
                         'TOCA PARA ACTIVAR',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
@@ -493,7 +494,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
 
   Widget _buildActiveEmergencyCard() {
     return Card(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -554,7 +555,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
                 label: const Text('CANCELAR EMERGENCIA (Solo Falsa Alarma)'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
               ),
@@ -590,7 +591,7 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
                     });
                   },
                   label: Text('${type.icon} ${type.name}'),
-                  backgroundColor: Colors.grey.shade100,
+                  backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                   selectedColor: Colors.red.shade100,
                   checkmarkColor: Colors.red,
                 );
@@ -669,8 +670,16 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
                     leading: const CircleAvatar(
                       child: Icon(Icons.person),
                     ),
-                    title: Text(contact.name),
-                    subtitle: Text('${contact.relationship} • ${contact.phoneNumber}'),
+                    title: Text(
+                      contact.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${contact.relationship} • ${contact.phoneNumber}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     trailing: const Icon(Icons.phone, color: Colors.green),
                     dense: true,
                   );
@@ -695,13 +704,13 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
             ),
             const SizedBox(height: 12),
             if (_emergencyHistory.isEmpty)
-              const Center(
+              Center(
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: Text(
                     'No hay emergencias previas',
                     style: TextStyle(
-                      color: Colors.grey,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                       fontSize: 14,
                     ),
                   ),
@@ -733,7 +742,11 @@ class _EmergencySOSScreenState extends State<EmergencySOSScreen>
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(emergency.location),
+                        Text(
+                          emergency.location,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         Text(
                           '${emergency.createdAt.day}/${emergency.createdAt.month}/${emergency.createdAt.year} '
                           '${emergency.createdAt.hour}:${emergency.createdAt.minute.toString().padLeft(2, '0')}',

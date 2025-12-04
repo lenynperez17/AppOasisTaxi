@@ -1,14 +1,14 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
+// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api, use_build_context_synchronously
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
-import '../../providers/notification_provider.dart';
-import '../../providers/auth_provider.dart';
-import '../../models/notification_types.dart';
+import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart';
 
-/// Pantalla de notificaciones completa
-/// ✅ IMPLEMENTACIÓN REAL COMPLETA
+/// Pantalla de notificaciones completa conectada a Firebase Firestore
+/// ✅ IMPLEMENTACIÓN REAL CON FIREBASE - SIN MOCKS
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -16,24 +16,26 @@ class NotificationsScreen extends StatefulWidget {
   _NotificationsScreenState createState() => _NotificationsScreenState();
 }
 
-class _NotificationsScreenState extends State<NotificationsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = _auth.currentUser?.uid;
+
+    if (currentUserId == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Notificaciones'),
+          backgroundColor: AppColors.oasisWhite,
+        ),
+        body: const Center(
+          child: Text('Debes iniciar sesión para ver las notificaciones'),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
@@ -48,516 +50,400 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         elevation: 0,
         iconTheme: IconThemeData(color: AppColors.textPrimary),
         actions: [
-          Consumer<NotificationProvider>(
-            builder: (context, provider, child) {
-              return PopupMenuButton<String>(
-                onSelected: (value) => _handleMenuSelection(value, provider),
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'mark_all_read',
-                    child: Row(
-                      children: [
-                        Icon(Icons.mark_email_read, color: AppColors.oasisGreen),
-                        SizedBox(width: 8),
-                        Text('Marcar todas como leídas'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'clear_all',
-                    child: Row(
-                      children: [
-                        Icon(Icons.clear_all, color: AppColors.error),
-                        SizedBox(width: 8),
-                        Text('Limpiar todas'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'test_notification',
-                    child: Row(
-                      children: [
-                        Icon(Icons.notifications_active, color: AppColors.warning),
-                        SizedBox(width: 8),
-                        Text('Enviar notificación de prueba'),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
+          // Marcar todas como leídas
+          IconButton(
+            icon: const Icon(Icons.done_all),
+            tooltip: 'Marcar todas como leídas',
+            onPressed: () => _markAllAsRead(currentUserId),
+          ),
+          // Eliminar todas
+          IconButton(
+            icon: const Icon(Icons.delete_sweep),
+            tooltip: 'Eliminar todas',
+            onPressed: () => _deleteAllNotifications(currentUserId),
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: AppColors.oasisGreen,
-          labelColor: AppColors.oasisGreen,
-          unselectedLabelColor: AppColors.textSecondary,
-          tabs: [
-            Consumer<NotificationProvider>(
-              builder: (context, provider, child) {
-                return Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Todas'),
-                      if (provider.unreadCount > 0) ...[
-                        SizedBox(width: 8),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.error,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            provider.unreadCount.toString(),
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
-            Tab(text: 'No leídas'),
-            Tab(text: 'Configuración'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildAllNotificationsTab(),
-          _buildUnreadNotificationsTab(),
-          _buildSettingsTab(),
-        ],
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _firestore
+            .collection('notifications')
+            .where('userId', isEqualTo: currentUserId)
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          // Cargando
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          // Error
+          if (snapshot.hasError) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 48, color: ModernTheme.error),
+                  const SizedBox(height: 16),
+                  Text('Error al cargar notificaciones:\n${snapshot.error}'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => setState(() {}),
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Sin notificaciones
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.notifications_off, size: 64, color: context.secondaryText.withOpacity(0.4)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No tienes notificaciones',
+                    style: TextStyle(fontSize: 18, color: context.secondaryText),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          final notifications = snapshot.data!.docs;
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: notifications.length,
+            itemBuilder: (context, index) {
+              final notificationDoc = notifications[index];
+              final notificationData = notificationDoc.data() as Map<String, dynamic>;
+
+              return _buildNotificationCard(
+                notificationDoc.id,
+                notificationData,
+              );
+            },
+          );
+        },
       ),
     );
   }
 
-  void _handleMenuSelection(String value, NotificationProvider provider) {
-    switch (value) {
-      case 'mark_all_read':
-        provider.markAllAsRead();
+  /// Construir tarjeta de notificación individual
+  Widget _buildNotificationCard(String notificationId, Map<String, dynamic> data) {
+    final title = data['title'] ?? 'Notificación';
+    final body = data['body'] ?? '';
+    final isRead = data['isRead'] ?? false;
+    final type = data['type'] ?? 'info';
+    final createdAt = data['createdAt'] as Timestamp?;
+    final payload = data['payload'] as String?;
+
+    return Dismissible(
+      key: Key(notificationId),
+      background: Container(
+        color: ModernTheme.success,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        child: Icon(Icons.done, color: Theme.of(context).colorScheme.onPrimary),
+      ),
+      secondaryBackground: Container(
+        color: ModernTheme.error,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: Icon(Icons.delete, color: Theme.of(context).colorScheme.onPrimary),
+      ),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.startToEnd) {
+          // Marcar como leída
+          await _markAsRead(notificationId);
+          return false;
+        } else {
+          // Eliminar
+          return await _confirmDelete(context);
+        }
+      },
+      onDismissed: (direction) {
+        if (direction == DismissDirection.endToStart) {
+          _deleteNotification(notificationId);
+        }
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        color: isRead ? Theme.of(context).colorScheme.surface : ModernTheme.info.withOpacity(0.1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListTile(
+          leading: _getNotificationIcon(type, isRead),
+          title: Text(
+            title,
+            style: TextStyle(
+              fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+              color: AppColors.textPrimary,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (body.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: TextStyle(color: AppColors.textSecondary),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              if (createdAt != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _formatTimestamp(createdAt),
+                  style: TextStyle(fontSize: 12, color: context.secondaryText),
+                ),
+              ],
+            ],
+          ),
+          trailing: !isRead
+              ? Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: ModernTheme.info,
+                    shape: BoxShape.circle,
+                  ),
+                )
+              : null,
+          onTap: () => _handleNotificationTap(notificationId, payload, isRead),
+        ),
+      ),
+    );
+  }
+
+  /// Obtener icono según tipo de notificación
+  Widget _getNotificationIcon(String type, bool isRead) {
+    IconData iconData;
+    Color iconColor;
+
+    switch (type) {
+      case 'ride':
+        iconData = Icons.local_taxi;
+        iconColor = AppColors.oasisGreen;
+        break;
+      case 'payment':
+        iconData = Icons.account_balance_wallet;
+        iconColor = ModernTheme.success;
+        break;
+      case 'emergency':
+        iconData = Icons.warning;
+        iconColor = ModernTheme.error;
+        break;
+      case 'promotion':
+        iconData = Icons.local_offer;
+        iconColor = ModernTheme.warning;
+        break;
+      case 'system':
+        iconData = Icons.info;
+        iconColor = ModernTheme.info;
+        break;
+      default:
+        iconData = Icons.notifications;
+        iconColor = context.secondaryText;
+    }
+
+    return CircleAvatar(
+      backgroundColor: isRead ? iconColor.withOpacity(0.2) : iconColor,
+      child: Icon(
+        iconData,
+        color: isRead ? iconColor : Theme.of(context).colorScheme.onPrimary,
+        size: 20,
+      ),
+    );
+  }
+
+  /// Formatear timestamp a texto legible
+  String _formatTimestamp(Timestamp timestamp) {
+    final dateTime = timestamp.toDate();
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inMinutes < 1) {
+      return 'Ahora';
+    } else if (difference.inMinutes < 60) {
+      return 'Hace ${difference.inMinutes}m';
+    } else if (difference.inHours < 24) {
+      return 'Hace ${difference.inHours}h';
+    } else if (difference.inDays < 7) {
+      return 'Hace ${difference.inDays}d';
+    } else {
+      return DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
+    }
+  }
+
+  /// Manejar tap en notificación
+  Future<void> _handleNotificationTap(
+    String notificationId,
+    String? payload,
+    bool isRead,
+  ) async {
+    // Marcar como leída si no lo está
+    if (!isRead) {
+      await _markAsRead(notificationId);
+    }
+
+    // Navegar según el payload
+    if (payload != null && payload.isNotEmpty) {
+      if (payload.startsWith('ride:')) {
+        final rideId = payload.substring(5);
+        Navigator.pushNamed(
+          context,
+          '/shared/trip-details',
+          arguments: {'rideId': rideId},
+        );
+      } else if (payload == 'driver_earnings') {
+        Navigator.pushNamed(context, '/driver/earnings');
+      } else if (payload == 'passenger_promotions') {
+        Navigator.pushNamed(context, '/passenger/promotions');
+      }
+    }
+  }
+
+  /// Marcar notificación como leída
+  Future<void> _markAsRead(String notificationId) async {
+    try {
+      await _firestore
+          .collection('notifications')
+          .doc(notificationId)
+          .update({'isRead': true});
+    } catch (e) {
+      debugPrint('❌ Error marcando notificación como leída: $e');
+    }
+  }
+
+  /// Marcar todas las notificaciones como leídas
+  Future<void> _markAllAsRead(String userId) async {
+    try {
+      final batch = _firestore.batch();
+      final unreadNotifications = await _firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: userId)
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      for (var doc in unreadNotifications.docs) {
+        batch.update(doc.reference, {'isRead': true});
+      }
+
+      await batch.commit();
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Todas las notificaciones marcadas como leídas'),
-            backgroundColor: AppColors.success,
+            backgroundColor: ModernTheme.success,
           ),
         );
-        break;
-      case 'clear_all':
-        _showClearAllDialog(provider);
-        break;
-      case 'test_notification':
-        provider.sendTestNotification();
+      }
+    } catch (e) {
+      debugPrint('❌ Error marcando todas como leídas: $e');
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Notificación de prueba enviada'),
-            backgroundColor: AppColors.info,
-          ),
+          SnackBar(content: Text('Error: $e')),
         );
-        break;
+      }
     }
   }
 
-  void _showClearAllDialog(NotificationProvider provider) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Limpiar notificaciones'),
-        content: Text('¿Estás seguro de que quieres eliminar todas las notificaciones?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              provider.clearAllNotifications();
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Todas las notificaciones eliminadas'),
-                  backgroundColor: AppColors.success,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-            child: Text('Eliminar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAllNotificationsTab() {
-    return Consumer<NotificationProvider>(
-      builder: (context, provider, child) {
-        if (provider.notifications.isEmpty) {
-          return _buildEmptyState('No tienes notificaciones');
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(16),
-          itemCount: provider.notifications.length,
-          itemBuilder: (context, index) {
-            final notification = provider.notifications[index];
-            return _buildNotificationCard(notification, provider);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildUnreadNotificationsTab() {
-    return Consumer<NotificationProvider>(
-      builder: (context, provider, child) {
-        final unreadNotifications = provider.unreadNotifications;
-        
-        if (unreadNotifications.isEmpty) {
-          return _buildEmptyState('No tienes notificaciones sin leer');
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(16),
-          itemCount: unreadNotifications.length,
-          itemBuilder: (context, index) {
-            final notification = unreadNotifications[index];
-            return _buildNotificationCard(notification, provider);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildSettingsTab() {
-    return Consumer<NotificationProvider>(
-      builder: (context, provider, child) {
-        return ListView(
-          padding: EdgeInsets.all(16),
-          children: [
-            _buildSettingsSection(
-              'General',
-              [
-                _buildSwitchTile(
-                  'Notificaciones habilitadas',
-                  'Recibir notificaciones push',
-                  provider.notificationsEnabled,
-                  (value) => provider.setNotificationsEnabled(value),
-                ),
-              ],
-            ),
-            SizedBox(height: 24),
-            Consumer<AuthProvider>(
-              builder: (context, authProvider, child) {
-                final userType = authProvider.currentUser?.userType ?? 'passenger';
-                return _buildSettingsSection(
-                  'Suscripciones',
-                  _getTopicsForUserType(userType, provider),
-                );
-              },
-            ),
-            SizedBox(height: 24),
-            _buildSettingsSection(
-              'Información',
-              [
-                _buildInfoTile('Token FCM', provider.fcmToken ?? 'No disponible'),
-                _buildInfoTile('Estado', provider.isInitialized ? 'Inicializado' : 'No inicializado'),
-                _buildInfoTile('Total de notificaciones', provider.notifications.length.toString()),
-                _buildInfoTile('No leídas', provider.unreadCount.toString()),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildNotificationCard(NotificationData notification, NotificationProvider provider) {
-    return Card(
-      margin: EdgeInsets.only(bottom: 12),
-      elevation: notification.isRead ? 1 : 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          if (!notification.isRead) {
-            provider.markAsRead(notification.id);
-          }
-        },
-        child: Container(
-          padding: EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: notification.isRead 
-                ? null 
-                : Border.all(color: AppColors.oasisGreen.withValues(alpha: 0.3), width: 2),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _getNotificationTypeColor(notification.type).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      _getNotificationTypeIcon(notification.type),
-                      color: _getNotificationTypeColor(notification.type),
-                      size: 20,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          notification.title,
-                          style: TextStyle(
-                            fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
-                            fontSize: 16,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          DateFormat('dd/MM/yyyy HH:mm').format(notification.timestamp),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!notification.isRead)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: AppColors.oasisGreen,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  SizedBox(width: 8),
-                  PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'delete') {
-                        provider.removeNotification(notification.id);
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, color: AppColors.error),
-                            SizedBox(width: 8),
-                            Text('Eliminar'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+  /// Confirmar eliminación
+  Future<bool> _confirmDelete(BuildContext context) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Eliminar notificación'),
+            content: const Text('¿Estás seguro de que quieres eliminar esta notificación?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
               ),
-              SizedBox(height: 8),
-              Text(
-                notification.body,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.error),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Eliminar'),
               ),
-              // Imagen removida - no disponible en modelo demo
             ],
           ),
-        ),
-      ),
-    );
+        ) ??
+        false;
   }
 
-  Widget _buildEmptyState(String message) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.notifications_none,
-            size: 64,
-            color: AppColors.textSecondary,
+  /// Eliminar notificación individual
+  Future<void> _deleteNotification(String notificationId) async {
+    try {
+      await _firestore.collection('notifications').doc(notificationId).delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notificación eliminada')),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error eliminando notificación: $e');
+    }
+  }
+
+  /// Eliminar todas las notificaciones
+  Future<void> _deleteAllNotifications(String userId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar todas las notificaciones'),
+        content: const Text('¿Estás seguro? Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
           ),
-          SizedBox(height: 16),
-          Text(
-            message,
-            style: TextStyle(
-              fontSize: 16,
-              color: AppColors.textSecondary,
-            ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Eliminar todas'),
           ),
         ],
       ),
     );
-  }
 
-  Widget _buildSettingsSection(String title, List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
+    if (confirmed != true) return;
+
+    try {
+      final batch = _firestore.batch();
+      final notifications = await _firestore
+          .collection('notifications')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      for (var doc in notifications.docs) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Todas las notificaciones eliminadas'),
+            backgroundColor: ModernTheme.success,
           ),
-        ),
-        SizedBox(height: 12),
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: Column(children: children),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSwitchTile(String title, String subtitle, bool value, Function(bool) onChanged) {
-    return SwitchListTile(
-      title: Text(title),
-      subtitle: Text(subtitle),
-      value: value,
-      onChanged: onChanged,
-      thumbColor: WidgetStateProperty.all(AppColors.oasisGreen),
-    );
-  }
-
-  List<Widget> _getTopicsForUserType(String userType, NotificationProvider provider) {
-    switch (userType) {
-      case 'passenger':
-        return [
-          _buildTopicTile('Notificaciones generales', 'all_users', provider),
-          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
-          _buildTopicTile('Notificaciones de pasajero', 'passengers', provider),
-          _buildTopicTile('Promociones especiales', 'passenger_promotions', provider),
-        ];
-      case 'driver':
-        return [
-          _buildTopicTile('Notificaciones generales', 'all_users', provider),
-          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
-          _buildTopicTile('Notificaciones de conductor', 'drivers', provider),
-          _buildTopicTile('Actualizaciones para conductores', 'driver_updates', provider),
-        ];
-      case 'admin':
-        return [
-          _buildTopicTile('Notificaciones generales', 'all_users', provider),
-          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
-          _buildTopicTile('Notificaciones de administrador', 'admins', provider),
-          _buildTopicTile('Alertas del sistema', 'system_alerts', provider),
-        ];
-      default:
-        // Caso por defecto: usuario sin tipo definido recibe solo lo básico
-        return [
-          _buildTopicTile('Notificaciones generales', 'all_users', provider),
-          _buildTopicTile('Actualizaciones de la app', 'app_updates', provider),
-        ];
-    }
-  }
-
-  Widget _buildTopicTile(String title, String topic, NotificationProvider provider) {
-    final isSubscribed = provider.topicSubscriptions[topic] ?? false;
-    return SwitchListTile(
-      title: Text(title),
-      subtitle: Text(isSubscribed
-          ? 'Recibiendo notificaciones'
-          : 'Notificaciones desactivadas'),
-      value: isSubscribed,
-      onChanged: (value) {
-        if (value) {
-          provider.subscribeToTopic(topic);
-        } else {
-          provider.unsubscribeFromTopic(topic);
-        }
-      },
-      thumbColor: WidgetStateProperty.all(AppColors.oasisGreen),
-    );
-  }
-
-  Widget _buildInfoTile(String title, String value) {
-    return ListTile(
-      title: Text(title),
-      subtitle: Text(
-        value,
-        style: TextStyle(fontFamily: 'monospace'),
-      ),
-      dense: true,
-    );
-  }
-
-  Color _getNotificationTypeColor(NotificationType type) {
-    switch (type) {
-      case NotificationType.general:
-        return AppColors.info;
-      case NotificationType.tripRequest:
-        return AppColors.warning;
-      case NotificationType.tripAccepted:
-        return AppColors.success;
-      case NotificationType.tripStarted:
-        return AppColors.oasisGreen;
-      case NotificationType.tripCancelled:
-        return AppColors.error;
-      case NotificationType.tripCompleted:
-        return AppColors.oasisGreen;
-      case NotificationType.driverArrived:
-        return AppColors.info;
-      case NotificationType.payment:
-        return AppColors.oasisGreen;
-      case NotificationType.promotion:
-        return AppColors.warning;
-      case NotificationType.support:
-        return AppColors.info;
-      case NotificationType.system:
-        return AppColors.textSecondary;
-      default:
-        return AppColors.info;
-    }
-  }
-
-  IconData _getNotificationTypeIcon(NotificationType type) {
-    switch (type) {
-      case NotificationType.general:
-        return Icons.notifications;
-      case NotificationType.tripRequest:
-        return Icons.car_rental;
-      case NotificationType.tripAccepted:
-        return Icons.check_circle;
-      case NotificationType.tripStarted:
-        return Icons.play_arrow;
-      case NotificationType.tripCancelled:
-        return Icons.cancel;
-      case NotificationType.tripCompleted:
-        return Icons.flag;
-      case NotificationType.driverArrived:
-        return Icons.location_on;
-      case NotificationType.payment:
-        return Icons.payment;
-      case NotificationType.promotion:
-        return Icons.local_offer;
-      case NotificationType.support:
-        return Icons.support_agent;
-      case NotificationType.system:
-        return Icons.settings;
-      default:
-        return Icons.notifications;
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error eliminando todas las notificaciones: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 }

@@ -127,21 +127,21 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                               Container(
                                 padding: EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: isSelected 
+                                  color: isSelected
                                       ? option['color'].withValues(alpha: 0.1)
-                                      : Colors.white,
+                                      : Theme.of(context).colorScheme.surface,
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: isSelected 
+                                    color: isSelected
                                         ? option['color']
-                                        : Colors.grey.shade200,
+                                        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
                                     width: isSelected ? 2 : 1,
                                   ),
                                   boxShadow: [
                                     BoxShadow(
                                       color: isSelected
                                           ? option['color'].withValues(alpha: 0.2)
-                                          : Colors.black.withValues(alpha: 0.05),
+                                          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
                                       blurRadius: isSelected ? 15 : 10,
                                       offset: Offset(0, 5),
                                     ),
@@ -170,9 +170,9 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: isSelected 
+                                        color: isSelected
                                             ? option['color']
-                                            : Colors.grey[700],
+                                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                                       ),
                                       textAlign: TextAlign.center,
                                     ),
@@ -184,16 +184,16 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                                           style: TextStyle(
                                             fontSize: 18,
                                             fontWeight: FontWeight.bold,
-                                            color: isSelected 
+                                            color: isSelected
                                                 ? option['color']
-                                                : Colors.black87,
+                                                : Theme.of(context).colorScheme.onSurface,
                                           ),
                                         ),
                                         Text(
                                           option['time'],
                                           style: TextStyle(
                                             fontSize: 12,
-                                            color: Colors.grey[600],
+                                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                                           ),
                                         ),
                                       ],
@@ -216,7 +216,7 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                                     ),
                                     child: Icon(
                                       Icons.check,
-                                      color: Colors.white,
+                                      color: Theme.of(context).colorScheme.onPrimary,
                                       size: 16,
                                     ),
                                   ),
@@ -233,7 +233,7 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                                       vertical: 4,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.amber,
+                                      color: Theme.of(context).colorScheme.tertiary,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
@@ -241,7 +241,7 @@ class _TransportOptionsWidgetState extends State<TransportOptionsWidget>
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+                                        color: Theme.of(context).colorScheme.onTertiary,
                                       ),
                                     ),
                                   ),

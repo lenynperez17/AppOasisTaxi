@@ -9,7 +9,7 @@ class AppConstants {
   /// Configuración de monedas por país
   static const Map<String, CurrencyConfig> CURRENCIES = {
     'PE': CurrencyConfig(
-      symbol: 'S/',
+      symbol: 'S/.',
       code: 'PEN',
       name: 'Sol Peruano',
       locale: 'es_PE',

@@ -1,8 +1,12 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../core/utils/currency_formatter.dart';
 
+import '../../utils/logger.dart';
 enum PromotionType { percentage, fixed, freeRide, loyalty }
 enum PromotionStatus { active, used, expired }
 
@@ -104,23 +108,37 @@ class _PromotionsScreenState extends State<PromotionsScreen>
   Future<void> _loadPromotionsFromFirebase() async {
     try {
       setState(() => _isLoading = true);
-      
-      // Por ahora usar un userId de ejemplo
-      // En producción, esto vendría del usuario autenticado
-      _userId = 'test_user_id';
-      
+
+      // ✅ Obtener el ID del usuario autenticado desde Firebase Auth
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Usuario no autenticado'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+        return;
+      }
+      _userId = currentUser.uid;
+
       // Cargar promociones activas desde Firebase
+      // ✅ CRÍTICO: Firestore rules requieren limit para queries (máx 100)
       final promotionsSnapshot = await _firestore
           .collection('promotions')
           .where('isActive', isEqualTo: true)
           .orderBy('createdAt', descending: true)
+          .limit(100) // ✅ Requerido por firestore.rules
           .get();
-      
+
       List<Promotion> loadedPromotions = [];
-      
+
       for (var doc in promotionsSnapshot.docs) {
         final data = doc.data();
-        
+
         // Determinar el tipo de promoción
         PromotionType type = PromotionType.percentage;
         if (data['type'] == 'fixed') {
@@ -130,13 +148,13 @@ class _PromotionsScreenState extends State<PromotionsScreen>
         } else if (data['type'] == 'loyalty') {
           type = PromotionType.loyalty;
         }
-        
+
         // Determinar el estado de la promoción
         PromotionStatus status = PromotionStatus.active;
-        final validUntil = data['validUntil'] != null 
-            ? (data['validUntil'] as Timestamp).toDate() 
+        final validUntil = data['validUntil'] != null
+            ? (data['validUntil'] as Timestamp).toDate()
             : DateTime.now().add(Duration(days: 30));
-        
+
         // Verificar si el usuario ya usó esta promoción
         final userUsageDoc = await _firestore
             .collection('users')
@@ -144,21 +162,21 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             .collection('used_promotions')
             .doc(doc.id)
             .get();
-        
+
         if (userUsageDoc.exists) {
           final usageData = userUsageDoc.data()!;
           final usedCount = usageData['usedCount'] ?? 0;
           final maxUses = data['maxUses'] ?? 1;
-          
+
           if (usedCount >= maxUses) {
             status = PromotionStatus.used;
           }
         }
-        
+
         if (validUntil.isBefore(DateTime.now())) {
           status = PromotionStatus.expired;
         }
-        
+
         // Determinar el color basado en el tipo
         Color color = ModernTheme.primaryBlue;
         if (type == PromotionType.fixed) {
@@ -168,7 +186,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
         } else if (type == PromotionType.loyalty) {
           color = ModernTheme.oasisGreen;
         }
-        
+
         loadedPromotions.add(Promotion(
           id: doc.id,
           code: data['code'] ?? '',
@@ -181,30 +199,42 @@ class _PromotionsScreenState extends State<PromotionsScreen>
           maxUses: data['maxUses'],
           usedCount: data['usedCount'] ?? 0,
           minAmount: data['minAmount']?.toDouble(),
-          validZones: data['validZones'] != null 
-              ? List<String>.from(data['validZones']) 
+          validZones: data['validZones'] != null
+              ? List<String>.from(data['validZones'])
               : null,
           imageUrl: data['imageUrl'] ?? 'assets/promo.jpg',
           color: color,
         ));
       }
-      
-      // Si no hay promociones, mostrar lista vacía (sin crear datos de ejemplo)
-      
+
+      // ✅ MEJORADO: Actualizar estado sin mostrar error si está vacío
       setState(() {
         _promotions = loadedPromotions;
         _isLoading = false;
       });
-      
+
+      // ✅ NUEVO: Si está vacío, mostrar mensaje informativo (no error)
+      if (loadedPromotions.isEmpty && mounted) {
+        AppLogger.info('No hay promociones disponibles en Firebase');
+      }
+
     } catch (e) {
-      print('Error cargando promociones: $e');
+      AppLogger.error('Error cargando promociones: $e');
       setState(() => _isLoading = false);
-      
+
+      // ✅ MEJORADO: Distinguir entre error de red/permisos vs colección vacía
       if (mounted) {
+        final errorMessage = e.toString().contains('index') || e.toString().contains('FAILED_PRECONDITION')
+            ? 'Configurando base de datos. Intenta de nuevo en un momento'
+            : e.toString().contains('permission') || e.toString().contains('PERMISSION_DENIED')
+            ? 'No tienes permisos para ver las promociones'
+            : 'Error al conectar con el servidor. Verifica tu conexión';
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al cargar promociones'),
+            content: Text(errorMessage),
             backgroundColor: ModernTheme.error,
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -224,32 +254,33 @@ class _PromotionsScreenState extends State<PromotionsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: Text(
           'Promociones y Cupones',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.card_giftcard, color: Colors.white),
-            onPressed: _showLoyaltyProgram,
-          ),
-        ],
+        // ✅ COMENTADO: Loyalty program hasta que se implementen datos reales
+        // actions: [
+        //   IconButton(
+        //     icon: Icon(Icons.XXX, color: Theme.of(context).colorScheme.onPrimary),
+        //     onPressed: _showLoyaltyProgram,
+        //   ),
+        // ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(60),
           child: Container(
             color: ModernTheme.oasisGreen,
             child: TabBar(
               controller: _tabController,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
+              indicatorColor: Theme.of(context).colorScheme.onPrimary,
+              labelColor: Theme.of(context).colorScheme.onPrimary,
+              unselectedLabelColor: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
               tabs: [
                 Tab(text: 'Activas (${_activePromotions.length})'),
                 Tab(text: 'Usadas (${_usedPromotions.length})'),
@@ -291,10 +322,10 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             child: Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.05),
                     blurRadius: 10,
                     offset: Offset(0, 5),
                   ),
@@ -310,7 +341,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                         prefixIcon: Icon(Icons.local_offer, color: ModernTheme.oasisGreen),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
+                          borderSide: BorderSide(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -345,16 +376,17 @@ class _PromotionsScreenState extends State<PromotionsScreen>
     if (promotions.isEmpty) {
       return _buildEmptyState(status);
     }
-    
+
     return ListView.builder(
       padding: EdgeInsets.all(16),
-      itemCount: promotions.length + (status == PromotionStatus.active ? 1 : 0),
+      itemCount: promotions.length, // ✅ CORREGIDO: Ya no suma 1 para loyalty card
       itemBuilder: (context, index) {
-        if (status == PromotionStatus.active && index == 0) {
-          return _buildLoyaltyCard();
-        }
-        
-        final promoIndex = status == PromotionStatus.active ? index - 1 : index;
+        // ✅ ELIMINADO: Ya no muestra loyalty card con datos ficticios
+        // if (status == PromotionStatus.active && index == 0) {
+        //   return _buildLoyaltyCard();
+        // }
+
+        final promoIndex = index; // ✅ SIMPLIFICADO: Ya no resta 1
         final promotion = promotions[promoIndex];
         final delay = promoIndex * 0.1;
         
@@ -423,7 +455,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Text(
                         'Programa de Fidelidad',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
@@ -432,13 +464,13 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
+                          color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           'Nivel ${_loyaltyData['level']}',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.surface,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -449,12 +481,12 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                   Container(
                     padding: EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.star,
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       size: 32,
                     ),
                   ),
@@ -472,7 +504,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Text(
                         '${_loyaltyData['currentPoints']} pts',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                         ),
@@ -480,7 +512,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Text(
                         '${_loyaltyData['nextRewardPoints']} pts',
                         style: TextStyle(
-                          color: Colors.white70,
+                          color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                           fontSize: 14,
                         ),
                       ),
@@ -489,14 +521,14 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                   SizedBox(height: 8),
                   LinearProgressIndicator(
                     value: _loyaltyData['currentPoints'] / _loyaltyData['nextRewardPoints'],
-                    backgroundColor: Colors.white.withValues(alpha: 0.2),
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    backgroundColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
+                    valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                   ),
                   SizedBox(height: 8),
                   Text(
                     'Te faltan ${_loyaltyData['nextRewardPoints'] - _loyaltyData['currentPoints']} puntos para tu próxima recompensa',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                       fontSize: 12,
                     ),
                   ),
@@ -510,8 +542,8 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _buildLoyaltyStat('Viajes', '${_loyaltyData['totalTrips']}'),
-                  Container(width: 1, height: 30, color: Colors.white24),
-                  _buildLoyaltyStat('Ahorrado', 'S/ ${_loyaltyData['savedAmount']}'),
+                  Container(width: 1, height: 30, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.24)),
+                  _buildLoyaltyStat('Ahorrado', CurrencyFormatter.formatCurrency((_loyaltyData['savedAmount'] as num).toDouble())),
                 ],
               ),
             ],
@@ -527,7 +559,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -535,7 +567,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
             fontSize: 12,
           ),
         ),
@@ -551,11 +583,11 @@ class _PromotionsScreenState extends State<PromotionsScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
         border: Border.all(
-          color: isActive ? promotion.color.withValues(alpha: 0.3) : Colors.grey.shade200,
+          color: isActive ? promotion.color.withValues(alpha: 0.3) : Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
           width: isActive ? 2 : 1,
         ),
       ),
@@ -571,7 +603,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                 gradient: LinearGradient(
                   colors: isActive 
                     ? [promotion.color, promotion.color.withValues(alpha: 0.7)]
-                    : [Colors.grey, Colors.grey.shade400],
+                    : [Theme.of(context).colorScheme.onSurface.withOpacity(0.6), Theme.of(context).colorScheme.onSurface.withOpacity(0.4)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -583,7 +615,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                   Positioned.fill(
                     child: CustomPaint(
                       painter: PromotionPatternPainter(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.1),
                       ),
                     ),
                   ),
@@ -601,13 +633,13 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                             Container(
                               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
+                                color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
                                 promotion.code,
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),
@@ -617,7 +649,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                               Container(
                                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
@@ -634,7 +666,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                         Text(
                           promotion.title,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.surface,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
@@ -650,7 +682,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                     Positioned.fill(
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.5),
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                         ),
                         child: Center(
@@ -665,7 +697,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                               child: Text(
                                 isUsed ? 'USADO' : 'EXPIRADO',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 20,
                                 ),
@@ -688,7 +720,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                   Text(
                     promotion.description,
                     style: TextStyle(
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                       fontSize: 14,
                     ),
                     maxLines: 2,
@@ -706,8 +738,8 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                             Icons.schedule,
                             size: 16,
                             color: isActive 
-                              ? (promotion.daysRemaining <= 3 ? ModernTheme.warning : ModernTheme.textSecondary)
-                              : Colors.grey,
+                              ? (promotion.daysRemaining <= 3 ? ModernTheme.warning : context.secondaryText)
+                              : Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                           ),
                           SizedBox(width: 4),
                           Text(
@@ -718,8 +750,8 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                               : 'Expirado',
                             style: TextStyle(
                               color: isActive
-                                ? (promotion.daysRemaining <= 3 ? ModernTheme.warning : ModernTheme.textSecondary)
-                                : Colors.grey,
+                                ? (promotion.daysRemaining <= 3 ? ModernTheme.warning : context.secondaryText)
+                                : Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                               fontSize: 12,
                             ),
                           ),
@@ -733,13 +765,13 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                             Icon(
                               Icons.confirmation_number,
                               size: 16,
-                              color: ModernTheme.textSecondary,
+                              color: context.secondaryText,
                             ),
                             SizedBox(width: 4),
                             Text(
                               '${promotion.remainingUses} usos',
                               style: TextStyle(
-                                color: ModernTheme.textSecondary,
+                                color: context.secondaryText,
                                 fontSize: 12,
                               ),
                             ),
@@ -773,8 +805,8 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       children: [
                         if (promotion.minAmount != null)
                           _buildConditionChip(
-                            Icons.attach_money,
-                            'Mín. S/ ${promotion.minAmount}',
+                            Icons.account_balance_wallet, // ✅ Cambiado de attach_money ($) a wallet
+                            'Mín. ${promotion.minAmount!.toCurrency()}',
                           ),
                         if (promotion.validZones != null)
                           ...(promotion.validZones!.map((zone) => 
@@ -795,18 +827,18 @@ class _PromotionsScreenState extends State<PromotionsScreen>
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: ModernTheme.backgroundLight,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: ModernTheme.textSecondary),
+          Icon(icon, size: 12, color: context.secondaryText),
           SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 11,
             ),
           ),
@@ -845,7 +877,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
           Icon(
             icon,
             size: 80,
-            color: Colors.grey.shade300,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
           ),
           SizedBox(height: 16),
           Text(
@@ -853,7 +885,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
           SizedBox(height: 8),
@@ -861,7 +893,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             subtitle,
             style: TextStyle(
               fontSize: 14,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -874,7 +906,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
       case PromotionType.percentage:
         return '${promotion.value.toInt()}%';
       case PromotionType.fixed:
-        return 'S/ ${promotion.value.toInt()}';
+        return promotion.value.toInt().toCurrency();
       case PromotionType.freeRide:
         return 'GRATIS';
       case PromotionType.loyalty:
@@ -939,7 +971,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
               promotion.title,
               style: TextStyle(
                 fontSize: 16,
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
               ),
               textAlign: TextAlign.center,
             ),
@@ -947,7 +979,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: ModernTheme.backgroundLight,
+                color: context.surfaceColor,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -955,7 +987,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                 children: [
                   Text(
                     'Código: ',
-                    style: TextStyle(color: ModernTheme.textSecondary),
+                    style: TextStyle(color: context.secondaryText),
                   ),
                   Text(
                     promotion.code,
@@ -971,7 +1003,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             Text(
               'Se aplicará automáticamente en tu próximo viaje',
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontSize: 12,
               ),
               textAlign: TextAlign.center,
@@ -1006,7 +1038,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
         builder: (context, scrollController) {
           return Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: ListView(
@@ -1019,7 +1051,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                     height: 4,
                     margin: EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1041,7 +1073,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Text(
                         _getPromotionValue(promotion),
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 48,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1050,7 +1082,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                       Text(
                         promotion.title,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1074,7 +1106,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                 Text(
                   promotion.description,
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontSize: 14,
                   ),
                 ),
@@ -1095,7 +1127,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                 if (promotion.maxUses != null)
                   _buildTermItem('Máximo ${promotion.maxUses} usos por usuario'),
                 if (promotion.minAmount != null)
-                  _buildTermItem('Compra mínima de S/ ${promotion.minAmount}'),
+                  _buildTermItem('Compra mínima de ${promotion.minAmount!.toCurrency()}'),
                 if (promotion.validZones != null)
                   _buildTermItem('Válido solo en: ${promotion.validZones!.join(', ')}'),
                 _buildTermItem('No acumulable con otras promociones'),
@@ -1138,7 +1170,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
             child: Text(
               text,
               style: TextStyle(
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 fontSize: 14,
               ),
             ),
@@ -1171,15 +1203,15 @@ class LoyaltyProgramScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: Text(
           'Programa de Fidelidad',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -1202,14 +1234,14 @@ class LoyaltyProgramScreen extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.star,
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     size: 64,
                   ),
                   SizedBox(height: 16),
                   Text(
                     'Nivel ${loyaltyData['level']}',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1218,7 +1250,7 @@ class LoyaltyProgramScreen extends StatelessWidget {
                   Text(
                     '${loyaltyData['currentPoints']} puntos acumulados',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                       fontSize: 16,
                     ),
                   ),
@@ -1238,22 +1270,22 @@ class LoyaltyProgramScreen extends StatelessWidget {
             ),
             SizedBox(height: 16),
             
-            _buildBenefitCard(
+            _buildBenefitCard(context,
               Icons.percent,
               '15% de descuento',
               'En todos tus viajes',
             ),
-            _buildBenefitCard(
+            _buildBenefitCard(context,
               Icons.flash_on,
               'Prioridad en horas pico',
               'Conexión más rápida con conductores',
             ),
-            _buildBenefitCard(
+            _buildBenefitCard(context,
               Icons.card_giftcard,
               'Promociones exclusivas',
               'Acceso anticipado a ofertas',
             ),
-            _buildBenefitCard(
+            _buildBenefitCard(context,
               Icons.support_agent,
               'Soporte prioritario',
               'Atención preferencial 24/7',
@@ -1271,17 +1303,17 @@ class LoyaltyProgramScreen extends StatelessWidget {
             ),
             SizedBox(height: 16),
             
-            _buildHowItWorksItem(
+            _buildHowItWorksItem(context,
               '1',
               'Acumula puntos',
               'Gana 10 puntos por cada S/ 1 gastado',
             ),
-            _buildHowItWorksItem(
+            _buildHowItWorksItem(context,
               '2',
               'Sube de nivel',
               'Alcanza nuevos niveles con más puntos',
             ),
-            _buildHowItWorksItem(
+            _buildHowItWorksItem(context,
               '3',
               'Disfruta beneficios',
               'Mejores descuentos y ventajas exclusivas',
@@ -1292,14 +1324,14 @@ class LoyaltyProgramScreen extends StatelessWidget {
     );
   }
   
-  Widget _buildBenefitCard(IconData icon, String title, String subtitle) {
+  Widget _buildBenefitCard(BuildContext context, IconData icon, String title, String subtitle) {
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: Row(
         children: [
@@ -1326,7 +1358,7 @@ class LoyaltyProgramScreen extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontSize: 14,
                   ),
                 ),
@@ -1338,7 +1370,7 @@ class LoyaltyProgramScreen extends StatelessWidget {
     );
   }
   
-  Widget _buildHowItWorksItem(String number, String title, String subtitle) {
+  Widget _buildHowItWorksItem(BuildContext context, String number, String title, String subtitle) {
     return Container(
       margin: EdgeInsets.only(bottom: 16),
       child: Row(
@@ -1355,7 +1387,7 @@ class LoyaltyProgramScreen extends StatelessWidget {
               child: Text(
                 number,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -1376,7 +1408,7 @@ class LoyaltyProgramScreen extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                     fontSize: 14,
                   ),
                 ),

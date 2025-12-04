@@ -7,7 +7,10 @@ import 'package:geocoding/geocoding.dart'; // ✅ NUEVO: Para reverse geocoding 
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:math'; // Para funciones matemáticas: sin, cos, sqrt, atan2 (fórmula Haversine)
+import '../../generated/l10n/app_localizations.dart'; // ✅ NUEVO: Import de localizaciones
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../core/config/app_config.dart'; // 🔐 NUEVO: Configuración de API Keys desde .env
 import '../../core/widgets/custom_place_text_field.dart'; // ✅ NUEVO: Widget custom que resuelve problema del teclado
 import '../../core/widgets/mode_switch_button.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
@@ -15,10 +18,13 @@ import '../../widgets/common/oasis_app_bar.dart';
 import '../../models/price_negotiation_model.dart' as models;
 import '../../providers/ride_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/price_negotiation_provider.dart'; // ✅ Provider de negociación
+import 'passenger_negotiations_screen.dart'; // ✅ Pantalla de negociaciones
 import '../shared/settings_screen.dart';
 import '../shared/about_screen.dart';
 import '../../utils/logger.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import '../../core/utils/currency_formatter.dart';
 
 // Enum para tipos de servicio disponibles
 enum ServiceType {
@@ -29,8 +35,10 @@ enum ServiceType {
   moto,        // Moto Taxi (1 pasajero, rápido)
 }
 
-// Google Maps API Key para Directions API y Places API
-const String _googleMapsApiKey = 'AIzaSyDhivA5K3FD5Qeom96dkJ-NsdmWVrqFWmo';
+// 🔐 GOOGLE MAPS API KEY - Usar desde configuración central
+// La API Key se configura en AppConfig mediante variables de entorno (.env)
+// Ver app/lib/core/config/app_config.dart para instrucciones de configuración
+// Usar directamente AppConfig.googleMapsApiKey en lugar de variable top-level
 
 // Estilo de mapa limpio - Oculta POIs, etiquetas y distracciones visuales
 // Solo muestra calles principales y geografía básica para mejor enfoque en la ruta
@@ -120,6 +128,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   bool _showContinueButton = false; // ✅ true solo cuando el teclado está cerrado y campos están llenos
   Timer? _buttonDelayTimer; // Timer para delay del botón después de cerrar teclado
   bool _isAdjustingPickup = false; // ✅ NUEVO: true cuando se muestra el marcador fijo para ajustar ubicación moviendo el mapa
+  bool _isCreatingNegotiation = false; // ✅ NUEVO: true mientras se está creando una negociación (previene múltiples clics)
 
   // Coordenadas de lugares seleccionados con Google Places
   LatLng? _pickupCoordinates;
@@ -260,7 +269,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     if (currentTrip != null) {
       // Navegar al código de verificación cuando el conductor sea asignado
       if (currentTrip.status == 'accepted' || currentTrip.status == 'driver_arriving') {
-        if (currentTrip.verificationCode != null) {
+        if (currentTrip.passengerVerificationCode != null) {
           Navigator.pushNamed(
             context,
             '/passenger/verification-code',
@@ -293,9 +302,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
         setState(() {
           _locationPermissionGranted = true;
         });
-        AppLogger.info('Permisos de ubicación otorgados - MyLocation habilitado en Maps');
+        AppLogger.info('✅ Permisos de ubicación otorgados - MyLocation habilitado en Maps');
+        print('✅ MAPA: Permisos otorgados, Google Maps debería mostrarse correctamente');
       } else {
-        AppLogger.warning('Permisos de ubicación denegados - MyLocation deshabilitado en Maps');
+        AppLogger.warning('⚠️ Permisos de ubicación denegados - MyLocation deshabilitado en Maps');
+        AppLogger.warning('   Permiso actual: $permission');
+        print('⚠️ MAPA: Permisos denegados ($permission), el mapa se mostrará SIN ubicación del usuario');
       }
 
     } catch (e, stackTrace) {
@@ -307,6 +319,10 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   void dispose() {
     // ✅ Marcar como disposed ANTES de cancelar cualquier recurso
     _isDisposed = true;
+
+    // ✅ Liberar MapController para evitar ImageReader buffer warnings
+    _mapController?.dispose();
+    _mapController = null;
 
     // Cancelar timers INMEDIATAMENTE para prevenir callbacks pendientes
     _negotiationTimer?.cancel();
@@ -451,7 +467,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
           _estimatedTime = time;
           _suggestedPrice = price;
         });
-        AppLogger.info('Ruta recalculada: $distance km, $time min, S/ ${price.toStringAsFixed(2)}');
+        AppLogger.info('Ruta recalculada: $distance km, $time min, ${price.toCurrency()}');
       }
 
       // Salir del modo de ajuste
@@ -499,43 +515,52 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     if (_pickupController.text.isEmpty || _destinationController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Debes ingresar origen y destino'),
-          backgroundColor: Colors.orange,
+          content: Text(AppLocalizations.of(context)!.enterOriginAndDestination),
+          backgroundColor: ModernTheme.warning,
         ),
       );
       return;
     }
 
+    // ✅ Prevenir múltiples clics - Activar loading
+    if (_isCreatingNegotiation) return; // Si ya está creando, ignorar nuevos clics
+
+    setState(() {
+      _isCreatingNegotiation = true;
+    });
+
     try {
       if (!mounted) return;
-      final rideProvider = Provider.of<RideProvider>(context, listen: false);
+      // ✅ CORRECCIÓN: Usar PriceNegotiationProvider en lugar de RideProvider
+      final negotiationProvider = Provider.of<PriceNegotiationProvider>(context, listen: false);
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = authProvider.currentUser;
-      
+
       if (user == null) {
         if (!mounted) return;
+        setState(() {
+          _isCreatingNegotiation = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: Usuario no autenticado'),
-            backgroundColor: Colors.red,
+            content: Text(AppLocalizations.of(context)!.userNotAuthenticated),
+            backgroundColor: ModernTheme.error,
           ),
         );
         return;
       }
 
-      if (!mounted) return;
-      setState(() {
-        _showPriceNegotiation = true;
-      });
-
       // Obtener ubicación real del GPS del dispositivo
       LatLng? currentLocation = await _getCurrentLocation();
       if (currentLocation == null) {
         if (!mounted) return;
+        setState(() {
+          _isCreatingNegotiation = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo obtener la ubicación actual. Verifica los permisos GPS.'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.locationPermissionDenied),
+            backgroundColor: ModernTheme.error,
           ),
         );
         return;
@@ -545,44 +570,93 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       LatLng? destinationLocation = await _getDestinationLocation();
       if (destinationLocation == null) {
         if (!mounted) return;
+        setState(() {
+          _isCreatingNegotiation = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('No se pudo encontrar la dirección de destino'),
-            backgroundColor: Colors.red,
+            backgroundColor: ModernTheme.error,
           ),
         );
         return;
       }
 
-      // Crear solicitud de viaje REAL usando ubicaciones reales
-      await rideProvider.requestRide(
-        pickupLocation: currentLocation, // UBICACIÓN GPS REAL
-        destinationLocation: destinationLocation, // DESTINO REAL GEOCODIFICADO
-        pickupAddress: _pickupController.text.isEmpty ? 'Mi ubicación actual' : _pickupController.text,
-        destinationAddress: _destinationController.text,
-        userId: user.id,
+      // ✅ Construir LocationPoints para negociación
+      final pickup = models.LocationPoint(
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+        address: _pickupController.text.isEmpty ? 'Mi ubicación actual' : _pickupController.text,
+        reference: null,
+      );
+
+      final destination = models.LocationPoint(
+        latitude: destinationLocation.latitude,
+        longitude: destinationLocation.longitude,
+        address: _destinationController.text,
+        reference: null,
+      );
+
+      // ✅ Determinar método de pago basado en selección del usuario
+      models.PaymentMethod paymentMethod;
+      switch (_selectedPaymentMethod) {
+        case 'Tarjeta':
+          paymentMethod = models.PaymentMethod.card;
+          break;
+        case 'Billetera':
+          paymentMethod = models.PaymentMethod.wallet;
+          break;
+        case 'Efectivo':
+        default:
+          paymentMethod = models.PaymentMethod.cash;
+          break;
+      }
+
+      // ✅ CORRECCIÓN: Crear negociación en lugar de solicitud directa
+      await negotiationProvider.createNegotiation(
+        pickup: pickup,
+        destination: destination,
+        offeredPrice: _offeredPrice,
+        paymentMethod: paymentMethod,
+        notes: null,
       );
 
       if (!mounted) return;
-      
+
+      // ✅ Cerrar el sheet de precio y mostrar mensaje de éxito
+      setState(() {
+        _showPriceNegotiation = false;
+        _isCreatingNegotiation = false; // ✅ Desactivar loading
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Buscando conductores disponibles...'),
-          backgroundColor: ModernTheme.oasisGreen,
+          content: Text('¡Solicitud enviada! Los conductores cercanos verán tu oferta'),
+          backgroundColor: ModernTheme.success,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // ✅ NUEVO: Navegar a la pantalla de negociaciones para ver ofertas
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PassengerNegotiationsScreen(),
         ),
       );
 
     } catch (e) {
       if (!mounted) return;
-      
+
       setState(() {
         _showPriceNegotiation = false;
+        _isCreatingNegotiation = false; // ✅ Desactivar loading en caso de error
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al solicitar viaje: ${e.toString()}'),
-          backgroundColor: Colors.red,
+          content: Text('Error al crear negociación: ${e.toString()}'),
+          backgroundColor: ModernTheme.error,
         ),
       );
     }
@@ -688,7 +762,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
           ModeSwitchButton(compact: true),
           SizedBox(width: 8),
           IconButton(
-            icon: Icon(Icons.notifications, color: Colors.white),
+            icon: Icon(Icons.notifications, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: () => Navigator.pushNamed(context, '/shared/notifications'),
           ),
         ],
@@ -712,6 +786,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
             style: _cleanMapStyle, // ✅ Aplica estilo limpio que oculta POIs y etiquetas
+            // ✅ OPTIMIZACIONES: Reducir carga de renderizado y eliminar ImageReader warnings
+            liteModeEnabled: false,  // Modo normal pero optimizado
+            buildingsEnabled: false, // Deshabilitar edificios 3D
+            indoorViewEnabled: false, // Deshabilitar vista interior
+            trafficEnabled: false,   // Tráfico deshabilitado por defecto
+            minMaxZoomPreference: MinMaxZoomPreference(10, 20), // Limitar zoom
           ),
 
           // ✅ NUEVO: Marcador fijo en el centro del mapa (solo visible en modo de ajuste)
@@ -720,14 +800,14 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Marcador azul fijo en el centro
+                  // Marcador verde fijo en el centro (color corporativo)
                   Icon(
                     Icons.location_on,
                     size: 48,
-                    color: Colors.blue,
+                    color: ModernTheme.oasisGreen,
                     shadows: [
                       Shadow(
-                        color: Colors.black.withOpacity(0.3),
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                         blurRadius: 4,
                         offset: Offset(0, 2),
                       ),
@@ -738,11 +818,11 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                     margin: EdgeInsets.only(top: 8),
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.1),
                           blurRadius: 8,
                           offset: Offset(0, 2),
                         ),
@@ -753,7 +833,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: ModernTheme.textPrimary,
+                        color: context.primaryText,
                       ),
                     ),
                   ),
@@ -871,10 +951,15 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     required Color markerColor,
     required bool isPickup,
   }) {
+    // ✅ LOG CRÍTICO: Confirmar que este método se ejecuta
+    AppLogger.critical('🎯🎯🎯 _buildAddressField LLAMADO - isPickup: $isPickup, hint: $hintText');
+    final apiKey = AppConfig.googleMapsApiKey;
+    AppLogger.critical('🎯🎯🎯 API Key: ${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 5)}');
+
     return CustomPlaceTextField(
       controller: controller,
       hintText: hintText,
-      googleApiKey: _googleMapsApiKey,
+      googleApiKey: apiKey,
       onTap: () {
         // ✅ FIX: Siempre activar modo de selección cuando el usuario toca el campo
         // Esto asegura que los bloques se oculten correctamente incluso cuando
@@ -932,12 +1017,15 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   }
 
   Widget _buildSearchBar() {
+    // ✅ LOG CRÍTICO: Confirmar que _buildSearchBar se ejecuta
+    AppLogger.critical('📍📍📍 _buildSearchBar EJECUTÁNDOSE - animation value: ${_searchBarAnimation.value}');
+
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
-        boxShadow: ModernTheme.floatingShadow,
+        boxShadow: ModernTheme.getFloatingShadow(context),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -961,14 +1049,14 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 Expanded(
                   child: _buildAddressField(
                     controller: _pickupController,
-                    hintText: '¿Dónde estás?',
+                    hintText: AppLocalizations.of(context)!.whereAreYou,
                     markerColor: ModernTheme.success,
                     isPickup: true,
                   ),
                 ),
                 // ✅ Botón para usar ubicación actual (GPS con reverse geocoding)
                 IconButton(
-                  icon: Icon(Icons.my_location, color: ModernTheme.primaryOrange),
+                  icon: Icon(Icons.my_location, color: context.primaryColor),
                   onPressed: () async {
                     // ✅ NUEVO: Mostrar indicador de carga mientras obtiene ubicación
                     _pickupController.text = 'Obteniendo ubicación...';
@@ -1022,11 +1110,39 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 Expanded(
                   child: _buildAddressField(
                     controller: _destinationController,
-                    hintText: '¿A dónde vas?',
+                    hintText: AppLocalizations.of(context)!.whereAreYouGoing,
                     markerColor: ModernTheme.error,
                     isPickup: false,
                   ),
                 ),
+                // ✅ Botón para limpiar campos y empezar de nuevo
+                if (_pickupController.text.isNotEmpty || _destinationController.text.isNotEmpty)
+                  IconButton(
+                    icon: Icon(Icons.close, color: ModernTheme.error),
+                    tooltip: 'Limpiar todo',
+                    onPressed: () {
+                      if (!mounted) return;
+                      setState(() {
+                        // Limpiar campos de texto
+                        _pickupController.clear();
+                        _destinationController.clear();
+                        // Limpiar coordenadas
+                        _pickupCoordinates = null;
+                        _destinationCoordinates = null;
+                        // Limpiar marcadores y ruta
+                        _markers.clear();
+                        _polylines.clear();
+                        // Resetear estados
+                        _isSelectingLocation = false;
+                        _showContinueButton = false;
+                        _calculatedDistance = null;
+                        _estimatedTime = null;
+                        _suggestedPrice = null;
+                      });
+                      _buttonDelayTimer?.cancel();
+                      AppLogger.info('Direcciones limpiadas - usuario puede empezar de nuevo');
+                    },
+                  ),
               ],
             ),
           ),
@@ -1084,9 +1200,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       builder: (BuildContext context, ScrollController scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(_kBorderRadiusXLarge)),
-            boxShadow: ModernTheme.floatingShadow,
+            boxShadow: ModernTheme.getFloatingShadow(context),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1097,7 +1213,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 width: _kHandleWidth,
                 height: _kHandleHeight,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(_kBorderRadiusTiny),
                 ),
               ),
@@ -1122,7 +1238,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 style: TextStyle(
                                   fontSize: _kFontSizeLarge,
                                   fontWeight: FontWeight.bold,
-                                  color: ModernTheme.textPrimary,
+                                  color: context.primaryText,
                                 ),
                               ),
                               SizedBox(height: 16),
@@ -1152,7 +1268,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 style: TextStyle(
                                   fontSize: _kFontSizeLarge,
                                   fontWeight: FontWeight.bold,
-                                  color: ModernTheme.textPrimary,
+                                  color: context.primaryText,
                                 ),
                               ),
                               SizedBox(height: 12),
@@ -1180,8 +1296,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                               });
                               _buttonDelayTimer?.cancel();
 
-                              // ✅ Capturar ScaffoldMessenger ANTES de cualquier await para evitar warnings
+                              // ✅ Capturar ScaffoldMessenger y strings localizados ANTES de cualquier await para evitar warnings
                               final scaffoldMessenger = ScaffoldMessenger.of(context);
+                              final locationErrorMessage = AppLocalizations.of(context)!.couldNotGetCurrentLocation;
 
                               // ✅ Si no hay coordenadas de origen, obtener ubicación GPS actual automáticamente
                               if (_pickupCoordinates == null) {
@@ -1197,7 +1314,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 } else {
                                   AppLogger.warning('No se pudo obtener ubicación GPS');
                                   scaffoldMessenger.showSnackBar(
-                                    SnackBar(content: Text('No se pudo obtener tu ubicación actual')),
+                                    SnackBar(content: Text(locationErrorMessage)),
                                   );
                                   return;
                                 }
@@ -1223,7 +1340,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 await _updateRoutePolyline();
                                 if (!mounted) return;
 
-                                AppLogger.info('Ruta calculada con coordenadas REALES: $distance km, $time min, S/ ${price.toStringAsFixed(2)}');
+                                AppLogger.info('Ruta calculada con coordenadas REALES: $distance km, $time min, ${price.toCurrency()}');
 
                                 // ✅ NUEVO: Activar modo de ajuste de pickup en lugar de ir directo a negociación
                                 _startPickupAdjustment();
@@ -1256,7 +1373,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     if (_calculatedDistance != null && _estimatedTime != null && _suggestedPrice != null) {
       // Usar valores calculados REALES
       distanceTimeText = '${_calculatedDistance!.toStringAsFixed(1)} km • $_estimatedTime min';
-      suggestedPriceText = 'Precio sugerido: S/ ${_suggestedPrice!.toStringAsFixed(2)}';
+      suggestedPriceText = 'Precio sugerido: ${_suggestedPrice!.toCurrency()}';
     } else if (_pickupCoordinates != null && _destinationCoordinates != null) {
       // Calcular ahora si aún no se ha hecho
       final distance = _calculateDistance(_pickupCoordinates!, _destinationCoordinates!);
@@ -1264,7 +1381,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       final price = _calculatePrice(distance);
 
       distanceTimeText = '${distance.toStringAsFixed(1)} km • $time min';
-      suggestedPriceText = 'Precio sugerido: S/ ${price.toStringAsFixed(2)}';
+      suggestedPriceText = 'Precio sugerido: ${price.toCurrency()}';
     }
 
     // NotificationListener para detectar cuando el usuario arrastra el sheet y ocultar el teclado
@@ -1284,9 +1401,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
         builder: (BuildContext context, ScrollController scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(_kBorderRadiusXLarge)),
-            boxShadow: ModernTheme.floatingShadow,
+            boxShadow: ModernTheme.getFloatingShadow(context),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1297,7 +1414,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 width: _kHandleWidth,
                 height: _kHandleHeight,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(_kBorderRadiusTiny),
                 ),
               ),
@@ -1309,7 +1426,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   children: [
                     // Botón para cancelar y volver atrás
                     IconButton(
-                      icon: Icon(Icons.arrow_back, color: ModernTheme.textPrimary),
+                      icon: Icon(Icons.arrow_back, color: context.primaryText),
                       onPressed: _cancelPriceNegotiation,
                       tooltip: 'Volver',
                     ),
@@ -1321,7 +1438,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                           style: TextStyle(
                             fontSize: _kFontSizeXLarge,
                             fontWeight: FontWeight.bold,
-                            color: ModernTheme.textPrimary,
+                            color: context.primaryText,
                           ),
                         ),
                       ),
@@ -1352,7 +1469,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                           'Los conductores cercanos verán tu oferta',
                           style: TextStyle(
                             fontSize: 14,
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                           ),
                         ),
                         SizedBox(height: 10), // ✅ Reducido de 16 a 10 (ahorra 6px adicionales)
@@ -1361,7 +1478,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                         Container(
                           padding: EdgeInsets.all(10), // ✅ Reducido de 14 a 10 (ahorra 4px adicionales)
                           decoration: BoxDecoration(
-                            color: ModernTheme.backgroundLight,
+                            color: context.surfaceColor,
                             borderRadius: BorderRadius.circular(_kBorderRadiusMedium),
                           ),
                           child: Row(
@@ -1401,7 +1518,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: ModernTheme.textPrimary,
+                            color: context.primaryText,
                           ),
                         ),
                         SizedBox(height: 6), // ✅ Reducido de 10 a 6 (ahorra 4px adicionales)
@@ -1424,10 +1541,10 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: ModernTheme.backgroundLight,
+                            color: context.surfaceColor,
                             borderRadius: BorderRadius.circular(_kBorderRadiusSmall),
                             border: Border.all(
-                              color: _isManualPriceEntry ? ModernTheme.primaryOrange : Colors.grey.shade300,
+                              color: _isManualPriceEntry ? context.primaryColor : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                               width: _isManualPriceEntry ? 2 : 1,
                             ),
                           ),
@@ -1438,7 +1555,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                 style: TextStyle(
                                   fontSize: _kFontSizeLarge,
                                   fontWeight: FontWeight.w600,
-                                  color: ModernTheme.textPrimary,
+                                  color: context.primaryText,
                                 ),
                               ),
                               SizedBox(width: 8),
@@ -1450,10 +1567,10 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                                   style: TextStyle(
                                     fontSize: _kFontSizeLarge,
                                     fontWeight: FontWeight.w600,
-                                    color: ModernTheme.primaryOrange,
+                                    color: context.primaryColor,
                                   ),
                                   decoration: InputDecoration(
-                                    hintText: 'Ingresa tu precio',
+                                    hintText: AppLocalizations.of(context)!.enterPrice,
                                     border: InputBorder.none,
                                     isDense: true,
                                   ),
@@ -1511,6 +1628,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                           text: 'Buscar conductor',
                           icon: Icons.search,
                           onPressed: _startNegotiation,
+                          isLoading: _isCreatingNegotiation, // ✅ Mostrar spinner mientras se crea la negociación
                         ),
                       ],
                     ),
@@ -1529,9 +1647,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   Widget _buildDriverOffersSheet() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-        boxShadow: ModernTheme.floatingShadow,
+        boxShadow: ModernTheme.getFloatingShadow(context),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1542,7 +1660,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey.shade300,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -1561,7 +1679,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                       style: TextStyle(
                         fontSize: _kFontSizeXLarge,
                         fontWeight: FontWeight.bold,
-                        color: ModernTheme.textPrimary,
+                        color: context.primaryText,
                       ),
                     ),
                     SizedBox(height: 4),
@@ -1569,7 +1687,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                       '${_currentNegotiation?.driverOffers.length ?? 0} conductores interesados',
                       style: TextStyle(
                         fontSize: 14,
-                        color: ModernTheme.textSecondary,
+                        color: context.secondaryText,
                       ),
                     ),
                   ],
@@ -1655,7 +1773,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                         offer.driverRating.toStringAsFixed(1),
                         style: TextStyle(
                           fontSize: 14,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                       ),
                     ],
@@ -1665,7 +1783,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                     '${offer.vehicleModel} • ${offer.vehicleColor}',
                     style: TextStyle(
                       fontSize: 14,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                   SizedBox(height: 4),
@@ -1681,13 +1799,13 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                         ),
                       ),
                       SizedBox(width: 12),
-                      Icon(Icons.directions_car, size: 14, color: ModernTheme.textSecondary),
+                      Icon(Icons.directions_car, size: 14, color: context.secondaryText),
                       SizedBox(width: 4),
                       Text(
                         '${offer.completedTrips} viajes',
                         style: TextStyle(
                           fontSize: 12,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                       ),
                     ],
@@ -1704,7 +1822,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
               ),
               child: Text(
-                'S/ ${offer.acceptedPrice.toStringAsFixed(2)}',
+                offer.acceptedPrice.toCurrency(),
                 style: TextStyle(
                   color: ModernTheme.success,
                   fontWeight: FontWeight.bold,
@@ -1735,10 +1853,10 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: ModernTheme.backgroundLight,
+                color: context.surfaceColor,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: ModernTheme.primaryOrange),
+              child: Icon(icon, color: context.primaryColor),
             ),
             SizedBox(height: 8),
             Text(
@@ -1765,12 +1883,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             Container(
               padding: EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: ModernTheme.backgroundLight,
+                color: context.surfaceColor,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.history,
-                color: ModernTheme.textSecondary,
+                color: context.secondaryText,
                 size: 20,
               ),
             ),
@@ -1790,7 +1908,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                     subtitle,
                     style: TextStyle(
                       fontSize: 14,
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                     ),
                   ),
                 ],
@@ -1799,7 +1917,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             Icon(
               Icons.arrow_forward_ios,
               size: 16,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ],
         ),
@@ -1820,9 +1938,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? ModernTheme.primaryOrange.withValues(alpha: 0.1) : Colors.transparent,
+          color: selected ? context.primaryColor.withValues(alpha: 0.1) : Colors.transparent,
           border: Border.all(
-            color: selected ? ModernTheme.primaryOrange : Colors.grey.shade300,
+            color: selected ? context.primaryColor : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
             width: selected ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(_kBorderRadiusSmall),
@@ -1831,14 +1949,14 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
           children: [
             Icon(
               icon,
-              color: selected ? ModernTheme.primaryOrange : ModernTheme.textSecondary,
+              color: selected ? context.primaryColor : context.secondaryText,
               size: 20,
             ),
             SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(
-                color: selected ? ModernTheme.primaryOrange : ModernTheme.textSecondary,
+                color: selected ? context.primaryColor : context.secondaryText,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
@@ -1870,26 +1988,26 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
           _isManualPriceEntry = false;
         });
 
-        AppLogger.info('Precio seleccionado desde botón: S/ ${price.toStringAsFixed(2)}');
+        AppLogger.info('Precio seleccionado desde botón: ${price.toCurrency()}');
       },
       borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
-            ? ModernTheme.primaryOrange
-            : ModernTheme.backgroundLight,
+            ? context.primaryColor
+            : context.surfaceColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isSelected
-              ? ModernTheme.primaryOrange
-              : Colors.grey.shade300,
+              ? context.primaryColor
+              : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected
             ? [
                 BoxShadow(
-                  color: ModernTheme.primaryOrange.withValues(alpha: 0.3),
+                  color: context.primaryColor.withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: Offset(0, 2),
                 )
@@ -1897,11 +2015,11 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             : null,
         ),
         child: Text(
-          'S/ ${price.toStringAsFixed(2)}',
+          price.toCurrency(),
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
-            color: isSelected ? Colors.white : ModernTheme.textPrimary,
+            color: isSelected ? Theme.of(context).colorScheme.onPrimary : context.primaryText,
           ),
         ),
       ),
@@ -1978,7 +2096,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             final price = _calculatePrice(distance);
             _suggestedPrice = price;
             _offeredPrice = price;
-            AppLogger.info('Tipo de servicio cambiado a: $type, nuevo precio: S/ ${price.toStringAsFixed(2)}');
+            AppLogger.info('Tipo de servicio cambiado a: $type, nuevo precio: ${price.toCurrency()}');
           }
         });
         // Actualizar polyline si cambia el tipo de servicio (mantener la ruta visible)
@@ -1988,21 +2106,21 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
         width: _kServiceCardWidth,
         margin: EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
-          color: isSelected ? ModernTheme.primaryOrange : Colors.white,
+          color: isSelected ? context.primaryColor : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(_kBorderRadiusMedium),
           border: Border.all(
-            color: isSelected ? ModernTheme.primaryOrange : Colors.grey.shade300,
+            color: isSelected ? context.primaryColor : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: ModernTheme.primaryOrange.withValues(alpha: 0.3),
+                    color: context.primaryColor.withValues(alpha: 0.3),
                     blurRadius: 8,
                     offset: Offset(0, 2),
                   )
                 ]
-              : ModernTheme.cardShadow,
+              : ModernTheme.getCardShadow(context),
         ),
         child: Padding(
           padding: EdgeInsets.all(8), // Reducido de 12 a 8 (ahorra 8px verticales)
@@ -2012,7 +2130,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
               Icon(
                 icon,
                 size: 28, // Reducido de 32 a 28 (ahorra 4px)
-                color: isSelected ? Colors.white : ModernTheme.primaryOrange,
+                color: isSelected ? Theme.of(context).colorScheme.onPrimary : context.primaryColor,
               ),
               SizedBox(height: 6), // Reducido de 8 a 6 (ahorra 2px)
               Text(
@@ -2021,7 +2139,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: isSelected ? Colors.white : ModernTheme.textPrimary,
+                  color: isSelected ? Theme.of(context).colorScheme.onPrimary : context.primaryText,
                   height: 1.2,
                 ),
               ),
@@ -2031,7 +2149,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 9,
-                  color: isSelected ? Colors.white.withValues(alpha: 0.9) : ModernTheme.textSecondary,
+                  color: isSelected ? Theme.of(context).colorScheme.onPrimary.withOpacity(0.9) : context.secondaryText,
                 ),
               ),
               SizedBox(height: 2),
@@ -2040,7 +2158,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
-                  color: isSelected ? Colors.white : ModernTheme.success,
+                  color: isSelected ? Theme.of(context).colorScheme.onPrimary : ModernTheme.success,
                 ),
               ),
             ],
@@ -2054,12 +2172,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   Widget _buildLocationButton() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         shape: BoxShape.circle,
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: IconButton(
-        icon: Icon(Icons.my_location, color: ModernTheme.primaryOrange),
+        icon: Icon(Icons.my_location, color: context.primaryColor),
         onPressed: () async {
           // Obtener ubicación GPS actual
           final currentLocation = await _getCurrentLocation();
@@ -2098,7 +2216,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             SizedBox(height: 8),
             Text(
               '${offer.driverName} está en camino',
-              style: TextStyle(color: ModernTheme.textSecondary),
+              style: TextStyle(color: context.secondaryText),
             ),
             SizedBox(height: 20),
             AnimatedPulseButton(
@@ -2117,7 +2235,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   Widget _buildDrawer() {
     return Drawer(
       child: Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         child: Column(
           children: [
             // Header del drawer unificado
@@ -2133,7 +2251,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                 children: [
                   _buildDrawerItem(
                     icon: Icons.history,
-                    title: 'Historial de Viajes',
+                    title: AppLocalizations.of(context)!.tripHistory,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/trip-history');
@@ -2141,7 +2259,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.star,
-                    title: 'Mis Calificaciones',
+                    title: AppLocalizations.of(context)!.ratings,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/ratings-history');
@@ -2149,7 +2267,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.payment,
-                    title: 'Métodos de Pago',
+                    title: AppLocalizations.of(context)!.paymentMethods,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/payment-methods');
@@ -2157,7 +2275,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.favorite,
-                    title: 'Lugares Favoritos',
+                    title: AppLocalizations.of(context)!.favoritePlaces,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/favorites');
@@ -2165,7 +2283,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.local_offer,
-                    title: 'Promociones',
+                    title: AppLocalizations.of(context)!.promotions,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/promotions');
@@ -2174,7 +2292,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   Divider(),
                   _buildDrawerItem(
                     icon: Icons.person,
-                    title: 'Mi Perfil',
+                    title: AppLocalizations.of(context)!.profile,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/passenger/profile');
@@ -2182,7 +2300,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.settings,
-                    title: 'Configuración',
+                    title: AppLocalizations.of(context)!.settings,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(
@@ -2195,7 +2313,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ),
                   _buildDrawerItem(
                     icon: Icons.help,
-                    title: 'Ayuda',
+                    title: AppLocalizations.of(context)!.helpCenter,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(
@@ -2209,7 +2327,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   Divider(),
                   _buildDrawerItem(
                     icon: Icons.logout,
-                    title: 'Cerrar Sesión',
+                    title: AppLocalizations.of(context)!.logout,
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamedAndRemoveUntil(
@@ -2243,7 +2361,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       title: Text(
         title,
         style: TextStyle(
-          color: color ?? ModernTheme.textPrimary,
+          color: color ?? context.primaryText,
         ),
       ),
       onTap: onTap,
@@ -2443,7 +2561,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     final double basePrice = baseFare + (distanceKm * ratePerKm);
     final double totalPrice = basePrice * serviceMultiplier;
 
-    AppLogger.info('Precio calculado: S/ ${totalPrice.toStringAsFixed(2)} ($serviceName x$serviceMultiplier: base S/ $baseFare + ${distanceKm.toStringAsFixed(2)} km × S/ $ratePerKm/km)');
+    AppLogger.info('Precio calculado: ${totalPrice.toCurrency()} ($serviceName x$serviceMultiplier: base ${baseFare.toCurrency()} + ${distanceKm.toStringAsFixed(2)} km × ${ratePerKm.toCurrency()}/km)');
     return totalPrice;
   }
 
@@ -2453,8 +2571,8 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     try {
       AppLogger.info('Obteniendo ruta real desde Google Directions API: ${origin.latitude},${origin.longitude} → ${destination.latitude},${destination.longitude}');
 
-      // Inicializar PolylinePoints con la API key
-      PolylinePoints polylinePoints = PolylinePoints(apiKey: _googleMapsApiKey);
+      // Inicializar PolylinePoints con la API key desde AppConfig
+      PolylinePoints polylinePoints = PolylinePoints(apiKey: AppConfig.googleMapsApiKey);
 
       // Solicitar la ruta desde la Directions API
       PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
@@ -2511,11 +2629,14 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       _destinationCoordinates!,
     );
 
+    // Verificar que el widget sigue montado antes de usar context
+    if (!mounted) return;
+
     // Crear polilínea con TODOS los puntos de la ruta real (no solo 2 puntos)
     final Polyline routePolyline = Polyline(
       polylineId: PolylineId('route'),
       points: routePoints, // ✅ AHORA USA RUTA REAL CON MÚLTIPLES PUNTOS
-      color: ModernTheme.primaryOrange,
+      color: context.primaryColor,
       width: 5,
       startCap: Cap.roundCap,
       endCap: Cap.roundCap,

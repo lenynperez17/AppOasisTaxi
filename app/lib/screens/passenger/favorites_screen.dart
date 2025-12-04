@@ -1,9 +1,20 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ✅ NUEVO: Importar FirebaseAuth
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:math' as math;
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../core/widgets/custom_place_text_field.dart';
+import '../../generated/l10n/app_localizations.dart';
+
+import '../../utils/logger.dart';
+import '../../core/config/app_config.dart';
+
+// 🔐 GOOGLE MAPS API KEY - Usar desde configuración central
+// La API Key se configura en AppConfig mediante variables de entorno
+final String _googleMapsApiKey = AppConfig.googleMapsApiKey;
 
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
@@ -55,11 +66,16 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   Future<void> _loadFavoritesFromFirebase() async {
     try {
       setState(() => _isLoading = true);
-      
-      // Por ahora usaremos un userId de ejemplo
-      // En producción, esto vendría del usuario autenticado
-      _userId = 'test_user_id';
-      
+
+      // ✅ CORREGIDO: Obtener el userId del usuario autenticado real
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        AppLogger.debug('Usuario no autenticado, no se pueden cargar favoritos');
+        setState(() => _isLoading = false);
+        return;
+      }
+      _userId = currentUser.uid;
+
       // Cargar lugares favoritos
       final favoritesSnapshot = await _firestore
           .collection('users')
@@ -128,13 +144,13 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       });
       
     } catch (e) {
-      print('Error cargando favoritos: $e');
+      AppLogger.error('Error cargando favoritos: $e');
       setState(() => _isLoading = false);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al cargar favoritos'),
+            content: Text(AppLocalizations.of(context)!.errorLoadingFavorites),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -167,10 +183,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     return 'place';
   }
   
-  Future<void> _addToFavorites(String name, String address, IconData icon, Color color) async {
+  /// ✅ CORREGIDO: Aceptar LatLng location como parámetro
+  Future<void> _addToFavorites(String name, String address, IconData icon, Color color, LatLng location) async {
     try {
       setState(() => _isLoading = true);
-      
+
       await _firestore
           .collection('users')
           .doc(_userId)
@@ -180,8 +197,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         'address': address,
         'icon': _getIconString(icon),
         'color': color.value,
-        'latitude': -12.0464,
-        'longitude': -77.0428,
+        /// ✅ CORREGIDO: Usar coordenadas reales del autocomplete
+        'latitude': location.latitude,
+        'longitude': location.longitude,
         'isDefault': false,
         'visitCount': 0,
         'lastVisit': null,
@@ -194,19 +212,19 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lugar agregado a favoritos'),
+            content: Text(AppLocalizations.of(context)!.placeAddedToFavorites),
             backgroundColor: ModernTheme.success,
           ),
         );
       }
     } catch (e) {
-      print('Error agregando favorito: $e');
+      AppLogger.error('Error agregando favorito: $e');
       setState(() => _isLoading = false);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al agregar favorito'),
+            content: Text(AppLocalizations.of(context)!.errorAddingFavorite),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -232,10 +250,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${place.name} eliminado'),
+            content: Text(AppLocalizations.of(context)!.placeRemovedMessage(place.name)),
             backgroundColor: ModernTheme.success,
             action: SnackBarAction(
-              label: 'Deshacer',
+              label: AppLocalizations.of(context)!.undo,
               onPressed: () async {
                 // Restaurar en Firebase
                 await _firestore
@@ -264,8 +282,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         );
       }
     } catch (e) {
-      print('Error eliminando favorito: $e');
-      
+      AppLogger.error('Error eliminando favorito: $e');
       // Restaurar en caso de error
       setState(() {
         _favorites.add(place);
@@ -274,7 +291,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al eliminar favorito'),
+            content: Text(AppLocalizations.of(context)!.errorRemovingFavorite),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -282,10 +299,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     }
   }
   
-  Future<void> _editFavorite(FavoritePlace place, String name, String address, IconData icon, Color color) async {
+  /// ✅ CORREGIDO: Aceptar LatLng location como parámetro
+  Future<void> _editFavorite(FavoritePlace place, String name, String address, IconData icon, Color color, LatLng location) async {
     try {
       setState(() => _isLoading = true);
-      
+
       await _firestore
           .collection('users')
           .doc(_userId)
@@ -296,6 +314,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         'address': address,
         'icon': _getIconString(icon),
         'color': color.value,
+        /// ✅ CORREGIDO: Actualizar también las coordenadas
+        'latitude': location.latitude,
+        'longitude': location.longitude,
         'updatedAt': FieldValue.serverTimestamp(),
       });
       
@@ -305,19 +326,19 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lugar actualizado'),
+            content: Text(AppLocalizations.of(context)!.placeUpdated),
             backgroundColor: ModernTheme.success,
           ),
         );
       }
     } catch (e) {
-      print('Error actualizando favorito: $e');
+      AppLogger.error('Error actualizando favorito: $e');
       setState(() => _isLoading = false);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al actualizar favorito'),
+            content: Text(AppLocalizations.of(context)!.errorUpdatingFavorite),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -360,34 +381,52 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: AnimatedSwitcher(
           duration: Duration(milliseconds: 300),
           child: _isSearching
-              ? TextField(
-                  controller: _searchTextController,
-                  autofocus: true,
-                  style: TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Buscar lugar...',
-                    hintStyle: TextStyle(color: Colors.white70),
-                    border: InputBorder.none,
+              /// ✅ COLORES INVERTIDOS: Fondo blanco con texto oscuro para contraste
+              ? Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  onChanged: (value) {
-                    setState(() => _searchQuery = value);
-                  },
+                  child: TextField(
+                    controller: _searchTextController,
+                    autofocus: true,
+                    style: TextStyle(
+                      color: ModernTheme.oasisGreen,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    cursorColor: ModernTheme.oasisGreen,
+                    decoration: InputDecoration(
+                      hintText: AppLocalizations.of(context)!.searchPlaceHint,
+                      hintStyle: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                        fontSize: 16,
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    onChanged: (value) {
+                      setState(() => _searchQuery = value);
+                    },
+                  ),
                 )
               : Text(
-                  'Lugares Favoritos',
-                  style: TextStyle(color: Colors.white),
+                  AppLocalizations.of(context)!.favoritePlacesTitle,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
                 ),
         ),
         leading: IconButton(
           icon: Icon(
             _isSearching ? Icons.close : Icons.arrow_back,
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
           ),
           onPressed: () {
             if (_isSearching) {
@@ -400,11 +439,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         actions: [
           if (!_isSearching)
             IconButton(
-              icon: Icon(Icons.search, color: Colors.white),
+              icon: Icon(Icons.search, color: Theme.of(context).colorScheme.onPrimary),
               onPressed: _toggleSearch,
             ),
           IconButton(
-            icon: Icon(Icons.map, color: Colors.white),
+            icon: Icon(Icons.map, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: _showMapView,
           ),
         ],
@@ -422,11 +461,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
                 child: Text(
-                  'Tus Lugares',
+                  AppLocalizations.of(context)!.yourPlaces,
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
               ),
@@ -446,8 +485,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                         parent: _listController,
                         curve: Interval(
                           delay,
-                          delay + 0.5,
-                          curve: Curves.easeOutBack,
+                          // ✅ CORREGIDO: Limitar end a 1.0 para prevenir assertion 'end <= 1.0'
+                          math.min(delay + 0.5, 1.0),
+                          // ✅ CORREGIDO: Usar Curves.easeOut en vez de easeOutBack (que sobrepasa 1.0)
+                          curve: Curves.easeOut,
                         ),
                       ),
                     );
@@ -458,7 +499,8 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                         return Transform.translate(
                           offset: Offset(50 * (1 - animation.value), 0),
                           child: Opacity(
-                            opacity: animation.value,
+                            // ✅ Clamp para prevenir valores fuera del rango [0.0, 1.0] por Curves.easeOutBack
+                            opacity: animation.value.clamp(0.0, 1.0),
                             child: _buildFavoriteCard(place),
                           ),
                         );
@@ -477,11 +519,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
                 child: Text(
-                  'Visitados Recientemente',
+                  AppLocalizations.of(context)!.recentlyVisited,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: ModernTheme.textPrimary,
+                    color: context.primaryText,
                   ),
                 ),
               ),
@@ -514,10 +556,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
             child: FloatingActionButton.extended(
               onPressed: _addNewFavorite,
               backgroundColor: ModernTheme.oasisGreen,
-              icon: Icon(Icons.add_location, color: Colors.white),
+              icon: Icon(Icons.add_location, color: Theme.of(context).colorScheme.onPrimary),
               label: Text(
-                'Agregar Lugar',
-                style: TextStyle(color: Colors.white),
+                AppLocalizations.of(context)!.addPlace,
+                style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
               ),
             ),
           );
@@ -529,9 +571,12 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   Widget _buildStatistics() {
     final totalVisits = _favorites.fold<int>(
       0, (total, place) => total + place.visitCount);
-    final mostVisited = _favorites.reduce(
-      (a, b) => a.visitCount > b.visitCount ? a : b);
-    
+
+    // ✅ CORREGIDO: Verificar que la lista no esté vacía antes de usar reduce()
+    final mostVisitedName = _favorites.isNotEmpty
+        ? _favorites.reduce((a, b) => a.visitCount > b.visitCount ? a : b).name
+        : '-';
+
     return Container(
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(20),
@@ -554,27 +599,27 @@ class _FavoritesScreenState extends State<FavoritesScreen>
               _buildStatItem(
                 icon: Icons.favorite,
                 value: '${_favorites.length}',
-                label: 'Favoritos',
+                label: AppLocalizations.of(context)!.favoritesLabel,
               ),
               Container(
                 height: 40,
                 width: 1,
-                color: Colors.white24,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.24),
               ),
               _buildStatItem(
                 icon: Icons.location_on,
                 value: '$totalVisits',
-                label: 'Visitas',
+                label: AppLocalizations.of(context)!.visitsLabel,
               ),
               Container(
                 height: 40,
                 width: 1,
-                color: Colors.white24,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.24),
               ),
               _buildStatItem(
                 icon: Icons.star,
-                value: mostVisited.name,
-                label: 'Más visitado',
+                value: mostVisitedName,
+                label: AppLocalizations.of(context)!.mostVisited,
               ),
             ],
           ),
@@ -593,16 +638,16 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         Container(
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.2),
+            color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, color: Colors.white, size: 20),
+          child: Icon(icon, color: Theme.of(context).colorScheme.onPrimary, size: 20),
         ),
         SizedBox(height: 8),
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
@@ -610,7 +655,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
             fontSize: 12,
           ),
         ),
@@ -630,7 +675,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           borderRadius: BorderRadius.circular(16),
         ),
         alignment: Alignment.centerRight,
-        child: Icon(Icons.delete, color: Colors.white),
+        child: Icon(Icons.delete, color: Theme.of(context).colorScheme.onPrimary),
       ),
       confirmDismiss: (direction) async {
         return await _confirmDelete(place);
@@ -642,9 +687,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       child: Container(
         margin: EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: ModernTheme.cardShadow,
+          boxShadow: ModernTheme.getCardShadow(context),
         ),
         child: InkWell(
           onTap: () => _selectPlace(place),
@@ -677,12 +722,16 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                     children: [
                       Row(
                         children: [
-                          Text(
-                            place.name,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: ModernTheme.textPrimary,
+                          Flexible(
+                            child: Text(
+                              place.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: context.primaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (place.isDefault) ...[
@@ -697,7 +746,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                'Principal',
+                                AppLocalizations.of(context)!.mainLabel,
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: ModernTheme.oasisGreen,
@@ -713,7 +762,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                         place.address,
                         style: TextStyle(
                           fontSize: 14,
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -724,26 +773,34 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                           Icon(
                             Icons.location_on,
                             size: 14,
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                           ),
-                          Text(
-                            ' ${place.visitCount} visitas',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: ModernTheme.textSecondary,
+                          Flexible(
+                            child: Text(
+                              AppLocalizations.of(context)!.visitsCount(place.visitCount),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.secondaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           SizedBox(width: 12),
                           Icon(
                             Icons.access_time,
                             size: 14,
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                           ),
-                          Text(
-                            ' ${_formatLastVisit(place.lastVisit)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: ModernTheme.textSecondary,
+                          Flexible(
+                            child: Text(
+                              ' ${_formatLastVisit(place.lastVisit)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.secondaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
@@ -776,26 +833,28 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ListTile(
         leading: Container(
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: ModernTheme.backgroundLight,
+            color: context.surfaceColor,
             shape: BoxShape.circle,
           ),
           child: Icon(
             place.icon,
-            color: ModernTheme.textSecondary,
+            color: context.secondaryText,
             size: 20,
           ),
         ),
         title: Text(
           place.address,
           style: TextStyle(fontSize: 14),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
           _formatDate(place.date),
@@ -816,15 +875,15 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   String _formatLastVisit(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
-    
+
     if (difference.inHours < 1) {
-      return 'Hace ${difference.inMinutes} min';
+      return AppLocalizations.of(context)!.minutesAgo(difference.inMinutes);
     } else if (difference.inDays < 1) {
-      return 'Hace ${difference.inHours} horas';
+      return AppLocalizations.of(context)!.hoursAgo(difference.inHours);
     } else if (difference.inDays == 1) {
-      return 'Ayer';
+      return AppLocalizations.of(context)!.yesterday;
     } else {
-      return 'Hace ${difference.inDays} días';
+      return AppLocalizations.of(context)!.daysAgoFavorites(difference.inDays);
     }
   }
   
@@ -846,7 +905,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   void _navigateToPlace(FavoritePlace place) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Navegando a ${place.name}...'),
+        content: Text('${AppLocalizations.of(context)!.navigatingTo} ${place.name}'),
         backgroundColor: ModernTheme.oasisGreen,
       ),
     );
@@ -862,18 +921,21 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   }
   
   void _addRecentToFavorites(RecentPlace recentPlace) {
-    final newFavorite = FavoritePlace(
-      id: 'F${DateTime.now().millisecondsSinceEpoch}',
-      name: 'Nuevo Favorito',
-      address: recentPlace.address,
-      icon: recentPlace.icon,
-      color: ModernTheme.primaryBlue,
-      location: LatLng(-12.0, -77.0), // Mock location
-      visitCount: 1,
-      lastVisit: DateTime.now(),
+    // ✅ CORREGIDO: Al agregar un reciente a favoritos, abrir el diálogo de edición
+    // para que el usuario seleccione la dirección con el autocomplete y obtener coordenadas reales
+    _showEditDialog(
+      FavoritePlace(
+        id: '',
+        name: 'Nuevo Favorito',
+        address: recentPlace.address,
+        icon: recentPlace.icon,
+        color: ModernTheme.primaryBlue,
+        location: LatLng(0, 0), // Se actualizará con coordenadas reales del autocomplete
+        visitCount: 0,
+        lastVisit: DateTime.now(),
+      ),
+      isNew: true,
     );
-    
-    _showEditDialog(newFavorite, isNew: true);
   }
   
   void _showEditDialog(FavoritePlace place, {bool isNew = false}) {
@@ -881,7 +943,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     final addressController = TextEditingController(text: place.address);
     IconData selectedIcon = place.icon;
     Color selectedColor = place.color;
-    
+    /// ✅ NUEVO: Variable para almacenar las coordenadas seleccionadas del autocomplete
+    LatLng? selectedLocation = isNew ? null : place.location;
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -890,7 +954,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            title: Text(isNew ? 'Agregar Favorito' : 'Editar Lugar'),
+            title: Text(isNew ? AppLocalizations.of(context)!.addFavorite : AppLocalizations.of(context)!.editPlace),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -899,29 +963,64 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                   TextField(
                     controller: nameController,
                     decoration: InputDecoration(
-                      labelText: 'Nombre del lugar',
+                      labelText: AppLocalizations.of(context)!.placeNameLabel,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                   ),
                   SizedBox(height: 16),
-                  
-                  // Dirección
-                  TextField(
-                    controller: addressController,
-                    decoration: InputDecoration(
-                      labelText: 'Dirección',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+
+                  /// ✅ CORREGIDO: Usar CustomPlaceTextField con autocomplete de Google Places
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    maxLines: 2,
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          AppLocalizations.of(context)!.addressLabel,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        CustomPlaceTextField(
+                          controller: addressController,
+                          hintText: AppLocalizations.of(context)!.searchAddressHint,
+                          googleApiKey: _googleMapsApiKey,
+                          onPlaceSelected: (PlacePrediction prediction) {
+                            /// ✅ Guardar las coordenadas cuando se selecciona un lugar
+                            if (prediction.lat != null && prediction.lng != null) {
+                              setDialogState(() {
+                                selectedLocation = LatLng(prediction.lat!, prediction.lng!);
+                              });
+                            }
+                          },
+                        ),
+                        if (selectedLocation != null)
+                          Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text(
+                              '📍 ${selectedLocation!.latitude.toStringAsFixed(4)}, ${selectedLocation!.longitude.toStringAsFixed(4)}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: ModernTheme.success,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                   SizedBox(height: 16),
-                  
+
                   // Selección de icono
-                  Text('Icono'),
+                  Text(AppLocalizations.of(context)!.iconLabel),
                   SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -947,7 +1046,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                           decoration: BoxDecoration(
                             color: selectedIcon == icon
                               ? ModernTheme.oasisGreen.withValues(alpha: 0.2)
-                              : Colors.grey.shade200,
+                              : Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: selectedIcon == icon
@@ -962,9 +1061,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                     }).toList(),
                   ),
                   SizedBox(height: 16),
-                  
+
                   // Selección de color
-                  Text('Color'),
+                  Text(AppLocalizations.of(context)!.colorLabel),
                   SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -993,7 +1092,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: selectedColor == color
-                                ? Colors.black
+                                ? Theme.of(context).colorScheme.onSurface
                                 : Colors.transparent,
                               width: 2,
                             ),
@@ -1008,28 +1107,41 @@ class _FavoritesScreenState extends State<FavoritesScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: Text('Cancelar'),
+                child: Text(AppLocalizations.of(context)!.cancel),
               ),
               ElevatedButton(
                 onPressed: () async {
+                  /// ✅ VALIDACIÓN: Verificar que se haya seleccionado una dirección con coordenadas
+                  if (selectedLocation == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(AppLocalizations.of(context)!.selectAddressFromAutocomplete),
+                        backgroundColor: ModernTheme.warning,
+                      ),
+                    );
+                    return;
+                  }
+
                   final navigator = Navigator.of(context);
 
                   if (isNew) {
-                    // Agregar a Firebase
+                    /// ✅ CORREGIDO: Agregar a Firebase con coordenadas reales
                     await _addToFavorites(
                       nameController.text,
                       addressController.text,
                       selectedIcon,
                       selectedColor,
+                      selectedLocation!, // ✅ Pasar coordenadas reales
                     );
                   } else {
-                    // Actualizar en Firebase
+                    /// ✅ CORREGIDO: Actualizar en Firebase con coordenadas reales
                     await _editFavorite(
                       place,
                       nameController.text,
                       addressController.text,
                       selectedIcon,
                       selectedColor,
+                      selectedLocation!, // ✅ Pasar coordenadas reales
                     );
                   }
                   if (!mounted) return;
@@ -1038,7 +1150,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ModernTheme.oasisGreen,
                 ),
-                child: Text(isNew ? 'Agregar' : 'Guardar'),
+                child: Text(isNew ? AppLocalizations.of(context)!.add : AppLocalizations.of(context)!.save),
               ),
             ],
           );
@@ -1070,21 +1182,21 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        title: Text('Eliminar ${place.name}'),
+        title: Text(AppLocalizations.of(context)!.deletePlace(place.name)),
         content: Text(
-          '¿Estás seguro de que deseas eliminar este lugar de tus favoritos?',
+          AppLocalizations.of(context)!.confirmDeletePlace,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancelar'),
+            child: Text(AppLocalizations.of(context)!.cancel),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.error,
             ),
-            child: Text('Eliminar'),
+            child: Text(AppLocalizations.of(context)!.delete),
           ),
         ],
       ),
@@ -1092,6 +1204,17 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   }
   
   void _showMapView() {
+    // ✅ CORREGIDO: Verificar que haya favoritos antes de mostrar el mapa
+    if (_favorites.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.addFavoritesToViewMap),
+          backgroundColor: ModernTheme.warning,
+        ),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1155,17 +1278,20 @@ class _FavoritesMapScreenState extends State<FavoritesMapScreen> {
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: Text(
-          'Mapa de Favoritos',
-          style: TextStyle(color: Colors.white),
+          AppLocalizations.of(context)!.favoritesMapTitle,
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: GoogleMap(
+        // ✅ CORREGIDO: Usar ubicación por defecto si no hay favoritos
         initialCameraPosition: CameraPosition(
-          target: widget.favorites.first.location,
+          target: widget.favorites.isNotEmpty
+              ? widget.favorites.first.location
+              : LatLng(-12.0464, -77.0428), // Lima centro por defecto
           zoom: 13,
         ),
         onMapCreated: (controller) {

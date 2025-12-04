@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
+import '../core/widgets/mode_switch_button.dart';
+import '../providers/auth_provider.dart';
 
 class PassengerDrawer extends StatelessWidget {
   const PassengerDrawer({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final user = authProvider.currentUser;
+
     return Drawer(
       child: Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         child: Column(
           children: [
             // Header del drawer
@@ -38,45 +44,62 @@ class PassengerDrawer extends StatelessWidget {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
+                      border: Border.all(color: Theme.of(context).colorScheme.onPrimary, width: 3),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.2),
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
                           blurRadius: 10,
                           offset: Offset(0, 5),
                         ),
                       ],
                     ),
-                    child: Icon(
-                      Icons.person,
-                      size: 50,
-                      color: AppColors.oasisTurquoise,
-                    ),
+                    child: user != null && user.profilePhotoUrl.isNotEmpty
+                        ? ClipOval(
+                            child: Image.network(
+                              user.profilePhotoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Icon(
+                                Icons.person,
+                                size: 50,
+                                color: AppColors.oasisTurquoise,
+                              ),
+                            ),
+                          )
+                        : Icon(
+                            Icons.person,
+                            size: 50,
+                            color: AppColors.oasisTurquoise,
+                          ),
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'Juan Pérez',
+                    user?.fullName ?? 'Usuario',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onPrimary,
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'juan.perez@email.com',
+                    user?.email ?? 'email@example.com',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 8),
                   Container(
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -89,16 +112,16 @@ class PassengerDrawer extends StatelessWidget {
                         ),
                         SizedBox(width: 4),
                         Text(
-                          '4.8',
+                          (user?.rating ?? 0.0).toStringAsFixed(1),
                           style: TextStyle(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.onPrimary,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         Text(
-                          ' • 156 viajes',
+                          ' • ${user?.totalTrips ?? 0} viajes',
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                             fontSize: 12,
                           ),
                         ),
@@ -108,7 +131,16 @@ class PassengerDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            
+
+            // Botón de cambio de modo (solo si tiene múltiples roles)
+            if (user != null &&
+                user.availableRoles != null &&
+                user.availableRoles!.length > 1)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: ModeSwitchButton(compact: false),
+              ),
+
             // Opciones del menú
             Expanded(
               child: ListView(
@@ -198,7 +230,7 @@ class PassengerDrawer extends StatelessWidget {
             Container(
               decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(color: Colors.grey.shade200),
+                  top: BorderSide(color: Theme.of(context).colorScheme.surfaceContainerHighest),
                 ),
               ),
               child: ListTile(
@@ -225,7 +257,7 @@ class PassengerDrawer extends StatelessWidget {
               child: Text(
                 'Versión 1.0.0',
                 style: TextStyle(
-                  color: Colors.grey[500],
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                   fontSize: 12,
                 ),
                 textAlign: TextAlign.center,
@@ -244,15 +276,16 @@ class PassengerDrawer extends StatelessWidget {
     Color? badgeColor,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      leading: Icon(icon, color: AppColors.oasisTurquoise),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
+    return Builder(
+      builder: (context) => ListTile(
+        leading: Icon(icon, color: AppColors.oasisTurquoise),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-      ),
       trailing: badge != null
           ? Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -263,14 +296,15 @@ class PassengerDrawer extends StatelessWidget {
               child: Text(
                 badge,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             )
-          : Icon(Icons.chevron_right, color: Colors.grey[400]),
-      onTap: onTap,
+          : Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
+        onTap: onTap,
+      ),
     );
   }
 
@@ -294,7 +328,7 @@ class PassengerDrawer extends StatelessWidget {
               ),
               child: Icon(
                 Icons.local_taxi,
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.onPrimary,
                 size: 24,
               ),
             ),
@@ -313,11 +347,11 @@ class PassengerDrawer extends StatelessWidget {
             SizedBox(height: 16),
             Text(
               'Versión: 1.0.0',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
             ),
             Text(
               'Desarrollado por: Oasis Tech',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
             ),
           ],
         ),

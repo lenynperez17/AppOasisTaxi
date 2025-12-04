@@ -4,10 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 import '../../services/chat_service.dart';
 import '../../providers/auth_provider.dart';
+import '../../generated/l10n/app_localizations.dart';
 
 /// ChatScreen - Chat profesional en tiempo real
 /// ✅ IMPLEMENTACIÓN COMPLETA con funcionalidad real
@@ -94,9 +98,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
 
       // Inicializar el servicio de chat
+      // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual del usuario
       await _chatService.initialize(
         userId: user.id,
-        userRole: user.userType,
+        userRole: user.activeMode,
       );
 
       // Marcar mensajes como leídos al entrar
@@ -135,7 +140,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al inicializar el chat'),
+            content: Text(AppLocalizations.of(context)!.errorInitializingChat),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -171,12 +176,13 @@ class _ChatScreenState extends State<ChatScreen>
       _messageFocusNode.unfocus();
 
       // Enviar mensaje
+      // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual
       final success = await _chatService.sendTextMessage(
         rideId: widget.rideId,
         senderId: user.id,
         senderName: user.fullName,
         message: message,
-        senderRole: user.userType,
+        senderRole: user.activeMode,
       );
 
       if (!mounted) return;
@@ -190,7 +196,7 @@ class _ChatScreenState extends State<ChatScreen>
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al enviar mensaje'),
+            content: Text(AppLocalizations.of(context)!.errorSendingMessage),
             backgroundColor: ModernTheme.error,
           ),
         );
@@ -201,7 +207,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al enviar mensaje'),
+          content: Text(AppLocalizations.of(context)!.errorSendingMessage),
           backgroundColor: ModernTheme.error,
         ),
       );
@@ -215,11 +221,12 @@ class _ChatScreenState extends State<ChatScreen>
       
       if (user == null) return;
 
+      // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual
       final success = await _chatService.sendQuickMessage(
         rideId: widget.rideId,
         senderId: user.id,
         senderName: user.fullName,
-        senderRole: user.userType,
+        senderRole: user.activeMode,
         type: type,
       );
 
@@ -247,11 +254,12 @@ class _ChatScreenState extends State<ChatScreen>
       const latitude = -12.0464;
       const longitude = -77.0428;
 
+      // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual
       final success = await _chatService.shareLocation(
         rideId: widget.rideId,
         senderId: user.id,
         senderName: user.fullName,
-        senderRole: user.userType,
+        senderRole: user.activeMode,
         latitude: latitude,
         longitude: longitude,
       );
@@ -291,7 +299,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 16),
-                Text('Enviando archivo...'),
+                Text(AppLocalizations.of(context)!.sendingFile),
               ],
             ),
             duration: Duration(seconds: 10),
@@ -311,11 +319,12 @@ class _ChatScreenState extends State<ChatScreen>
           }
         }
 
+        // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual
         final success = await _chatService.sendMultimediaMessage(
           rideId: widget.rideId,
           senderId: user.id,
           senderName: user.fullName,
-          senderRole: user.userType,
+          senderRole: user.activeMode,
           mediaFile: file,
           messageType: messageType,
         );
@@ -330,7 +339,7 @@ class _ChatScreenState extends State<ChatScreen>
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Error al enviar archivo'),
+              content: Text(AppLocalizations.of(context)!.errorSendingFile),
               backgroundColor: ModernTheme.error,
             ),
           );
@@ -343,7 +352,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al enviar archivo'),
+          content: Text(AppLocalizations.of(context)!.errorSendingFile),
           backgroundColor: ModernTheme.error,
         ),
       );
@@ -353,7 +362,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         title: Column(
@@ -365,14 +374,56 @@ class _ChatScreenState extends State<ChatScreen>
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.phone, color: Colors.white),
-            onPressed: () {
-              // Implementar llamada telefónica
+            icon: Icon(Icons.phone, color: context.surfaceColor),
+            onPressed: () async {
+              // ✅ IMPLEMENTADO: Llamada telefónica
               HapticFeedback.lightImpact();
+              final messenger = ScaffoldMessenger.of(context);
+
+              try {
+                // Obtener número de teléfono del otro usuario desde Firestore
+                if (widget.otherUserId != null) {
+                  final userDoc = await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(widget.otherUserId)
+                      .get();
+
+                  if (userDoc.exists) {
+                    final phone = userDoc.data()?['phone'] as String?;
+                    if (phone != null && phone.isNotEmpty) {
+                      final Uri phoneUri = Uri(scheme: 'tel', path: phone);
+                      if (await canLaunchUrl(phoneUri)) {
+                        await launchUrl(phoneUri);
+                      } else {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('No se puede realizar la llamada'),
+                            backgroundColor: ModernTheme.error,
+                          ),
+                        );
+                      }
+                    } else {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text('Número de teléfono no disponible'),
+                          backgroundColor: ModernTheme.warning,
+                        ),
+                      );
+                    }
+                  }
+                }
+              } catch (e) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Error al intentar llamar: $e'),
+                    backgroundColor: ModernTheme.error,
+                  ),
+                );
+              }
             },
           ),
           IconButton(
-            icon: Icon(Icons.more_vert, color: Colors.white),
+            icon: Icon(Icons.more_vert, color: context.surfaceColor),
             onPressed: () {
               _showChatOptions();
             },
@@ -401,9 +452,9 @@ class _ChatScreenState extends State<ChatScreen>
           ),
           SizedBox(height: 16),
           Text(
-            'Iniciando chat...',
+            AppLocalizations.of(context)!.initiatingChat,
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 16,
             ),
           ),
@@ -414,23 +465,25 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _buildStatusText() {
     if (_isOtherUserOnline) {
-      return 'En línea';
+      return AppLocalizations.of(context)!.online;
     } else if (_otherUserLastSeen != null) {
       final now = DateTime.now();
       final difference = now.difference(_otherUserLastSeen!);
-      
+
       if (difference.inMinutes < 1) {
-        return 'Visto hace un momento';
+        return AppLocalizations.of(context)!.seenMomentAgo;
       } else if (difference.inMinutes < 60) {
-        return 'Visto hace ${difference.inMinutes} min';
+        return AppLocalizations.of(context)!.seenMinutesAgo(difference.inMinutes);
       } else if (difference.inHours < 24) {
-        return 'Visto hace ${difference.inHours} h';
+        return AppLocalizations.of(context)!.seenHoursAgo(difference.inHours);
       } else {
-        return 'Visto hace ${difference.inDays} días';
+        return AppLocalizations.of(context)!.seenDaysAgo(difference.inDays);
       }
     }
-    
-    final roleText = widget.otherUserRole == 'driver' ? 'Conductor' : 'Pasajero';
+
+    final roleText = widget.otherUserRole == 'driver'
+        ? AppLocalizations.of(context)!.driver
+        : AppLocalizations.of(context)!.passenger;
     return roleText;
   }
 
@@ -472,20 +525,22 @@ class _ChatScreenState extends State<ChatScreen>
           ),
           SizedBox(height: 24),
           Text(
-            '¡Inicia la conversación!',
+            AppLocalizations.of(context)!.startConversation,
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w600,
-              color: ModernTheme.textPrimary,
+              color: context.primaryText,
             ),
           ),
           SizedBox(height: 8),
           Text(
-            'Mantente en contacto con tu ${widget.otherUserRole == 'driver' ? 'conductor' : 'pasajero'}',
+            widget.otherUserRole == 'driver'
+                ? AppLocalizations.of(context)!.stayInTouchWithDriver
+                : AppLocalizations.of(context)!.stayInTouchWithPassenger,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -523,16 +578,16 @@ class _ChatScreenState extends State<ChatScreen>
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: isMyMessage 
-                    ? ModernTheme.oasisGreen 
-                    : Colors.white,
+                color: isMyMessage
+                    ? ModernTheme.oasisGreen
+                    : context.surfaceColor,
                 borderRadius: BorderRadius.circular(18).copyWith(
                   bottomLeft: Radius.circular(isMyMessage ? 18 : 4),
                   bottomRight: Radius.circular(isMyMessage ? 4 : 18),
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: context.primaryText.withValues(alpha: 0.1),
                     blurRadius: 4,
                     offset: Offset(0, 2),
                   ),
@@ -557,9 +612,9 @@ class _ChatScreenState extends State<ChatScreen>
                         _formatMessageTime(message.timestamp),
                         style: TextStyle(
                           fontSize: 11,
-                          color: isMyMessage 
-                              ? Colors.white.withValues(alpha: 0.7)
-                              : ModernTheme.textSecondary,
+                          color: isMyMessage
+                              ? context.surfaceColor.withValues(alpha: 0.7)
+                              : context.secondaryText,
                         ),
                       ),
                       if (isMyMessage) ...[
@@ -567,9 +622,9 @@ class _ChatScreenState extends State<ChatScreen>
                         Icon(
                           message.isRead ? Icons.done_all : Icons.done,
                           size: 14,
-                          color: message.isRead 
-                              ? Colors.blue 
-                              : Colors.white.withValues(alpha: 0.7),
+                          color: message.isRead
+                              ? ModernTheme.info
+                              : context.surfaceColor.withValues(alpha: 0.7),
                         ),
                       ],
                     ],
@@ -590,7 +645,7 @@ class _ChatScreenState extends State<ChatScreen>
       message.message,
       style: TextStyle(
         fontSize: 15,
-        color: isMyMessage ? Colors.white : ModernTheme.textPrimary,
+        color: isMyMessage ? context.surfaceColor : context.primaryText,
         height: 1.3,
       ),
     );
@@ -599,23 +654,23 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _buildMediaMessage(ChatMessage message, bool isMyMessage) {
     IconData icon;
     String label;
-    
+
     switch (message.messageType) {
       case MessageType.image:
         icon = Icons.image;
-        label = 'Imagen';
+        label = AppLocalizations.of(context)!.imageLabel;
         break;
       case MessageType.audio:
         icon = Icons.audiotrack;
-        label = 'Audio';
+        label = AppLocalizations.of(context)!.audioLabel;
         break;
       case MessageType.video:
         icon = Icons.videocam;
-        label = 'Video';
+        label = AppLocalizations.of(context)!.videoLabel;
         break;
       default:
         icon = Icons.attachment;
-        label = 'Archivo';
+        label = AppLocalizations.of(context)!.fileLabel;
     }
 
     return Row(
@@ -624,7 +679,7 @@ class _ChatScreenState extends State<ChatScreen>
         Icon(
           icon,
           size: 20,
-          color: isMyMessage ? Colors.white : ModernTheme.oasisGreen,
+          color: isMyMessage ? context.surfaceColor : ModernTheme.oasisGreen,
         ),
         SizedBox(width: 8),
         Expanded(
@@ -636,7 +691,7 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: isMyMessage ? Colors.white : ModernTheme.textPrimary,
+                  color: isMyMessage ? context.surfaceColor : context.primaryText,
                 ),
               ),
               if (message.message.isNotEmpty) ...[
@@ -645,9 +700,9 @@ class _ChatScreenState extends State<ChatScreen>
                   message.message,
                   style: TextStyle(
                     fontSize: 13,
-                    color: isMyMessage 
-                        ? Colors.white.withValues(alpha: 0.8)
-                        : ModernTheme.textSecondary,
+                    color: isMyMessage
+                        ? context.surfaceColor.withValues(alpha: 0.8)
+                        : context.secondaryText,
                   ),
                 ),
               ],
@@ -665,16 +720,16 @@ class _ChatScreenState extends State<ChatScreen>
         Icon(
           Icons.location_on,
           size: 20,
-          color: isMyMessage ? Colors.white : ModernTheme.error,
+          color: isMyMessage ? context.surfaceColor : ModernTheme.error,
         ),
         SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Ubicación compartida',
+            AppLocalizations.of(context)!.sharedLocation,
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w500,
-              color: isMyMessage ? Colors.white : ModernTheme.textPrimary,
+              color: isMyMessage ? context.surfaceColor : context.primaryText,
             ),
           ),
         ),
@@ -686,9 +741,9 @@ class _ChatScreenState extends State<ChatScreen>
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         border: Border(
-          top: BorderSide(color: Colors.grey.shade200),
+          top: BorderSide(color: Theme.of(context).dividerColor),
         ),
       ),
       child: SingleChildScrollView(
@@ -723,9 +778,9 @@ class _ChatScreenState extends State<ChatScreen>
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.surfaceColor,
         border: Border(
-          top: BorderSide(color: Colors.grey.shade200),
+          top: BorderSide(color: Theme.of(context).dividerColor),
         ),
       ),
       child: SafeArea(
@@ -746,16 +801,16 @@ class _ChatScreenState extends State<ChatScreen>
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(25),
                 ),
                 child: TextField(
                   controller: _messageController,
                   focusNode: _messageFocusNode,
                   decoration: InputDecoration(
-                    hintText: 'Escribe un mensaje...',
+                    hintText: AppLocalizations.of(context)!.writeMessage,
                     border: InputBorder.none,
-                    hintStyle: TextStyle(color: ModernTheme.textSecondary),
+                    hintStyle: TextStyle(color: context.secondaryText),
                   ),
                   maxLines: null,
                   textCapitalization: TextCapitalization.sentences,
@@ -792,7 +847,7 @@ class _ChatScreenState extends State<ChatScreen>
                     onPressed: _sendMessage,
                     icon: Icon(
                       Icons.send,
-                      color: Colors.white,
+                      color: context.surfaceColor,
                       size: 20,
                     ),
                   ),
@@ -808,15 +863,15 @@ class _ChatScreenState extends State<ChatScreen>
   String _getQuickMessageText(QuickMessageType type) {
     switch (type) {
       case QuickMessageType.onMyWay:
-        return 'En camino';
+        return AppLocalizations.of(context)!.onMyWay;
       case QuickMessageType.arrived:
-        return 'He llegado';
+        return AppLocalizations.of(context)!.arrived;
       case QuickMessageType.waiting:
-        return 'Esperando';
+        return AppLocalizations.of(context)!.waiting;
       case QuickMessageType.trafficDelay:
-        return 'Hay tráfico';
+        return AppLocalizations.of(context)!.trafficDelay;
       case QuickMessageType.cantFind:
-        return 'No te encuentro';
+        return AppLocalizations.of(context)!.cantFind;
     }
   }
 
@@ -825,7 +880,7 @@ class _ChatScreenState extends State<ChatScreen>
     final difference = now.difference(timestamp);
 
     if (difference.inMinutes < 1) {
-      return 'Ahora';
+      return AppLocalizations.of(context)!.now;
     } else if (difference.inMinutes < 60) {
       return '${difference.inMinutes}m';
     } else if (difference.inHours < 24) {
@@ -846,7 +901,7 @@ class _ChatScreenState extends State<ChatScreen>
             children: [
               ListTile(
                 leading: Icon(Icons.clear_all, color: ModernTheme.error),
-                title: Text('Limpiar chat'),
+                title: Text(AppLocalizations.of(context)!.clearChat),
                 onTap: () {
                   Navigator.pop(context);
                   _showClearChatDialog();
@@ -854,10 +909,11 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               ListTile(
                 leading: Icon(Icons.report, color: ModernTheme.warning),
-                title: Text('Reportar usuario'),
+                title: Text(AppLocalizations.of(context)!.reportUser),
                 onTap: () {
                   Navigator.pop(context);
-                  // Implementar reporte de usuario
+                  // ✅ IMPLEMENTADO: Reporte de usuario
+                  _showReportUserDialog();
                 },
               ),
             ],
@@ -872,12 +928,12 @@ class _ChatScreenState extends State<ChatScreen>
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Limpiar chat'),
-          content: Text('¿Estás seguro de que quieres limpiar toda la conversación?'),
+          title: Text(AppLocalizations.of(context)!.clearChat),
+          content: Text(AppLocalizations.of(context)!.clearChatConfirmation),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Cancelar'),
+              child: Text(AppLocalizations.of(context)!.cancel),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -889,12 +945,130 @@ class _ChatScreenState extends State<ChatScreen>
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: ModernTheme.error,
+                foregroundColor: context.surfaceColor,
               ),
-              child: Text('Limpiar', style: TextStyle(color: Colors.white)),
+              child: Text(AppLocalizations.of(context)!.clear),
             ),
           ],
         );
       },
+    );
+  }
+
+  // ✅ IMPLEMENTADO: Mostrar diálogo de reporte de usuario
+  void _showReportUserDialog() {
+    final TextEditingController reportController = TextEditingController();
+    String selectedReason = 'Comportamiento inapropiado';
+    final List<String> reasons = [
+      'Comportamiento inapropiado',
+      'Lenguaje ofensivo',
+      'Acoso',
+      'Conducción peligrosa',
+      'Tarifa incorrecta',
+      'Otro',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Reportar Usuario', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Reportar a: ${widget.otherUserName}', style: TextStyle(fontSize: 16)),
+                SizedBox(height: 16),
+                Text('Motivo:', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: selectedReason,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  items: reasons.map((reason) {
+                    return DropdownMenuItem(value: reason, child: Text(reason));
+                  }).toList(),
+                  onChanged: (value) {
+                    setDialogState(() => selectedReason = value!);
+                  },
+                ),
+                SizedBox(height: 16),
+                Text('Detalles adicionales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 8),
+                TextField(
+                  controller: reportController,
+                  decoration: InputDecoration(
+                    hintText: 'Describe el problema...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: EdgeInsets.all(16),
+                  ),
+                  maxLines: 4,
+                  maxLength: 300,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                reportController.dispose();
+                Navigator.pop(context);
+              },
+              child: Text('Cancelar', style: TextStyle(color: context.secondaryText)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(context);
+                final details = reportController.text.trim();
+
+                try {
+                  final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                  final userId = authProvider.currentUser?.id;
+
+                  // Crear reporte en Firebase
+                  await FirebaseFirestore.instance.collection('userReports').add({
+                    'reportedBy': userId,
+                    'reportedUser': widget.otherUserId,
+                    'reportedUserName': widget.otherUserName,
+                    'reason': selectedReason,
+                    'details': details,
+                    'rideId': widget.rideId,
+                    'status': 'pending',
+                    'createdAt': FieldValue.serverTimestamp(),
+                  });
+
+                  reportController.dispose();
+                  navigator.pop();
+
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Reporte enviado. Revisaremos el caso.'),
+                      backgroundColor: ModernTheme.success,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                } catch (e) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Error al enviar reporte: $e'),
+                      backgroundColor: ModernTheme.error,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ModernTheme.warning,
+                foregroundColor: context.surfaceColor,
+              ),
+              child: Text('Enviar Reporte'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

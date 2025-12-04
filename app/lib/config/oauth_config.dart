@@ -31,41 +31,40 @@
 ///    - Verificar que el proyecto tenga habilitado Phone Auth en Firebase Console
 
 class OAuthConfig {
-  // ==================== CONFIGURACIÓN OAUTH SEGURA ====================
-  // CRÍTICO: Las credenciales ahora se obtienen de variables de entorno
-  // Configurar archivo .env antes de usar en producción
-  
-  // Google Sign In - CONFIGURACIÓN REAL REQUERIDA
-  static const String googleWebClientId = String.fromEnvironment(
-    'googleWebClientId',
-    defaultValue: '', // CRÍTICO: No usar placeholder en producción
-  );
-  
-  static const String googleAndroidClientId = String.fromEnvironment(
-    'googleAndroidClientId', 
-    defaultValue: '',
-  );
-  
-  static const String googleIosClientId = String.fromEnvironment(
-    'googleIosClientId',
-    defaultValue: '',
-  );
-  
-  // Facebook Login - CONFIGURACIÓN REAL REQUERIDA
-  static const String facebookAppId = String.fromEnvironment(
-    'facebookAppId',
-    defaultValue: '', // CRÍTICO: No usar placeholder en producción
-  );
-  
-  static const String facebookAppSecret = String.fromEnvironment(
-    'facebookAppSecret',
-    defaultValue: '',
-  );
-  
-  static const String facebookClientToken = String.fromEnvironment(
-    'facebookClientToken',
-    defaultValue: '',
-  );
+  // ==================== CONFIGURACIÓN OAUTH REAL - FIREBASE ====================
+  // ✅ CONFIGURACIÓN REAL extraída de google-services.json
+  // NOTA: Estos valores están en git, NO son secretos (son Client IDs públicos)
+  // Los secretos reales están en Firebase Console backend
+
+  // Google Sign In - ✅ CONFIGURADO DESDE FIREBASE
+  // Web Client ID extraído de google-services.json (client_type: 3)
+  static const String googleWebClientId = '747030072271-7hkakkl25taap3cuiifek17ik06vr7fp.apps.googleusercontent.com';
+
+  // Android Client ID extraído de google-services.json (client_type: 1)
+  // ✅ ACTUALIZADO: Client ID con SHA-1 del debug keystore
+  static const String googleAndroidClientId = '747030072271-5emcfqpq9l1tg5cmhm2l0em33fapd42c.apps.googleusercontent.com';
+
+  // iOS Client ID (configurar cuando se implemente iOS)
+  static const String googleIosClientId = '';
+
+  // Facebook Login - ✅ CONFIGURADO DESDE FIREBASE CONSOLE
+  // App ID extraído de Facebook Developers Console (público - puede estar en código)
+  static const String facebookAppId = '1289349759483925';
+
+  // 🔐 FACEBOOK APP SECRET - REMOVIDO POR SEGURIDAD
+  // ⚠️ CRÍTICO: El App Secret NUNCA debe estar en código cliente
+  // El App Secret debe configurarse SOLAMENTE en:
+  // 1. Firebase Console > Authentication > Sign-in method > Facebook
+  // 2. Cloud Functions (backend) si necesitas hacer llamadas a la API de Facebook
+  //
+  // NOTA: Firebase maneja automáticamente el App Secret en el servidor
+  // No necesitas configurarlo aquí. La autenticación de Facebook funciona con:
+  // - facebookAppId (público)
+  // - facebookClientToken (público)
+  // - App Secret en Firebase Console (privado, solo backend)
+
+  // Client Token de Facebook (público - puede estar en código)
+  static const String facebookClientToken = '367f0737179dbc29554a3f3f48ac3aaa';
   
   // Verificar si las credenciales OAuth están configuradas
   static bool get isGoogleConfigured => 
@@ -79,13 +78,17 @@ class OAuthConfig {
   static bool get isAppleConfigured => 
     appleServiceId.isNotEmpty;
   
-  // Apple Sign In
-  static const String appleServiceId = 'com.oasistaxiapp.signin';
-  static const String appleRedirectUri = 'https://oasis-taxi-app.firebaseapp.com/__/auth/handler';
+  // Apple Sign In - ✅ CONFIGURADO
+  // Service ID que debes crear en Apple Developer Console
+  static const String appleServiceId = 'com.oasistaxis.app.signin';
+
+  // Redirect URI configurado en Firebase (YA ESTÁ EN FIREBASE CONSOLE)
+  static const String appleRedirectUri = 'https://app-oasis-taxi.firebaseapp.com/__/auth/handler';
   
   // Configuración de seguridad
-  static const int maxLoginAttempts = 5;
-  static const int lockoutDurationMinutes = 30;
+  // ✅ AJUSTADO: Más intentos y bloqueo más corto para mejor UX
+  static const int maxLoginAttempts = 10;
+  static const int lockoutDurationMinutes = 5;
   static const int otpTimeoutSeconds = 60;
   static const int sessionTimeoutMinutes = 60;
   
@@ -127,10 +130,13 @@ class OAuthConfig {
   static const bool forcePhoneVerification = false;
   
   // URLs de términos y políticas
-  static const String termsOfServiceUrl = 'https://oasistaxiapp.com/terms';
-  static const String privacyPolicyUrl = 'https://oasistaxiapp.com/privacy';
-  static const String supportEmail = 'soporte@oasistaxiapp.com';
-  static const String supportPhone = '+51 999 999 999';
+  static const String termsOfServiceUrl = 'https://darkorchid-crane-575563.hostingersite.com/terminos/';
+  static const String privacyPolicyUrl = 'https://darkorchid-crane-575563.hostingersite.com/privacidad/';
+  static const String deleteAccountUrl = 'https://darkorchid-crane-575563.hostingersite.com/eliminar-cuenta/';
+  static const String cookiesPolicyUrl = 'https://darkorchid-crane-575563.hostingersite.com/cookies/';
+  static const String websiteUrl = 'https://darkorchid-crane-575563.hostingersite.com/';
+  static const String supportEmail = 'taxioasistours@gmail.com';
+  static const String supportPhone = '+51 901 039 918';
 }
 
 /// Mensajes de error personalizados en español
@@ -154,7 +160,7 @@ class AuthErrorMessages {
     'app-not-authorized': 'La aplicación no está autorizada para usar Firebase Authentication.',
     
     // Errores personalizados
-    'account-locked': 'Tu cuenta ha sido bloqueada temporalmente por seguridad. Intenta de nuevo en 30 minutos.',
+    'account-locked': 'Tu cuenta ha sido bloqueada temporalmente por seguridad. Intenta de nuevo en 5 minutos.',
     'email-not-verified': 'Por favor verifica tu email antes de iniciar sesión. Revisa tu bandeja de entrada.',
     'phone-not-verified': 'Por favor verifica tu número de teléfono para continuar.',
     'invalid-otp': 'El código OTP es inválido o ha expirado.',

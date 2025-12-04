@@ -34,7 +34,7 @@ export class TripNotificationHandler {
         console.warn(`⚠️ No se encontraron conductores disponibles para el viaje ${tripId}`);
         
         // Actualizar estado del viaje
-        await this.db.collection('trips').doc(tripId).update({
+        await this.db.collection('rides').doc(tripId).update({
           status: 'no_drivers_available',
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -93,7 +93,7 @@ export class TripNotificationHandler {
       );
 
       // Actualizar estado del viaje
-      await this.db.collection('trips').doc(tripId).update({
+      await this.db.collection('rides').doc(tripId).update({
         status: 'searching_driver',
         notificationsSent: result.successCount,
         driversNotified: availableDrivers.map(d => d.id),

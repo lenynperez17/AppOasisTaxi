@@ -352,12 +352,12 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
               label: const Text('Abrir Yape'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.purple,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              'Monto: S/${widget.fareAmount.toStringAsFixed(2)}',
+              'Monto: S/. ${widget.fareAmount.toStringAsFixed(2)}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ],
@@ -417,12 +417,12 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
               label: const Text('Abrir Plin'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              'Monto: S/${widget.fareAmount.toStringAsFixed(2)}',
+              'Monto: S/. ${widget.fareAmount.toStringAsFixed(2)}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ],
@@ -480,7 +480,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                   const Text('• Solicita tu comprobante digital'),
                   const SizedBox(height: 12),
                   Text(
-                    'Monto total: S/${widget.fareAmount.toStringAsFixed(2)}',
+                    'Monto total: S/. ${widget.fareAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -504,7 +504,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             child: const Text('CONFIRMAR'),
           ),
@@ -565,7 +565,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
               child: Column(
                 children: [
                   Text(
-                    'Monto pagado: S/${widget.fareAmount.toStringAsFixed(2)}',
+                    'Monto pagado: S/. ${widget.fareAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -573,12 +573,12 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Comisión plataforma: S/${_platformCommission.toStringAsFixed(2)}',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    'Comisión plataforma: S/. ${_platformCommission.toStringAsFixed(2)}',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
                   ),
                   Text(
-                    'Ganancia conductor: S/${_driverEarnings.toStringAsFixed(2)}',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    'Ganancia conductor: S/. ${_driverEarnings.toStringAsFixed(2)}',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
                   ),
                 ],
               ),
@@ -691,11 +691,11 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey.shade50,
+      backgroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.05),
       appBar: AppBar(
         title: const Text('💳 Método de Pago'),
         backgroundColor: Colors.blue.shade600,
-        foregroundColor: Colors.white,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         elevation: 0,
       ),
       body: LoadingOverlay(
@@ -760,7 +760,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                         style: TextStyle(fontSize: 16),
                       ),
                       Text(
-                        'S/${widget.fareAmount.toStringAsFixed(2)}',
+                        'S/. ${widget.fareAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -776,14 +776,14 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                         'Comisión plataforma (20%):',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                       Text(
-                        'S/${_platformCommission.toStringAsFixed(2)}',
+                        'S/. ${_platformCommission.toStringAsFixed(2)}',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                     ],
@@ -796,14 +796,14 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                         'Ganancia conductor:',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                       Text(
-                        'S/${_driverEarnings.toStringAsFixed(2)}',
+                        'S/. ${_driverEarnings.toStringAsFixed(2)}',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                         ),
                       ),
                     ],
@@ -821,7 +821,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                         ),
                       ),
                       Text(
-                        'S/${widget.fareAmount.toStringAsFixed(2)}',
+                        'S/. ${widget.fareAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -864,7 +864,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
                   margin: const EdgeInsets.only(bottom: 8),
                   color: _selectedMethod?.id == method.id 
                     ? Colors.blue.shade50 
-                    : Colors.white,
+                    : Theme.of(context).colorScheme.onPrimary,
                   child: ListTile(
                     leading: Radio<PaymentMethodInfo>(
                       value: method,
@@ -947,10 +947,10 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.3),
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6).withValues(alpha: 0.3),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -960,7 +960,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
         onPressed: _selectedMethod != null && !_isLoading ? _processPayment : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blue.shade600,
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -968,7 +968,7 @@ class _PaymentMethodSelectionScreenState extends State<PaymentMethodSelectionScr
         ),
         child: Text(
           _selectedMethod != null 
-            ? 'Pagar S/${widget.fareAmount.toStringAsFixed(2)} con ${_selectedMethod!.name}'
+            ? 'Pagar S/. ${widget.fareAmount.toStringAsFixed(2)} con ${_selectedMethod!.name}'
             : 'Selecciona un método de pago',
           style: const TextStyle(
             fontSize: 16,

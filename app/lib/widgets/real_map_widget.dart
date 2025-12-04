@@ -181,20 +181,20 @@ class _RealMapWidgetState extends State<RealMapWidget> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Container(
-        color: Colors.grey[200],
-        child: const Center(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00C800)),
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               Text(
                 'Cargando mapa...',
                 style: TextStyle(
                   fontSize: 16,
-                  color: Colors.grey,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -242,33 +242,33 @@ class _RealMapWidgetState extends State<RealMapWidget> {
               // Botón de zoom in
               FloatingActionButton(
                 mini: true,
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.surface,
                 onPressed: _zoomIn,
                 heroTag: 'zoom_in',
-                child: const Icon(Icons.add, color: Colors.black87),
+                child: Icon(Icons.add, color: Theme.of(context).colorScheme.onSurface),
               ),
               const SizedBox(height: 8),
-              
+
               // Botón de zoom out
               FloatingActionButton(
                 mini: true,
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.surface,
                 onPressed: _zoomOut,
                 heroTag: 'zoom_out',
-                child: const Icon(Icons.remove, color: Colors.black87),
+                child: Icon(Icons.remove, color: Theme.of(context).colorScheme.onSurface),
               ),
               const SizedBox(height: 8),
-              
+
               // Botón de ubicación actual
               if (widget.showCurrentLocation)
                 FloatingActionButton(
                   mini: true,
-                  backgroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
                   onPressed: _centerOnLocation,
                   heroTag: 'my_location',
-                  child: const Icon(
+                  child: Icon(
                     Icons.my_location,
-                    color: Color(0xFF00C800),
+                    color: Theme.of(context).colorScheme.primary,
                   ),
                 ),
             ],

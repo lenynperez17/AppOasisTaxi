@@ -33,10 +33,10 @@ class ModernButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final effectiveBackgroundColor = backgroundColor ?? theme.primaryColor;
-    final effectiveTextColor = textColor ?? Colors.white;
-    
+    final colorScheme = Theme.of(context).colorScheme;
+    final effectiveBackgroundColor = backgroundColor ?? colorScheme.primary;
+    final effectiveTextColor = textColor ?? colorScheme.onPrimary;
+
     return SizedBox(
       width: width,
       height: height,

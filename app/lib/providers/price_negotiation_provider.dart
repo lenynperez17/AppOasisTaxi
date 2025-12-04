@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,13 +11,157 @@ class PriceNegotiationProvider extends ChangeNotifier {
   final List<PriceNegotiation> _activeNegotiations = [];
   List<PriceNegotiation> _driverVisibleRequests = [];
   PriceNegotiation? _currentNegotiation;
-  
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ✅ NUEVO: StreamSubscription para escuchar cambios en tiempo real
+  StreamSubscription<QuerySnapshot>? _negotiationsSubscription;
+
   List<PriceNegotiation> get activeNegotiations => _activeNegotiations;
   List<PriceNegotiation> get driverVisibleRequests => _driverVisibleRequests;
   PriceNegotiation? get currentNegotiation => _currentNegotiation;
-  
+
+  // ✅ NUEVO: Iniciar escucha en tiempo real para pasajeros
+  void startListeningToMyNegotiations() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      debugPrint('❌ Usuario no autenticado para escuchar negociaciones');
+      return;
+    }
+
+    debugPrint('🔄 Iniciando listener de negociaciones para pasajero: ${user.uid}');
+
+    // Cancelar cualquier suscripción anterior
+    _negotiationsSubscription?.cancel();
+
+    // Escuchar en tiempo real las negociaciones del pasajero
+    _negotiationsSubscription = _firestore
+        .collection('negotiations')
+        .where('passengerId', isEqualTo: user.uid)
+        .snapshots()
+        .listen((snapshot) async {
+      debugPrint('📥 Recibidas ${snapshot.docs.length} negociaciones del pasajero');
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final negotiationId = data['id'] ?? doc.id;
+
+        // Buscar ofertas de conductores para esta negociación
+        final offersSnapshot = await _firestore
+            .collection('negotiations')
+            .doc(doc.id)
+            .collection('offers')
+            .get();
+
+        final driverOffers = offersSnapshot.docs.map((offerDoc) {
+          final offerData = offerDoc.data();
+          return DriverOffer(
+            driverId: offerData['driverId'] ?? '',
+            driverName: offerData['driverName'] ?? 'Conductor',
+            driverPhoto: offerData['driverPhoto'] ?? '',
+            driverRating: (offerData['driverRating'] ?? 5.0).toDouble(),
+            vehicleModel: offerData['vehicleModel'] ?? '',
+            vehiclePlate: offerData['vehiclePlate'] ?? '',
+            vehicleColor: offerData['vehicleColor'] ?? '',
+            acceptedPrice: (offerData['acceptedPrice'] ?? 0.0).toDouble(),
+            estimatedArrival: offerData['estimatedArrival'] ?? 5,
+            offeredAt: _parseDateTime(offerData['offeredAt']),
+            status: OfferStatus.values.firstWhere(
+              (s) => s.name == (offerData['status'] ?? 'pending'),
+              orElse: () => OfferStatus.pending,
+            ),
+            completedTrips: offerData['completedTrips'] ?? 0,
+            acceptanceRate: (offerData['acceptanceRate'] ?? 0.0).toDouble(),
+          );
+        }).toList();
+
+        final negotiation = PriceNegotiation(
+          id: negotiationId,
+          passengerId: data['passengerId'] ?? '',
+          passengerName: data['passengerName'] ?? '',
+          passengerPhoto: data['passengerPhoto'] ?? '',
+          passengerRating: (data['passengerRating'] ?? 5.0).toDouble(),
+          pickup: LocationPoint(
+            latitude: (data['pickup']?['latitude'] ?? 0.0).toDouble(),
+            longitude: (data['pickup']?['longitude'] ?? 0.0).toDouble(),
+            address: data['pickup']?['address'] ?? '',
+            reference: data['pickup']?['reference'],
+          ),
+          destination: LocationPoint(
+            latitude: (data['destination']?['latitude'] ?? 0.0).toDouble(),
+            longitude: (data['destination']?['longitude'] ?? 0.0).toDouble(),
+            address: data['destination']?['address'] ?? '',
+            reference: data['destination']?['reference'],
+          ),
+          suggestedPrice: (data['suggestedPrice'] ?? 0.0).toDouble(),
+          offeredPrice: (data['offeredPrice'] ?? 0.0).toDouble(),
+          distance: (data['distance'] ?? 0.0).toDouble(),
+          estimatedTime: data['estimatedTime'] ?? 0,
+          createdAt: _parseDateTime(data['createdAt']),
+          expiresAt: _parseDateTime(data['expiresAt']),
+          status: NegotiationStatus.values.firstWhere(
+            (s) => s.name == (data['status'] ?? 'waiting'),
+            orElse: () => NegotiationStatus.waiting,
+          ),
+          driverOffers: driverOffers,
+          selectedDriverId: data['acceptedDriverId'],
+          paymentMethod: PaymentMethod.values.firstWhere(
+            (m) => m.name == (data['paymentMethod'] ?? 'cash'),
+            orElse: () => PaymentMethod.cash,
+          ),
+          notes: data['notes'],
+        );
+
+        // Actualizar o agregar la negociación
+        final existingIndex = _activeNegotiations.indexWhere((n) => n.id == negotiationId);
+        if (existingIndex >= 0) {
+          _activeNegotiations[existingIndex] = negotiation;
+          debugPrint('📝 Actualizada negociación: $negotiationId con ${driverOffers.length} ofertas, status: ${negotiation.status.name}');
+        } else {
+          _activeNegotiations.add(negotiation);
+          debugPrint('➕ Agregada nueva negociación: $negotiationId');
+        }
+
+        // Actualizar currentNegotiation si corresponde
+        if (_currentNegotiation?.id == negotiationId) {
+          _currentNegotiation = negotiation;
+        }
+      }
+
+      notifyListeners();
+    }, onError: (e) {
+      debugPrint('❌ Error en listener de negociaciones: $e');
+    });
+  }
+
+  // ✅ NUEVO: Detener escucha
+  void stopListeningToNegotiations() {
+    debugPrint('🛑 Deteniendo listener de negociaciones');
+    _negotiationsSubscription?.cancel();
+    _negotiationsSubscription = null;
+  }
+
+  // ✅ NUEVO: Obtener el rideId de una negociación aceptada
+  Future<String?> getRideIdForNegotiation(String negotiationId) async {
+    try {
+      final doc = await _firestore.collection('negotiations').doc(negotiationId).get();
+      if (doc.exists) {
+        return doc.data()?['rideId'] as String?;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error obteniendo rideId: $e');
+      return null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _negotiationsSubscription?.cancel();
+    super.dispose();
+  }
+
   /// Para pasajeros: Crear nueva negociación con datos reales
   Future<void> createNegotiation({
     required LocationPoint pickup,
@@ -93,10 +238,12 @@ class PriceNegotiationProvider extends ChangeNotifier {
       final driverLat = driverData['location']['lat'];
       final driverLng = driverData['location']['lng'];
       
+      // ✅ CORREGIDO: Sin filtro de expiresAt en query (puede ser String o Timestamp)
+      // El filtro se hace en el cliente después de parsear
       final snapshot = await _firestore
           .collection('negotiations')
           .where('status', isEqualTo: 'waiting')
-          .where('expiresAt', isGreaterThan: Timestamp.now())
+          .limit(50)
           .get();
 
       _driverVisibleRequests = snapshot.docs
@@ -124,8 +271,8 @@ class PriceNegotiationProvider extends ChangeNotifier {
               offeredPrice: (data['offeredPrice'] ?? 0.0).toDouble(),
               distance: (data['distance'] ?? 0.0).toDouble(),
               estimatedTime: data['estimatedTime'] ?? 0,
-              createdAt: DateTime.parse(data['createdAt']),
-              expiresAt: DateTime.parse(data['expiresAt']),
+              createdAt: _parseDateTime(data['createdAt']),
+              expiresAt: _parseDateTime(data['expiresAt']),
               status: NegotiationStatus.values.firstWhere(
                 (status) => status.name == data['status'],
                 orElse: () => NegotiationStatus.waiting,
@@ -139,6 +286,10 @@ class PriceNegotiationProvider extends ChangeNotifier {
             );
           })
           .where((negotiation) {
+            // ✅ Filtrar expirados (el filtro que antes estaba en Firestore)
+            if (negotiation.expiresAt.isBefore(DateTime.now())) {
+              return false;
+            }
             // Filtrar por proximidad (10km radio)
             final distance = _calculateHaversineDistance(
               LatLng(driverLat, driverLng),
@@ -246,42 +397,147 @@ class PriceNegotiationProvider extends ChangeNotifier {
   }
   
   /// Para pasajeros: Aceptar oferta de conductor
-  void acceptDriverOffer(String negotiationId, String driverId) {
+  /// Crea un viaje en Firestore y conecta la negociación con el ride
+  Future<String?> acceptDriverOffer(String negotiationId, String driverId) async {
     final negotiationIndex = _activeNegotiations
         .indexWhere((n) => n.id == negotiationId);
-    
-    if (negotiationIndex != -1) {
-      final offerIndex = _activeNegotiations[negotiationIndex]
-          .driverOffers
-          .indexWhere((o) => o.driverId == driverId);
-      
-      if (offerIndex != -1) {
-        // Actualizar estado de la oferta aceptada
-        final updatedOffers = List<DriverOffer>.from(
-          _activeNegotiations[negotiationIndex].driverOffers
+
+    if (negotiationIndex == -1) return null;
+
+    final offerIndex = _activeNegotiations[negotiationIndex]
+        .driverOffers
+        .indexWhere((o) => o.driverId == driverId);
+
+    if (offerIndex == -1) return null;
+
+    try {
+      final negotiation = _activeNegotiations[negotiationIndex];
+      final acceptedOffer = negotiation.driverOffers[offerIndex];
+
+      // Generar código de verificación del conductor
+      final driverVerificationCode = _generateVerificationCode();
+
+      // Crear el viaje en Firestore
+      final rideRef = await _firestore.collection('rides').add({
+        'userId': negotiation.passengerId,
+        'driverId': driverId,
+        'negotiationId': negotiationId,
+        'pickupLocation': {
+          'latitude': negotiation.pickup.latitude,
+          'longitude': negotiation.pickup.longitude,
+        },
+        'destinationLocation': {
+          'latitude': negotiation.destination.latitude,
+          'longitude': negotiation.destination.longitude,
+        },
+        'pickupAddress': negotiation.pickup.address,
+        'destinationAddress': negotiation.destination.address,
+        'estimatedFare': acceptedOffer.acceptedPrice,
+        'finalFare': acceptedOffer.acceptedPrice,
+        'estimatedDistance': negotiation.distance,
+        'status': 'accepted',
+        'paymentMethod': negotiation.paymentMethod.name,
+        'isPaidOutsideApp': negotiation.paymentMethod == PaymentMethod.cash,
+        'requestedAt': FieldValue.serverTimestamp(),
+        'acceptedAt': FieldValue.serverTimestamp(),
+        // Códigos de verificación mutua
+        'passengerVerificationCode': _generateVerificationCode(),
+        'driverVerificationCode': driverVerificationCode,
+        'isPassengerVerified': false,
+        'isDriverVerified': false,
+        // Info del conductor
+        'vehicleInfo': {
+          'driverName': acceptedOffer.driverName,
+          'driverPhoto': acceptedOffer.driverPhoto,
+          'driverRating': acceptedOffer.driverRating,
+          'vehicleModel': acceptedOffer.vehicleModel,
+          'vehiclePlate': acceptedOffer.vehiclePlate,
+          'vehicleColor': acceptedOffer.vehicleColor,
+        },
+        // Info del pasajero
+        'passengerInfo': {
+          'passengerName': negotiation.passengerName,
+          'passengerPhoto': negotiation.passengerPhoto,
+          'passengerRating': negotiation.passengerRating,
+        },
+      });
+
+      // Actualizar la negociación en Firestore
+      await _firestore.collection('negotiations').doc(negotiationId).update({
+        'status': 'accepted',
+        'acceptedDriverId': driverId,
+        'rideId': rideRef.id,
+        'acceptedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Actualizar ofertas localmente
+      final updatedOffers = List<DriverOffer>.from(negotiation.driverOffers);
+      for (int i = 0; i < updatedOffers.length; i++) {
+        updatedOffers[i] = updatedOffers[i].copyWith(
+          status: i == offerIndex
+              ? OfferStatus.accepted
+              : OfferStatus.rejected,
         );
-        
-        for (int i = 0; i < updatedOffers.length; i++) {
-          updatedOffers[i] = updatedOffers[i].copyWith(
-            status: i == offerIndex 
-                ? OfferStatus.accepted 
-                : OfferStatus.rejected,
-          );
-        }
-        
-        _activeNegotiations[negotiationIndex] = 
-            _activeNegotiations[negotiationIndex].copyWith(
-          driverOffers: updatedOffers,
-          status: NegotiationStatus.accepted,
-          acceptedDriverId: driverId,
-        );
-        
-        if (_currentNegotiation?.id == negotiationId) {
-          _currentNegotiation = _activeNegotiations[negotiationIndex];
-        }
-        
-        notifyListeners();
       }
+
+      _activeNegotiations[negotiationIndex] = negotiation.copyWith(
+        driverOffers: updatedOffers,
+        status: NegotiationStatus.accepted,
+        acceptedDriverId: driverId,
+      );
+
+      if (_currentNegotiation?.id == negotiationId) {
+        _currentNegotiation = _activeNegotiations[negotiationIndex];
+      }
+
+      // Enviar notificación al conductor
+      await _sendAcceptanceNotification(driverId, rideRef.id, negotiation);
+
+      notifyListeners();
+
+      debugPrint('✅ Viaje creado: ${rideRef.id} desde negociación: $negotiationId');
+      return rideRef.id;
+
+    } catch (e) {
+      debugPrint('❌ Error aceptando oferta: $e');
+      return null;
+    }
+  }
+
+  /// Generar código de verificación de 4 dígitos
+  String _generateVerificationCode() {
+    final random = math.Random();
+    String code = '';
+    for (int i = 0; i < 4; i++) {
+      code += random.nextInt(10).toString();
+    }
+    return code;
+  }
+
+  /// Enviar notificación al conductor cuando su oferta es aceptada
+  Future<void> _sendAcceptanceNotification(
+    String driverId,
+    String rideId,
+    PriceNegotiation negotiation
+  ) async {
+    try {
+      await _firestore.collection('notifications').add({
+        'userId': driverId,
+        'title': '¡Oferta Aceptada!',
+        'message': 'Tu oferta de S/. ${negotiation.driverOffers.firstWhere((o) => o.driverId == driverId).acceptedPrice.toStringAsFixed(2)} ha sido aceptada. Dirígete al punto de recogida.',
+        'type': 'offer_accepted',
+        'data': {
+          'rideId': rideId,
+          'negotiationId': negotiation.id,
+          'pickupAddress': negotiation.pickup.address,
+          'destinationAddress': negotiation.destination.address,
+        },
+        'isRead': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Notificación enviada al conductor: $driverId');
+    } catch (e) {
+      debugPrint('❌ Error enviando notificación: $e');
     }
   }
   
@@ -351,8 +607,8 @@ class PriceNegotiationProvider extends ChangeNotifier {
             'offeredPrice': negotiation.offeredPrice,
             'distance': negotiation.distance,
             'estimatedTime': negotiation.estimatedTime,
-            'createdAt': negotiation.createdAt.toIso8601String(),
-            'expiresAt': negotiation.expiresAt.toIso8601String(),
+            'createdAt': Timestamp.fromDate(negotiation.createdAt),
+            'expiresAt': Timestamp.fromDate(negotiation.expiresAt),
             'status': negotiation.status.name,
             'paymentMethod': negotiation.paymentMethod.name,
             'notes': negotiation.notes,
@@ -401,15 +657,43 @@ class PriceNegotiationProvider extends ChangeNotifier {
     }
   }
   
-  /// Enviar notificaciones push a conductores
+  /// ✅ IMPLEMENTADO: Enviar notificaciones push a conductores
   Future<void> _sendPushNotificationToDrivers(List<String> driverIds, PriceNegotiation negotiation) async {
-    // Implementar envío de notificaciones push usando Firebase Cloud Messaging
-    // Este método se conectará con el servicio de notificaciones
-    debugPrint('Enviando notificaciones push a conductores: $driverIds');
+    try {
+      for (final driverId in driverIds) {
+        // Crear notificación en Firestore (será procesada por Cloud Functions)
+        await _firestore.collection('notifications').add({
+          'userId': driverId,
+          'title': 'Nueva Solicitud de Viaje',
+          'message': 'Nueva solicitud de viaje. Distancia: ${(negotiation.distance / 1000).toStringAsFixed(1)} km. Precio ofrecido: S/. ${negotiation.offeredPrice.toStringAsFixed(2)}',
+          'type': 'price_negotiation',
+          'data': {
+            'negotiationId': negotiation.id,
+            'passengerId': negotiation.passengerId,
+            'pickup': {'lat': negotiation.pickup.latitude, 'lng': negotiation.pickup.longitude},
+            'destination': {'lat': negotiation.destination.latitude, 'lng': negotiation.destination.longitude},
+            'offeredPrice': negotiation.offeredPrice,
+          },
+          'isRead': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+      debugPrint('✅ Notificaciones creadas para ${driverIds.length} conductores');
+    } catch (e) {
+      debugPrint('❌ Error enviando notificaciones: $e');
+    }
   }
 
   LatLng _locationPointToLatLng(LocationPoint point) {
     return LatLng(point.latitude, point.longitude);
+  }
+
+  /// Helper para parsear DateTime desde Firestore (soporta Timestamp y String)
+  DateTime _parseDateTime(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
   }
 
   double _calculateHaversineDistance(LatLng point1, LatLng point2) {

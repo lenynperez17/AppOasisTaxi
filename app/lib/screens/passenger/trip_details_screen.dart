@@ -1,7 +1,14 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../../core/theme/modern_theme.dart';
-
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../core/utils/currency_formatter.dart';
+import '../../utils/logger.dart';
 class TripDetailsScreen extends StatefulWidget {
   final String tripId;
   
@@ -57,119 +64,209 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
   }
   
   void _loadTripDetails() async {
-    // Simulate loading trip details
-    await Future.delayed(Duration(seconds: 2));
-    
-    setState(() {
-      _tripDetail = TripDetail(
-        id: widget.tripId,
-        status: TripStatus.completed,
-        date: DateTime.now().subtract(Duration(days: 2)),
-        pickupLocation: TripLocation(
-          address: 'Av. Los Conquistadores 123, San Isidro',
-          coordinates: LatLng(-12.0931, -77.0465),
-          landmark: 'Frente al banco BCP',
-        ),
-        destinationLocation: TripLocation(
-          address: 'Centro Comercial Jockey Plaza, Surco',
-          coordinates: LatLng(-12.0822, -76.9761),
-          landmark: 'Puerta principal - Food Court',
-        ),
-        driver: DriverInfo(
-          id: 'DRV_001',
-          name: 'Carlos Mendoza',
-          rating: 4.8,
-          totalTrips: 1247,
-          phone: '+51 987 654 321',
-          photo: '',
-          vehicle: VehicleInfo(
-            make: 'Toyota',
-            model: 'Yaris',
-            year: 2020,
-            color: 'Blanco',
-            plate: 'ABC-123',
+    try {
+      // ✅ Consultar viaje real desde Firebase
+      final tripDoc = await FirebaseFirestore.instance
+          .collection('rides')
+          .doc(widget.tripId)
+          .get();
+
+      if (!tripDoc.exists) {
+        // Viaje no encontrado
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Viaje no encontrado'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      final tripData = tripDoc.data()!;
+
+      // ✅ Consultar información del conductor desde Firebase
+      final driverDoc = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(tripData['driverId'])
+          .get();
+
+      final driverData = driverDoc.exists ? driverDoc.data()! : null;
+
+      // ✅ Parsear estado del viaje
+      TripStatus status;
+      switch (tripData['status']) {
+        case 'completed':
+          status = TripStatus.completed;
+          break;
+        case 'cancelled':
+          status = TripStatus.cancelled;
+          break;
+        case 'in_progress':
+          status = TripStatus.inProgress;
+          break;
+        case 'requested':
+          status = TripStatus.requested;
+          break;
+        default:
+          status = TripStatus.requested;
+      }
+
+      // ✅ Construir timeline desde eventos reales de Firebase
+      List<TripEvent> timeline = [];
+      if (tripData['events'] != null) {
+        for (var event in (tripData['events'] as List)) {
+          timeline.add(TripEvent(
+            time: (event['timestamp'] as Timestamp).toDate(),
+            type: _parseEventType(event['type']),
+            description: event['description'] ?? '',
+          ));
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _tripDetail = TripDetail(
+            id: widget.tripId,
+            status: status,
+            date: (tripData['createdAt'] as Timestamp).toDate(),
+            pickupLocation: TripLocation(
+              address: tripData['pickup']?['address'] ?? 'Dirección no disponible',
+              coordinates: LatLng(
+                tripData['pickup']?['lat'] ?? 0.0,
+                tripData['pickup']?['lng'] ?? 0.0,
+              ),
+              landmark: tripData['pickup']?['landmark'] ?? '',
+            ),
+            destinationLocation: TripLocation(
+              address: tripData['destination']?['address'] ?? 'Dirección no disponible',
+              coordinates: LatLng(
+                tripData['destination']?['lat'] ?? 0.0,
+                tripData['destination']?['lng'] ?? 0.0,
+              ),
+              landmark: tripData['destination']?['landmark'] ?? '',
+            ),
+            driver: driverData != null
+                ? DriverInfo(
+                    id: tripData['driverId'],
+                    name: driverData['name'] ?? 'Conductor',
+                    rating: (driverData['rating'] ?? 0.0).toDouble(),
+                    totalTrips: driverData['totalTrips'] ?? 0,
+                    phone: driverData['phoneNumber'] ?? '',
+                    photo: driverData['photoUrl'] ?? '',
+                    vehicle: VehicleInfo(
+                      make: driverData['vehicleMake'] ?? '',
+                      model: driverData['vehicleModel'] ?? '',
+                      year: driverData['vehicleYear'] ?? 0,
+                      color: driverData['vehicleColor'] ?? '',
+                      plate: driverData['vehiclePlate'] ?? '',
+                    ),
+                  )
+                : DriverInfo(
+                    id: tripData['driverId'] ?? '',
+                    name: 'Conductor no disponible',
+                    rating: 0.0,
+                    totalTrips: 0,
+                    phone: '',
+                    photo: '',
+                    vehicle: VehicleInfo(
+                      make: 'N/A',
+                      model: 'N/A',
+                      year: 0,
+                      color: 'N/A',
+                      plate: 'N/A',
+                    ),
+                  ),
+            pricing: TripPricing(
+              baseFare: (tripData['pricing']?['baseFare'] ?? 0.0).toDouble(),
+              distanceFare: (tripData['pricing']?['distanceFare'] ?? 0.0).toDouble(),
+              timeFare: (tripData['pricing']?['timeFare'] ?? 0.0).toDouble(),
+              tip: (tripData['pricing']?['tip'] ?? 0.0).toDouble(),
+              discount: (tripData['pricing']?['discount'] ?? 0.0).toDouble(),
+              total: (tripData['pricing']?['total'] ?? 0.0).toDouble(),
+              paymentMethod: tripData['paymentMethod'] ?? 'No especificado',
+            ),
+            timeline: timeline,
+            distance: (tripData['distance'] ?? 0.0).toDouble(),
+            duration: tripData['duration'] ?? 0,
+            rating: tripData['rating'],
+            comment: tripData['comment'],
+            receipt: TripReceipt(
+              receiptNumber: 'REC-${widget.tripId}',
+              issueDate: (tripData['createdAt'] as Timestamp).toDate(),
+              taxAmount: (tripData['pricing']?['tax'] ?? 0.0).toDouble(),
+              subtotal: (tripData['pricing']?['subtotal'] ?? 0.0).toDouble(),
+            ),
+          );
+          _isLoading = false;
+        });
+
+        _fadeController.forward();
+        _slideController.forward();
+      }
+    } catch (e) {
+      AppLogger.error('❌ Error al cargar detalles del viaje: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cargar el viaje: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
           ),
-        ),
-        pricing: TripPricing(
-          baseFare: 5.00,
-          distanceFare: 12.50,
-          timeFare: 8.00,
-          tip: 5.00,
-          discount: 3.00,
-          total: 27.50,
-          paymentMethod: 'Tarjeta Visa ****1234',
-        ),
-        timeline: [
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 2, minutes: 30)),
-            type: TripEventType.requested,
-            description: 'Viaje solicitado',
-          ),
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 2, minutes: 28)),
-            type: TripEventType.driverAssigned,
-            description: 'Conductor asignado: Carlos Mendoza',
-          ),
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 2, minutes: 25)),
-            type: TripEventType.driverArrived,
-            description: 'Conductor llegó al punto de recogida',
-          ),
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 2, minutes: 23)),
-            type: TripEventType.tripStarted,
-            description: 'Viaje iniciado',
-          ),
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 1, minutes: 55)),
-            type: TripEventType.tripCompleted,
-            description: 'Viaje completado',
-          ),
-          TripEvent(
-            time: DateTime.now().subtract(Duration(days: 2, hours: 1, minutes: 53)),
-            type: TripEventType.paymentProcessed,
-            description: 'Pago procesado exitosamente',
-          ),
-        ],
-        distance: 8.5,
-        duration: 28,
-        rating: 5,
-        comment: 'Excelente servicio, muy puntual y amable.',
-        receipt: TripReceipt(
-          receiptNumber: 'REC-${widget.tripId}',
-          issueDate: DateTime.now().subtract(Duration(days: 2)),
-          taxAmount: 4.95,
-          subtotal: 22.55,
-        ),
-      );
-      _isLoading = false;
-    });
-    
-    _fadeController.forward();
-    _slideController.forward();
+        );
+        Navigator.pop(context);
+      }
+    }
+  }
+
+  // ✅ Función helper para parsear tipos de eventos
+  TripEventType _parseEventType(String? type) {
+    switch (type) {
+      case 'requested':
+        return TripEventType.requested;
+      case 'driver_assigned':
+        return TripEventType.driverAssigned;
+      case 'driver_arrived':
+        return TripEventType.driverArrived;
+      case 'trip_started':
+        return TripEventType.tripStarted;
+      case 'trip_completed':
+        return TripEventType.tripCompleted;
+      case 'payment_processed':
+        return TripEventType.paymentProcessed;
+      default:
+        return TripEventType.requested;
+    }
   }
   
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ModernTheme.backgroundLight,
+      backgroundColor: context.surfaceColor,
       appBar: AppBar(
         backgroundColor: ModernTheme.oasisGreen,
         elevation: 0,
         title: Text(
           'Detalles del Viaje',
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.share, color: Colors.white),
+            icon: Icon(Icons.share, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: _shareTrip,
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: Colors.white),
+            icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.onPrimary),
             onSelected: _handleMenuAction,
             itemBuilder: (context) => [
               PopupMenuItem(
@@ -222,7 +319,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
           Text(
             'Cargando detalles del viaje...',
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
             ),
           ),
         ],
@@ -298,12 +395,12 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                     Container(
                       padding: EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         _getStatusIcon(),
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         size: 28,
                       ),
                     ),
@@ -315,7 +412,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                           Text(
                             _getStatusText(),
                             style: TextStyle(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.surface,
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
                             ),
@@ -323,7 +420,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                           Text(
                             'ID: ${_tripDetail!.id}',
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                               fontSize: 14,
                             ),
                           ),
@@ -331,9 +428,9 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                       ),
                     ),
                     Text(
-                      'S/ ${_tripDetail!.pricing.total.toStringAsFixed(2)}',
+                      _tripDetail!.pricing.total.toCurrency(),
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                       ),
@@ -372,19 +469,19 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
   Widget _buildStatItem(String value, String label, IconData icon) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 16),
+        Icon(icon, color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7), size: 16),
         SizedBox(height: 4),
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             fontWeight: FontWeight.bold,
           ),
         ),
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
             fontSize: 12,
           ),
         ),
@@ -477,7 +574,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                   Text(
                     location.landmark,
                     style: TextStyle(
-                      color: ModernTheme.textSecondary,
+                      color: context.secondaryText,
                       fontSize: 12,
                     ),
                   ),
@@ -504,7 +601,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
               child: Text(
                 _tripDetail!.driver.name.split(' ').map((n) => n[0]).take(2).join(),
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
@@ -532,7 +629,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                             size: 16,
                             color: index < _tripDetail!.driver.rating.floor()
                                 ? Colors.amber
-                                : Colors.grey.shade300,
+                                : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                           );
                         }),
                       ),
@@ -540,7 +637,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                       Text(
                         '${_tripDetail!.driver.rating} (${_tripDetail!.driver.totalTrips} viajes)',
                         style: TextStyle(
-                          color: ModernTheme.textSecondary,
+                          color: context.secondaryText,
                           fontSize: 12,
                         ),
                       ),
@@ -563,12 +660,12 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
         Container(
           padding: EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: ModernTheme.backgroundLight,
+            color: context.surfaceColor,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              Icon(Icons.directions_car, color: ModernTheme.textSecondary),
+              Icon(Icons.directions_car, color: context.secondaryText),
               SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -616,12 +713,12 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
         Container(
           padding: EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: ModernTheme.backgroundLight,
+            color: context.surfaceColor,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              Icon(Icons.payment, color: ModernTheme.textSecondary),
+              Icon(Icons.payment, color: context.secondaryText),
               SizedBox(width: 12),
               Text(
                 'Método de pago: ${_tripDetail!.pricing.paymentMethod}',
@@ -649,7 +746,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
             ),
           ),
           Text(
-            '${amount >= 0 ? '' : '-'}S/ ${amount.abs().toStringAsFixed(2)}',
+            amount.toCurrencyWithSign(),
             style: TextStyle(
               fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
               fontSize: isTotal ? 16 : 14,
@@ -696,7 +793,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                       Container(
                         width: 2,
                         height: 40,
-                        color: Colors.grey.shade300,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                       ),
                   ],
                 ),
@@ -716,7 +813,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                         Text(
                           _formatTime(event.time),
                           style: TextStyle(
-                            color: ModernTheme.textSecondary,
+                            color: context.secondaryText,
                             fontSize: 12,
                           ),
                         ),
@@ -747,7 +844,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
                   size: 24,
                   color: index < _tripDetail!.rating!
                       ? Colors.amber
-                      : Colors.grey.shade300,
+                      : Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                 );
               }),
             ),
@@ -766,13 +863,13 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
           Container(
             padding: EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: ModernTheme.backgroundLight,
+              color: context.surfaceColor,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.format_quote, color: ModernTheme.textSecondary),
+                Icon(Icons.format_quote, color: context.secondaryText),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -794,11 +891,11 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -844,7 +941,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
       case TripStatus.inProgress:
         return ModernTheme.warning;
       default:
-        return ModernTheme.textSecondary;
+        return context.secondaryText;
     }
   }
   
@@ -894,7 +991,7 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
       case TripEventType.paymentProcessed:
         return Colors.indigo;
       default:
-        return Colors.grey;
+        return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
     }
   }
   
@@ -906,13 +1003,52 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
   
-  void _shareTrip() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Compartiendo detalles del viaje...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+  /// ✅ COMPARTIR VIAJE CON SHARE_PLUS
+  Future<void> _shareTrip() async {
+    final trip = _tripDetail;
+    if (trip == null) {
+      AppLogger.warning('⚠️ No hay detalles del viaje para compartir');
+      return;
+    }
+
+    try {
+      final text = '''
+🚕 Viaje Oasis Taxi
+
+📍 Desde: ${trip.pickupLocation.address}
+📍 Hasta: ${trip.destinationLocation.address}
+
+💰 Costo: ${trip.pricing.total.toCurrencyWithSign()}
+🕐 Duración: ${trip.duration} min
+📏 Distancia: ${trip.distance.toStringAsFixed(1)} km
+
+⭐ Calificación: ${trip.rating != null ? '${trip.rating}/5' : 'Sin calificar'}
+
+🚗 Conductor: ${trip.driver.name}
+🔢 Placa: ${trip.driver.vehicle.plate}
+
+📅 Fecha: ${_formatDate(trip.date)} ${_formatTime(trip.date)}
+
+ID de viaje: ${trip.id}
+''';
+
+      await Share.share(
+        text,
+        subject: 'Detalles de mi viaje en Oasis Taxi',
+      );
+
+      AppLogger.info('✅ Viaje compartido exitosamente');
+    } catch (e) {
+      AppLogger.error('❌ Error al compartir viaje: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al compartir: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
   }
   
   void _handleMenuAction(String action) {
@@ -929,31 +1065,400 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
     }
   }
   
-  void _showReceipt() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Generando recibo...'),
-        backgroundColor: ModernTheme.info,
+  /// ✅ GENERAR Y MOSTRAR RECIBO PDF
+  Future<void> _showReceipt() async {
+    final trip = _tripDetail;
+    if (trip == null) {
+      AppLogger.warning('⚠️ No hay detalles del viaje para generar recibo');
+      return;
+    }
+
+    try {
+      // Mostrar loading
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('Generando recibo PDF...'),
+              ],
+            ),
+            backgroundColor: ModernTheme.info,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Header
+              pw.Center(
+                child: pw.Text(
+                  'RECIBO DE VIAJE',
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Center(
+                child: pw.Text(
+                  'Oasis Taxi',
+                  style: pw.TextStyle(fontSize: 16),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Número de recibo y fecha
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Recibo N°: ${trip.receipt.receiptNumber}',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                  pw.Text('Fecha: ${_formatDate(trip.date)}'),
+                ],
+              ),
+              pw.Divider(thickness: 2),
+              pw.SizedBox(height: 20),
+
+              // Información del viaje
+              pw.Text(
+                'DETALLES DEL VIAJE',
+                style: pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              _buildPdfRow('Origen', trip.pickupLocation.address),
+              _buildPdfRow('Destino', trip.destinationLocation.address),
+              _buildPdfRow('Distancia', '${trip.distance.toStringAsFixed(1)} km'),
+              _buildPdfRow('Duración', '${trip.duration} min'),
+              pw.SizedBox(height: 20),
+
+              // Información del conductor
+              pw.Text(
+                'CONDUCTOR',
+                style: pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              _buildPdfRow('Nombre', trip.driver.name),
+              _buildPdfRow(
+                'Vehículo',
+                '${trip.driver.vehicle.color} ${trip.driver.vehicle.make} ${trip.driver.vehicle.model}',
+              ),
+              _buildPdfRow('Placa', trip.driver.vehicle.plate),
+              pw.SizedBox(height: 20),
+
+              // Desglose de costos
+              pw.Text(
+                'DESGLOSE DE COSTOS',
+                style: pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              _buildPdfRow(
+                'Tarifa base',
+                trip.pricing.baseFare.toCurrencyWithSign(),
+              ),
+              _buildPdfRow(
+                'Por distancia',
+                trip.pricing.distanceFare.toCurrencyWithSign(),
+              ),
+              _buildPdfRow(
+                'Por tiempo',
+                trip.pricing.timeFare.toCurrencyWithSign(),
+              ),
+              if (trip.pricing.tip > 0)
+                _buildPdfRow(
+                  'Propina',
+                  trip.pricing.tip.toCurrencyWithSign(),
+                ),
+              if (trip.pricing.discount > 0)
+                _buildPdfRow(
+                  'Descuento',
+                  '- ${trip.pricing.discount.toCurrencyWithSign()}',
+                ),
+
+              pw.Divider(thickness: 2),
+
+              _buildPdfRow(
+                'TOTAL',
+                trip.pricing.total.toCurrencyWithSign(),
+                isTotal: true,
+              ),
+
+              pw.SizedBox(height: 10),
+              _buildPdfRow('Método de pago', trip.pricing.paymentMethod),
+
+              pw.Spacer(),
+
+              // Footer
+              pw.Center(
+                child: pw.Text(
+                  'Gracias por viajar con Oasis Taxi',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontStyle: pw.FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Mostrar preview y permitir compartir/imprimir
+      await Printing.layoutPdf(
+        onLayout: (format) async => pdf.save(),
+        name: 'Recibo_OasisTaxi_${trip.id}.pdf',
+      );
+
+      AppLogger.info('✅ Recibo PDF generado exitosamente');
+    } catch (e) {
+      AppLogger.error('❌ Error al generar recibo PDF: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al generar recibo: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// ✅ Helper para construir filas en el PDF
+  pw.Widget _buildPdfRow(String label, String value, {bool isTotal = false}) {
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontWeight: isTotal ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontSize: isTotal ? 16 : 14,
+            ),
+          ),
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontWeight: isTotal ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontSize: isTotal ? 16 : 14,
+            ),
+          ),
+        ],
       ),
     );
   }
   
-  void _repeatTrip() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Solicitando viaje similar...'),
-        backgroundColor: ModernTheme.info,
-      ),
-    );
+  /// ✅ REPETIR VIAJE (copiar origen/destino a nueva solicitud)
+  Future<void> _repeatTrip() async {
+    final trip = _tripDetail;
+    if (trip == null) {
+      AppLogger.warning('⚠️ No hay detalles del viaje para repetir');
+      return;
+    }
+
+    try {
+      // Confirmar acción
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text('¿Repetir viaje?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Se creará una nueva solicitud con:'),
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.my_location, size: 16, color: ModernTheme.success),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      trip.pickupLocation.address,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.location_on, size: 16, color: ModernTheme.error),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      trip.destinationLocation.address,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ModernTheme.oasisGreen,
+              ),
+              child: Text('Repetir viaje'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm != true || !mounted) return;
+
+      // Navegar a home con datos pre-cargados
+      Navigator.pushReplacementNamed(
+        context,
+        '/passenger/home',
+        arguments: {
+          'pickupAddress': trip.pickupLocation.address,
+          'pickupLatLng': trip.pickupLocation.coordinates,
+          'destinationAddress': trip.destinationLocation.address,
+          'destinationLatLng': trip.destinationLocation.coordinates,
+        },
+      );
+
+      AppLogger.info('✅ Navegando a home para repetir viaje');
+    } catch (e) {
+      AppLogger.error('❌ Error al repetir viaje: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al repetir viaje: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
   }
   
-  void _reportProblem() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Abriendo formulario de reporte...'),
-        backgroundColor: ModernTheme.warning,
-      ),
-    );
+  /// ✅ REPORTAR PROBLEMA (crear ticket de soporte en Firestore)
+  Future<void> _reportProblem() async {
+    final trip = _tripDetail;
+    if (trip == null) {
+      AppLogger.warning('⚠️ No hay detalles del viaje para reportar');
+      return;
+    }
+
+    try {
+      final issue = await showDialog<String>(
+        context: context,
+        builder: (context) => _ReportDialog(tripId: trip.id),
+      );
+
+      if (issue == null || issue.isEmpty || !mounted) return;
+
+      // Mostrar loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Enviando reporte...'),
+            ],
+          ),
+          backgroundColor: ModernTheme.info,
+        ),
+      );
+
+      // Crear ticket de soporte en Firestore
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Usuario no autenticado');
+      }
+
+      await FirebaseFirestore.instance.collection('supportTickets').add({
+        'userId': user.uid,
+        'tripId': trip.id,
+        'issue': issue,
+        'status': 'open',
+        'priority': 'medium',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'metadata': {
+          'tripDate': trip.date.toIso8601String(),
+          'driverId': trip.driver.id,
+          'driverName': trip.driver.name,
+          'fare': trip.pricing.total,
+        },
+      });
+
+      AppLogger.info('✅ Reporte de problema enviado exitosamente');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Theme.of(context).colorScheme.onPrimary),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Reporte enviado. Te contactaremos pronto.'),
+                ),
+              ],
+            ),
+            backgroundColor: ModernTheme.success,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('❌ Error al reportar problema: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al enviar reporte: ${e.toString()}'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
   }
   
   void _callDriver() {
@@ -971,6 +1476,133 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
         content: Text('Abriendo chat con ${_tripDetail!.driver.name}...'),
         backgroundColor: ModernTheme.info,
       ),
+    );
+  }
+}
+
+// ✅ WIDGET DE DIÁLOGO PARA REPORTAR PROBLEMAS
+class _ReportDialog extends StatefulWidget {
+  final String tripId;
+  const _ReportDialog({required this.tripId});
+
+  @override
+  _ReportDialogState createState() => _ReportDialogState();
+}
+
+class _ReportDialogState extends State<_ReportDialog> {
+  final _controller = TextEditingController();
+  String? _selectedIssue;
+
+  final List<String> _issues = [
+    'Conductor no llegó',
+    'Cobro incorrecto',
+    'Mala conducción',
+    'Vehículo sucio',
+    'Conductor grosero',
+    'Ruta incorrecta',
+    'Demora excesiva',
+    'Otro',
+  ];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: Row(
+        children: [
+          Icon(Icons.report_problem, color: ModernTheme.warning),
+          SizedBox(width: 12),
+          Text('Reportar problema'),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Tipo de problema',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: DropdownButtonFormField<String>(
+                value: _selectedIssue,
+                decoration: InputDecoration(
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  border: InputBorder.none,
+                  hintText: 'Selecciona un tipo',
+                ),
+                items: _issues.map((issue) {
+                  return DropdownMenuItem(
+                    value: issue,
+                    child: Text(issue),
+                  );
+                }).toList(),
+                onChanged: (value) => setState(() => _selectedIssue = value),
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Descripción (opcional)',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            SizedBox(height: 8),
+            TextField(
+              controller: _controller,
+              decoration: InputDecoration(
+                hintText: 'Cuéntanos más sobre el problema...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                contentPadding: EdgeInsets.all(12),
+              ),
+              maxLines: 4,
+              maxLength: 500,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: _selectedIssue == null
+              ? null
+              : () {
+                  final fullIssue = _selectedIssue! +
+                      (_controller.text.isNotEmpty
+                          ? ': ${_controller.text}'
+                          : '');
+                  Navigator.pop(context, fullIssue);
+                },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: ModernTheme.warning,
+            disabledBackgroundColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+          ),
+          child: Text('Enviar reporte'),
+        ),
+      ],
     );
   }
 }

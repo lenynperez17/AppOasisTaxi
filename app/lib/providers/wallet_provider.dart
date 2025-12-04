@@ -433,8 +433,8 @@ class WalletProvider extends ChangeNotifier {
         throw Exception('Monto excede el balance disponible');
       }
 
-      if (amount < 10) {
-        throw Exception('El monto mínimo de retiro es S/ 10');
+      if (amount < 50) {
+        throw Exception('El monto mínimo de retiro es S/. 50.00');
       }
 
       // Crear solicitud de retiro

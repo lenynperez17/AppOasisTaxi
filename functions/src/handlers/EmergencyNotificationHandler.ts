@@ -39,7 +39,7 @@ export class EmergencyNotificationHandler {
       let otherUserData = null;
 
       if (tripId) {
-        const tripDoc = await this.db.collection('trips').doc(tripId).get();
+        const tripDoc = await this.db.collection('rides').doc(tripId).get();
         tripData = tripDoc.data();
 
         if (tripData) {

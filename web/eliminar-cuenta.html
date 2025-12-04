@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eliminar Cuenta - Oasis Taxi</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2E7D32;
+            --primary-dark: #1B5E20;
+            --primary-light: #4CAF50;
+            --dark: #1a1a2e;
+            --gray: #6c757d;
+            --light: #f8f9fa;
+            --white: #ffffff;
+            --danger: #DC3545;
+            --warning: #FFC107;
+            --info: #17A2B8;
+            --gradient: linear-gradient(135deg, #1B5E20 0%, #2E7D32 50%, #43A047 100%);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: var(--light); color: var(--dark); line-height: 1.8; }
+
+        .header {
+            background: var(--gradient);
+            color: white;
+            padding: 100px 5% 60px;
+            text-align: center;
+            position: relative;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -50px;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: var(--light);
+            border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+        }
+        .header-content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 30px;
+            transition: color 0.3s;
+        }
+        .back-link:hover { color: white; }
+        .back-link svg { width: 20px; height: 20px; }
+        .header h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 700; margin-bottom: 15px; }
+        .header p { font-size: 18px; opacity: 0.9; }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+            position: relative;
+            z-index: 2;
+        }
+        .card {
+            background: var(--white);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h2 .icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, rgba(46, 125, 50, 0.1) 0%, rgba(76, 175, 80, 0.15) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        h3 {
+            color: var(--dark);
+            font-size: 18px;
+            font-weight: 600;
+            margin: 25px 0 15px;
+        }
+        p { color: var(--gray); margin-bottom: 15px; }
+        ul, ol {
+            padding-left: 0;
+            margin-bottom: 15px;
+            list-style: none;
+        }
+        li {
+            color: var(--gray);
+            padding: 8px 0 8px 28px;
+            position: relative;
+        }
+        li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 16px;
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+        }
+        ol { counter-reset: step; }
+        ol li { counter-increment: step; }
+        ol li::before {
+            content: counter(step);
+            width: 24px;
+            height: 24px;
+            background: var(--gradient);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            top: 10px;
+        }
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .alert {
+            padding: 20px 25px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+        .alert-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .alert-warning {
+            background: linear-gradient(135deg, rgba(255, 193, 7, 0.1) 0%, rgba(255, 193, 7, 0.05) 100%);
+            border-left: 4px solid var(--warning);
+        }
+        .alert-info {
+            background: linear-gradient(135deg, rgba(23, 162, 184, 0.1) 0%, rgba(23, 162, 184, 0.05) 100%);
+            border-left: 4px solid var(--info);
+        }
+        .alert-content h4 {
+            color: var(--dark);
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .alert-content p { margin: 0; font-size: 14px; }
+
+        .steps-box {
+            background: linear-gradient(135deg, rgba(46, 125, 50, 0.05) 0%, rgba(76, 175, 80, 0.05) 100%);
+            border-radius: 16px;
+            padding: 25px 30px;
+            margin: 20px 0;
+        }
+        .steps-box ol li {
+            padding: 12px 0 12px 40px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 32px;
+            border-radius: 14px;
+            font-weight: 600;
+            font-size: 15px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+            box-shadow: 0 8px 25px rgba(220, 53, 69, 0.25);
+        }
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(220, 53, 69, 0.3);
+            text-decoration: none;
+        }
+        .btn svg { width: 20px; height: 20px; }
+
+        .footer {
+            background: var(--dark);
+            color: white;
+            padding: 30px 5%;
+            text-align: center;
+        }
+        .footer p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; }
+        .footer a { color: var(--primary-light); }
+
+        @media (max-width: 600px) {
+            .header { padding: 80px 5% 40px; }
+            .card { padding: 25px; border-radius: 16px; }
+            h2 { font-size: 20px; }
+            .btn { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="index.html" class="back-link">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg>
+                Volver al inicio
+            </a>
+            <h1>Eliminar Cuenta</h1>
+            <p>Cómo eliminar tu cuenta y datos personales</p>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="card">
+            <p>En Oasis Taxi respetamos tu derecho a eliminar tu cuenta y datos personales en cualquier momento. Esta página explica el proceso y las consecuencias de eliminar tu cuenta.</p>
+
+            <div class="alert alert-warning">
+                <span class="alert-icon">⚠️</span>
+                <div class="alert-content">
+                    <h4>Advertencia Importante</h4>
+                    <p>La eliminación de cuenta es <strong>permanente e irreversible</strong>. Todos tus datos serán eliminados y no podrán recuperarse.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📱</span> Opción 1: Desde la Aplicación</h2>
+            <p>La forma más rápida de eliminar tu cuenta:</p>
+            <div class="steps-box">
+                <ol>
+                    <li>Abre la aplicación <strong>Oasis Taxi</strong></li>
+                    <li>Ve a <strong>Perfil</strong> (icono de usuario)</li>
+                    <li>Selecciona <strong>Configuración</strong></li>
+                    <li>Toca <strong>Cuenta</strong></li>
+                    <li>Selecciona <strong>Eliminar cuenta</strong></li>
+                    <li>Confirma tu identidad con tu contraseña</li>
+                    <li>Lee la información y confirma la eliminación</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📧</span> Opción 2: Por Correo Electrónico</h2>
+            <p>Si no puedes acceder a tu cuenta, envía un correo a:</p>
+            <p style="font-size: 20px; font-weight: 600; color: var(--primary-dark); margin: 15px 0;">
+                <a href="mailto:eliminar-cuenta@oasistaxis.com">eliminar-cuenta@oasistaxis.com</a>
+            </p>
+            <p>Incluye la siguiente información para verificar tu identidad:</p>
+            <ul>
+                <li>Número de teléfono registrado</li>
+                <li>Correo electrónico de la cuenta</li>
+                <li>Nombre completo</li>
+                <li>Motivo de la eliminación (opcional)</li>
+            </ul>
+            <p><strong>Procesaremos tu solicitud en un plazo máximo de 30 días.</strong></p>
+
+            <a href="mailto:eliminar-cuenta@oasistaxis.com?subject=Solicitud de eliminación de cuenta&body=Hola,%0A%0ASolicito la eliminación de mi cuenta en Oasis Taxi.%0A%0AMis datos son:%0A- Teléfono: %0A- Email: %0A- Nombre: %0A%0AGracias." class="btn btn-danger">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19,4H5A3,3 0 0,0 2,7V17A3,3 0 0,0 5,20H19A3,3 0 0,0 22,17V7A3,3 0 0,0 19,4M19,8L12,13L5,8V7L12,12L19,7V8Z"/></svg>
+                Solicitar Eliminación por Email
+            </a>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🗑️</span> Qué se Elimina</h2>
+            <p>Al eliminar tu cuenta, se borrarán permanentemente:</p>
+            <ul>
+                <li>Tu perfil e información personal</li>
+                <li>Historial de viajes</li>
+                <li>Direcciones guardadas y favoritos</li>
+                <li>Métodos de pago asociados</li>
+                <li>Calificaciones y comentarios que hayas dado</li>
+                <li>Preferencias y configuraciones</li>
+                <li>Mensajes del chat</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📂</span> Qué se Conserva</h2>
+            <div class="alert alert-info">
+                <span class="alert-icon">ℹ️</span>
+                <div class="alert-content">
+                    <h4>Datos retenidos por razones legales</h4>
+                    <p>Algunos datos se conservan temporalmente según lo requiere la ley.</p>
+                </div>
+            </div>
+            <ul>
+                <li><strong>Registros de transacciones:</strong> 5 años (obligación fiscal)</li>
+                <li><strong>Datos de seguridad:</strong> 1 año (prevención de fraude)</li>
+                <li><strong>Registros legales:</strong> Según lo requiera la ley</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⚠️</span> Consecuencias de Eliminar tu Cuenta</h2>
+            <ul>
+                <li>No podrás usar la aplicación con el mismo número de teléfono durante 30 días</li>
+                <li>Perderás cualquier saldo o crédito en tu billetera</li>
+                <li>No podrás recuperar tu historial de viajes</li>
+                <li>Las calificaciones que recibiste también se eliminarán</li>
+                <li>Si eres conductor, tu perfil de conductor se desactivará</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🚗</span> Para Conductores</h2>
+            <p>Si eres conductor, antes de eliminar tu cuenta asegúrate de:</p>
+            <ul>
+                <li>Completar todos los viajes pendientes</li>
+                <li>Retirar cualquier saldo pendiente en tu billetera</li>
+                <li>No tener disputas o reclamos abiertos</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⏱️</span> Plazo de Eliminación</h2>
+            <ul>
+                <li><strong>Desde la app:</strong> Inmediato (algunos datos hasta 30 días)</li>
+                <li><strong>Por correo:</strong> Máximo 30 días</li>
+                <li><strong>Datos retenidos por ley:</strong> Según el período legal aplicable</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">💭</span> ¿Cambiar de Opinión?</h2>
+            <p>Durante las primeras <strong>24 horas</strong> después de solicitar la eliminación, puedes cancelar el proceso iniciando sesión en la aplicación. Después de este período, la eliminación es irreversible.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📧</span> Contacto</h2>
+            <p>Si tienes preguntas sobre la eliminación de tu cuenta:</p>
+            <ul>
+                <li>Soporte general: <a href="mailto:soporte@oasistaxis.com">soporte@oasistaxis.com</a></li>
+                <li>Eliminación de cuenta: <a href="mailto:eliminar-cuenta@oasistaxis.com">eliminar-cuenta@oasistaxis.com</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2025 Oasis Taxi. Todos los derechos reservados. | <a href="index.html">Inicio</a> | <a href="privacidad.html">Privacidad</a></p>
+    </footer>
+</body>
+</html>

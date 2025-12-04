@@ -1,13 +1,15 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter
+// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, unused_import
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // 🔐 NUEVO: Cargar variables de entorno desde .env
+import 'generated/l10n/app_localizations.dart'; // ✅ NUEVO: Localizaciones generadas
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_analytics/firebase_analytics.dart'; // ✅ NUEVO: Analytics
-import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ NUEVO: App Check
+import 'package:firebase_app_check/firebase_app_check.dart'; // ✅ NUEVO: App Check con Play Integrity
 import 'firebase_options.dart';
 import 'firebase_messaging_handler.dart';
 
@@ -28,6 +30,8 @@ import 'providers/location_provider.dart';
 import 'providers/ride_provider.dart';
 import 'providers/notification_provider.dart';
 import 'providers/price_negotiation_provider.dart';
+import 'providers/locale_provider.dart'; // ✅ NUEVO: Provider para cambio de idioma
+import 'providers/preferences_provider.dart'; // ✅ NUEVO: Provider para Dark Mode y preferencias
 import 'models/trip_model.dart';
 
 // Screens
@@ -37,6 +41,7 @@ import 'screens/auth/modern_register_screen.dart';
 import 'screens/auth/forgot_password_screen.dart';
 import 'screens/auth/email_verification_screen.dart';
 import 'screens/auth/phone_verification_screen.dart';
+import 'screens/auth/complete_profile_screen.dart'; // ✅ NUEVO: Pantalla obligatoria para login social
 import 'screens/passenger/modern_passenger_home.dart';
 import 'screens/passenger/trip_history_screen.dart';
 import 'screens/passenger/ratings_history_screen.dart';
@@ -79,14 +84,23 @@ import 'screens/shared/trip_details_screen.dart';
 import 'screens/shared/trip_tracking_screen.dart';
 import 'screens/shared/chat_screen.dart';
 import 'screens/shared/map_picker_screen.dart';
+import 'screens/shared/upgrade_to_driver_screen.dart';
+import 'screens/shared/change_phone_number_screen.dart';
+import 'screens/driver/active_trip_screen.dart'; // Pantalla de viaje activo para conductor
+import 'screens/passenger/trip_completed_screen.dart'; // Pantalla de viaje completado para pasajero
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   AppLogger.separator('INICIANDO OASIS TAXI APP');
   AppLogger.info('Iniciando aplicación Oasis Taxi...');
-  
+
   try {
+    // 🔐 Cargar variables de entorno desde archivo .env
+    AppLogger.debug('Cargando variables de entorno desde .env');
+    await dotenv.load(fileName: '.env');
+    AppLogger.info('✅ Variables de entorno cargadas correctamente');
+
     // Configurar orientación
     AppLogger.debug('Configurando orientación de pantalla');
     await SystemChrome.setPreferredOrientations([
@@ -94,12 +108,14 @@ void main() async {
       DeviceOrientation.portraitDown,
     ]);
     
-    // Configurar la barra de estado
-    AppLogger.debug('Configurando barra de estado');
+    // ✅ ANDROID 15: Configurar la barra de estado para Edge-to-Edge
+    AppLogger.debug('Configurando barra de estado para Edge-to-Edge');
     SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent, // ✅ Transparente para edge-to-edge
         statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: Colors.transparent, // ✅ Navegación también transparente
+        systemNavigationBarIconBrightness: Brightness.dark,
       ),
     );
     
@@ -116,12 +132,16 @@ void main() async {
     await analytics.logAppOpen(); // Log de apertura de app
     AppLogger.info('✅ Firebase Analytics inicializado');
 
-    // ✅ NUEVO: Activar Firebase App Check con Debug Provider (cambiar a Play Integrity en producción)
-    AppLogger.info('Activando Firebase App Check...');
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: AndroidProvider.debug, // Para desarrollo - cambiar a playIntegrity en producción
-    );
-    AppLogger.info('✅ Firebase App Check activado (modo debug)');
+    // ✅ DESARROLLO: Firebase App Check DESHABILITADO temporalmente
+    // El App Check con Play Integrity no funciona con builds debug (no firmados)
+    // Para producción, cambiar a AndroidProvider.playIntegrity
+    AppLogger.info('Firebase App Check deshabilitado para desarrollo...');
+    // NO activar App Check en desarrollo para evitar problemas de permisos
+    // await FirebaseAppCheck.instance.activate(
+    //   androidProvider: AndroidProvider.playIntegrity,
+    //   webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'),
+    // );
+    AppLogger.info('⚠️ Firebase App Check omitido (modo desarrollo)');
 
     // Inicializar servicio Firebase
     AppLogger.info('Inicializando servicios de Firebase...');
@@ -137,24 +157,35 @@ void main() async {
     AppLogger.info('Inicializando servicio de notificaciones...');
     await NotificationService().initialize();
     AppLogger.info('✅ Servicio de notificaciones iniciado');
-    
+
+    // ✅ NUEVO: Inicializar PreferencesProvider para cargar modo oscuro y otras preferencias
+    AppLogger.info('Inicializando preferencias de usuario...');
+    final preferencesProvider = PreferencesProvider();
+    await preferencesProvider.init();
+    AppLogger.info('✅ Preferencias de usuario cargadas');
+
     AppLogger.separator('APP LISTA PARA PRODUCCIÓN');
-    runApp(OasisTaxiApp());
+    runApp(OasisTaxiApp(preferencesProvider: preferencesProvider));
     
   } catch (error, stackTrace) {
     AppLogger.error('Error crítico al inicializar la app', error, stackTrace);
-    // Intentar iniciar la app incluso con errores
-    runApp(OasisTaxiApp());
+    // Intentar iniciar la app incluso con errores, con provider por defecto
+    final fallbackProvider = PreferencesProvider();
+    runApp(OasisTaxiApp(preferencesProvider: fallbackProvider));
   }
 }
 
 class OasisTaxiApp extends StatelessWidget {
-  const OasisTaxiApp({super.key});
+  final PreferencesProvider preferencesProvider;
+
+  const OasisTaxiApp({super.key, required this.preferencesProvider});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => LocaleProvider()), // ✅ NUEVO: Provider de idioma
+        ChangeNotifierProvider.value(value: preferencesProvider), // ✅ MODIFICADO: Usar provider ya inicializado
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
         ChangeNotifierProvider(create: (_) => RideProvider()),
@@ -171,180 +202,167 @@ class OasisTaxiApp extends StatelessWidget {
               FocusManager.instance.primaryFocus?.unfocus();
             },
             behavior: HitTestBehavior.translucent, // No bloquear otros gestos
-            child: MaterialApp(
-            title: 'Oasis Taxi',
-            debugShowCheckedModeBanner: false,
-        
-        // Configurar localizaciones
-        localizationsDelegates: [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: [
-          Locale('es', 'ES'),
-          Locale('en', 'US'),
-        ],
-        locale: Locale('es', 'ES'),
-      
-        // Tema moderno con gradientes y animaciones
-        theme: ModernTheme.lightTheme,
-        darkTheme: ModernTheme.darkTheme,
-        themeMode: ThemeMode.light,
-        
-        // Tema antiguo (comentado para referencia)
-        /*theme: ThemeData(
-          primarySwatch: MaterialColor(0xFF00C800, {
-            50: Color(0xFFE0F7E0),
-            100: Color(0xFFB3E5B3),
-            200: Color(0xFF80D280),
-            300: Color(0xFF4DBF4D),
-            400: Color(0xFF26B026),
-            500: Color(0xFF00C800),
-            600: Color(0xFF00A100),
-            700: Color(0xFF008F00),
-            800: Color(0xFF007D00),
-            900: Color(0xFF006600),
-          }),
-          primaryColor: AppColors.oasisGreen,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: AppColors.oasisGreen,
-            primary: AppColors.oasisGreen,
-            secondary: AppColors.oasisBlack,
-            surface: AppColors.oasisWhite,
-            onPrimary: AppColors.oasisWhite,
-            onSecondary: AppColors.oasisWhite,
-            onSurface: AppColors.oasisBlack,
+            // ✅ CORREGIDO: Usar MaterialApp directo con animación de tema
+            child: _ThemedMaterialApp(),
           ),
-          useMaterial3: true,
-          inputDecorationTheme: InputDecorationTheme(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            filled: true,
-            fillColor: AppColors.backgroundLight,
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: AppColors.oasisGreen, width: 2),
-            ),
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              elevation: 0,
-              backgroundColor: AppColors.oasisGreen,
-              foregroundColor: AppColors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          appBarTheme: AppBarTheme(
-            backgroundColor: AppColors.oasisGreen,
-            foregroundColor: AppColors.white,
-            elevation: 0,
-            centerTitle: true,
-            titleTextStyle: TextStyle(
-              color: AppColors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-            iconTheme: IconThemeData(
-              color: AppColors.white,
-            ),
-          ),
-        ),*/
-        
-        // Ruta inicial
-        initialRoute: '/',
-        
-        // Rutas
-        routes: {
-          '/': (context) => ModernSplashScreen(),
-          '/login': (context) => ModernLoginScreen(),
-          '/register': (context) => ModernRegisterScreen(),
-          '/forgot-password': (context) => ForgotPasswordScreen(),
-          '/email-verification': (context) => EmailVerificationScreen(
-            email: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/phone-verification': (context) => PhoneVerificationScreen(
-            phoneNumber: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
+        ),
+      ),
+    );
+  }
+}
 
-          // Rutas de Pasajero
-          '/passenger/home': (context) => ModernPassengerHomeScreen(),
-          '/passenger/trip-history': (context) => TripHistoryScreen(),
-          '/passenger/ratings-history': (context) => RatingsHistoryScreen(),
-          '/passenger/payment-methods': (context) => PaymentMethodsScreen(),
-          // '/passenger/payment-method-selection': Requiere argumentos - usar Navigator.push
-          // '/passenger/emergency': Requiere argumentos - usar Navigator.push
-          '/passenger/negotiations': (context) => PassengerNegotiationsScreen(),
-          '/passenger/favorites': (context) => FavoritesScreen(),
-          '/passenger/promotions': (context) => PromotionsScreen(),
-          '/passenger/profile': (context) => ProfileScreen(),
-          '/passenger/profile-edit': (context) => ProfileEditScreen(),
-          '/passenger/trip-details': (context) => TripDetailsScreen(
-            tripId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/passenger/tracking': (context) => TripTrackingScreen(
-            rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/passenger/verification-code': (context) => TripVerificationCodeScreen(
-            trip: ModalRoute.of(context)!.settings.arguments as TripModel,
-          ),
-          
-          // Rutas de Conductor
-          '/driver/home': (context) => ModernDriverHomeScreen(),
-          '/driver/wallet': (context) => WalletScreen(),
-          '/driver/navigation': (context) => NavigationScreen(),
-          '/driver/communication': (context) => CommunicationScreen(),
-          '/driver/metrics': (context) => MetricsScreen(),
-          '/driver/vehicle-management': (context) => VehicleManagementScreen(),
-          '/driver/transactions-history': (context) => TransactionsHistoryScreen(),
-          '/driver/earnings-details': (context) => EarningsDetailsScreen(),
-          // '/driver/earnings-withdrawal': Requiere driverId - usar Navigator.push
-          '/driver/negotiations': (context) => DriverNegotiationsScreen(),
-          '/driver/documents': (context) => DocumentsScreen(),
-          '/driver/profile': (context) => DriverProfileScreen(),
-          '/driver/verification': (context) => DriverVerificationScreen(
-            trip: ModalRoute.of(context)!.settings.arguments as TripModel,
-          ),
-          
-          // Rutas de Admin
-          '/admin/login': (context) => AdminLoginScreen(),
-          '/admin/dashboard': (context) => AdminDashboardScreen(),
-          '/admin/users-management': (context) => UsersManagementScreen(),
-          '/admin/drivers-management': (context) => DriversManagementScreen(),
-          '/admin/financial': (context) => FinancialScreen(),
-          '/admin/analytics': (context) => AnalyticsScreen(),
-          '/admin/settings': (context) => SettingsAdminScreen(),
-          
-          // Rutas Compartidas
-          '/shared/chat': (context) => ChatScreen(
-            rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-            otherUserName: 'Usuario',
-            otherUserRole: 'user',
-          ),
-          '/shared/trip-details': (context) => TripDetailsScreen(
-            tripId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/shared/trip-tracking': (context) => TripTrackingScreen(
-            rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/shared/help-center': (context) => HelpCenterScreen(),
-          '/shared/settings': (context) => SettingsScreen(),
-          '/shared/about': (context) => AboutScreen(),
-          '/shared/support': (context) => SupportScreen(),
-          '/shared/notifications': (context) => NotificationsScreen(),
-          // '/shared/live-tracking-map': Requiere rideId, userType y userId - usar Navigator.push
-          '/shared/emergency-details': (context) => EmergencyDetailsScreen(
-            emergencyId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
-          ),
-          '/map-picker': (context) => MapPickerScreen(),
+// ✅ SOLUCIÓN DEFINITIVA: Usar Consumer para garantizar rebuild cuando cambia darkMode
+class _ThemedMaterialApp extends StatelessWidget {
+  const _ThemedMaterialApp();
+
+  @override
+  Widget build(BuildContext context) {
+    // ✅ Usar Consumer para garantizar que el widget se reconstruya cuando cambie darkMode
+    return Consumer<PreferencesProvider>(
+      builder: (context, prefsProvider, child) {
+        final locale = context.select<LocaleProvider, Locale>((provider) => provider.locale);
+        final darkMode = prefsProvider.darkMode;
+        final themeMode = darkMode ? ThemeMode.dark : ThemeMode.light;
+
+        // 🔍 DEBUG: Verificar rebuild
+        print('🎨 _ThemedMaterialApp rebuild - darkMode: $darkMode, themeMode: $themeMode');
+
+        return MaterialApp(
+      title: 'Oasis Taxi',
+      debugShowCheckedModeBanner: false,
+
+      // Configurar localizaciones
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('es', 'ES'),
+        Locale('en', 'US'),
+      ],
+      locale: locale,
+
+      // Tema moderno con gradientes y animaciones
+      theme: ModernTheme.lightTheme,
+      darkTheme: ModernTheme.darkTheme,
+      themeMode: themeMode,
+
+      // Ruta inicial
+      initialRoute: '/',
+
+      // Rutas
+      routes: {
+        '/': (context) => ModernSplashScreen(),
+        '/login': (context) => ModernLoginScreen(),
+        '/register': (context) => ModernRegisterScreen(),
+        '/forgot-password': (context) => ForgotPasswordScreen(),
+        '/email-verification': (context) => EmailVerificationScreen(
+          email: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/phone-verification': (context) => PhoneVerificationScreen(
+          phoneNumber: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/auth/complete-profile': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          return CompleteProfileScreen(
+            loginMethod: args?['loginMethod'] as String? ?? 'google',
+          );
         },
-            ), // Cierre de MaterialApp
-          ), // Cierre de GestureDetector
-        ), // Cierre de Builder
-      ), // Cierre de NotificationHandlerWidget
-    ); // Cierre de MultiProvider
+
+        // Rutas de Pasajero
+        '/passenger/home': (context) => ModernPassengerHomeScreen(),
+        '/passenger/trip-history': (context) => TripHistoryScreen(),
+        '/passenger/ratings-history': (context) => RatingsHistoryScreen(),
+        '/passenger/payment-methods': (context) => PaymentMethodsScreen(),
+        '/passenger/negotiations': (context) => PassengerNegotiationsScreen(),
+        '/passenger/favorites': (context) => FavoritesScreen(),
+        '/passenger/promotions': (context) => PromotionsScreen(),
+        '/passenger/profile': (context) => ProfileScreen(),
+        '/passenger/profile-edit': (context) => ProfileEditScreen(),
+        '/passenger/trip-details': (context) => TripDetailsScreen(
+          tripId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/passenger/tracking': (context) => TripTrackingScreen(
+          rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/passenger/verification-code': (context) => TripVerificationCodeScreen(
+          trip: ModalRoute.of(context)!.settings.arguments as TripModel,
+        ),
+
+        // Rutas de Conductor
+        '/driver/home': (context) => ModernDriverHomeScreen(),
+        '/driver/wallet': (context) => WalletScreen(),
+        '/driver/navigation': (context) => NavigationScreen(),
+        '/driver/communication': (context) => CommunicationScreen(),
+        '/driver/metrics': (context) => MetricsScreen(),
+        '/driver/vehicle-management': (context) => VehicleManagementScreen(),
+        '/driver/transactions-history': (context) => TransactionsHistoryScreen(),
+        '/driver/earnings-details': (context) => EarningsDetailsScreen(),
+        '/driver/negotiations': (context) => DriverNegotiationsScreen(),
+        '/driver/documents': (context) => DocumentsScreen(),
+        '/driver/profile': (context) => DriverProfileScreen(),
+        '/driver/verification': (context) => DriverVerificationScreen(
+          trip: ModalRoute.of(context)!.settings.arguments as TripModel,
+        ),
+        '/driver/active-trip': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          return ActiveTripScreen(
+            tripId: args?['tripId'] as String? ?? '',
+          );
+        },
+
+        // Rutas de Admin
+        '/admin/login': (context) => AdminLoginScreen(),
+        '/admin/dashboard': (context) => AdminDashboardScreen(),
+        '/admin/users-management': (context) => UsersManagementScreen(),
+        '/admin/drivers-management': (context) => DriversManagementScreen(),
+        '/admin/financial': (context) => FinancialScreen(),
+        '/admin/analytics': (context) => AnalyticsScreen(),
+        '/admin/settings': (context) => SettingsAdminScreen(),
+
+        // Rutas Compartidas
+        '/shared/chat': (context) => ChatScreen(
+          rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+          otherUserName: 'Usuario',
+          otherUserRole: 'user',
+        ),
+        '/shared/trip-details': (context) => TripDetailsScreen(
+          tripId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/shared/trip-tracking': (context) => TripTrackingScreen(
+          rideId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/shared/help-center': (context) => HelpCenterScreen(),
+        '/shared/settings': (context) => SettingsScreen(),
+        '/shared/about': (context) => AboutScreen(),
+        '/shared/support': (context) => SupportScreen(),
+        '/shared/notifications': (context) => NotificationsScreen(),
+        '/shared/emergency-details': (context) => EmergencyDetailsScreen(
+          emergencyId: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/shared/upgrade-to-driver': (context) => UpgradeToDriverScreen(),
+        '/upgrade-to-driver': (context) => UpgradeToDriverScreen(), // Alias corto
+        '/map-picker': (context) => MapPickerScreen(),
+        '/change-phone-number': (context) => ChangePhoneNumberScreen(
+          currentPhoneNumber: (ModalRoute.of(context)!.settings.arguments as String?) ?? '',
+        ),
+        '/trip-tracking': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          return TripTrackingScreen(
+            rideId: args?['rideId'] as String? ?? '',
+          );
+        },
+        '/trip-completed': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          return TripCompletedScreen(
+            tripId: args?['tripId'] as String? ?? '',
+          );
+        },
+      },
+    );
+      },  // Cierra builder del Consumer
+    );    // Cierra Consumer
   }
 }

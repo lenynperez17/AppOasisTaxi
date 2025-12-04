@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "app-oasis-taxi"
+  },
   "targets": {},
   "etags": {}
 }

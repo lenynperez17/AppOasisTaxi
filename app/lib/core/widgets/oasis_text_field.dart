@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../theme/app_theme.dart';
 
 class OasisTextField extends StatelessWidget {
   final String label;
@@ -73,7 +72,7 @@ class OasisTextField extends StatelessWidget {
         prefixIcon: prefixIcon != null
             ? Icon(
                 prefixIcon,
-                color: AppTheme.textSecondaryColor,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               )
             : null,
         suffixIcon: suffixIcon,
@@ -81,8 +80,10 @@ class OasisTextField extends StatelessWidget {
         floatingLabelBehavior: FloatingLabelBehavior.auto,
         filled: true,
         fillColor: enabled
-            ? (readOnly ? Colors.grey.shade100 : Colors.grey.shade50)
-            : Colors.grey.shade100,
+            ? (readOnly
+                ? Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                : Theme.of(context).colorScheme.surface)
+            : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 16,
@@ -94,35 +95,35 @@ class OasisTextField extends StatelessWidget {
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-            color: Colors.grey.shade200,
+            color: Theme.of(context).colorScheme.outline,
             width: 1,
           ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: AppTheme.primaryColor,
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.primary,
             width: 2,
           ),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: AppTheme.errorColor,
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.error,
             width: 2,
           ),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: AppTheme.errorColor,
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.error,
             width: 2,
           ),
         ),
         disabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-            color: Colors.grey.shade200,
+            color: Theme.of(context).colorScheme.outline,
             width: 1,
           ),
         ),

@@ -122,7 +122,7 @@ class LocalNotificationService {
   }) async {
     await showNotification(
       title: '🚗 Nueva solicitud de viaje',
-      body: '$passengerName necesita un viaje desde $pickupAddress - S/ $price',
+      body: '$passengerName necesita un viaje desde $pickupAddress - S/. price',
       payload: 'ride_request',
     );
   }
@@ -155,7 +155,7 @@ class LocalNotificationService {
   }) async {
     await showNotification(
       title: '✅ Viaje completado',
-      body: 'El viaje ha finalizado. Total: S/ $price',
+      body: 'El viaje ha finalizado. Total: S/. price',
       payload: 'trip_completed',
     );
   }
@@ -166,7 +166,7 @@ class LocalNotificationService {
   }) async {
     await showNotification(
       title: '💰 Pago recibido',
-      body: 'Has recibido S/ $amount por el viaje completado',
+      body: 'Has recibido S/. amount por el viaje completado',
       payload: 'payment_received',
     );
   }

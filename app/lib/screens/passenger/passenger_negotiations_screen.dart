@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/modern_theme.dart';
@@ -15,6 +16,41 @@ class PassengerNegotiationsScreen extends StatefulWidget {
 }
 
 class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScreen> {
+  // Timer para actualizar el cronómetro cada segundo
+  Timer? _countdownTimer;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ✅ NUEVO: Iniciar listener en tiempo real para recibir ofertas y cambios de status
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+      provider.startListeningToMyNegotiations();
+    });
+
+    // Iniciar timer para actualizar el cronómetro cada segundo
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          // Forzar rebuild para actualizar el cronómetro
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+
+    // ✅ Detener listener al salir
+    final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+    provider.stopListeningToNegotiations();
+
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -27,6 +63,47 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
       ),
       body: Consumer<PriceNegotiationProvider>(
         builder: (context, provider, _) {
+          // ✅ NUEVO: Detectar si alguna negociación fue aceptada (por conductor)
+          final acceptedNegotiations = provider.activeNegotiations
+              .where((n) => n.passengerId == currentUserId)
+              .where((n) => n.status == NegotiationStatus.accepted)
+              .toList();
+
+          // Si hay una negociación aceptada, navegar al tracking
+          if (acceptedNegotiations.isNotEmpty) {
+            final acceptedNeg = acceptedNegotiations.first;
+            debugPrint('🎉 Negociación aceptada detectada: ${acceptedNeg.id}');
+
+            // Guardar referencias locales antes del async para evitar use_build_context_synchronously
+            final scaffoldMessenger = ScaffoldMessenger.of(context);
+            final navigator = Navigator.of(context);
+
+            // Usar addPostFrameCallback para navegar después del build
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!mounted) return;
+
+              // Obtener el rideId desde Firestore
+              final rideId = await provider.getRideIdForNegotiation(acceptedNeg.id);
+              debugPrint('🚗 RideId obtenido: $rideId');
+
+              if (rideId != null && mounted) {
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('¡Un conductor aceptó tu viaje! Iniciando tracking...'),
+                    backgroundColor: ModernTheme.success,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                // Navegar a la pantalla de tracking
+                navigator.pushReplacementNamed(
+                  '/trip-tracking',
+                  arguments: {'rideId': rideId},
+                );
+              }
+            });
+          }
+
           final myNegotiations = provider.activeNegotiations
               .where((n) => n.passengerId == currentUserId)
               .where((n) =>
@@ -58,7 +135,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
           Icon(
             Icons.inbox_outlined,
             size: 80,
-            color: Colors.grey[400],
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
           ),
           const SizedBox(height: 16),
           Text(
@@ -66,13 +143,13 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[600],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Solicita un viaje para comenzar',
-            style: TextStyle(color: Colors.grey[500]),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
           ),
         ],
       ),
@@ -224,17 +301,17 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.hourglass_empty, color: Colors.grey[600]),
+                        Icon(Icons.hourglass_empty, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             'Esperando ofertas de conductores...',
-                            style: TextStyle(color: Colors.grey[700]),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)),
                           ),
                         ),
                       ],
@@ -289,7 +366,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
                         '${offer.completedTrips} viajes',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey[600],
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                       ),
                     ],
@@ -298,7 +375,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
                     '${offer.vehicleModel} • ${offer.vehicleColor}',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey[600],
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
@@ -353,12 +430,12 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.timer, size: 16, color: Colors.white),
+          Icon(Icons.timer, size: 16, color: Theme.of(context).colorScheme.onPrimary),
           const SizedBox(width: 4),
           Text(
             '$minutes:${seconds.toString().padLeft(2, '0')}',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.surface,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -386,7 +463,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -417,7 +494,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
       case NegotiationStatus.cancelled:
         return ModernTheme.error;
       default:
-        return Colors.grey;
+        return Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
     }
   }
 
@@ -487,18 +564,47 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
       );
 
       try {
-        provider.acceptDriverOffer(negotiationId, driverId);
+        // Mostrar loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: ModernTheme.oasisGreen),
+          ),
+        );
 
-        if (mounted) {
+        // Aceptar oferta y obtener el ID del viaje creado
+        final rideId = await provider.acceptDriverOffer(negotiationId, driverId);
+
+        // Cerrar loading
+        if (mounted) Navigator.pop(context);
+
+        if (rideId != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Oferta aceptada. ¡Tu conductor está en camino!'),
+              content: Text('¡Oferta aceptada! Tu conductor está en camino.'),
               backgroundColor: ModernTheme.success,
             ),
           );
-          Navigator.pop(context);
+
+          // Navegar a la pantalla de tracking del viaje
+          Navigator.pushReplacementNamed(
+            context,
+            '/trip-tracking',
+            arguments: {'rideId': rideId},
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error al crear el viaje. Inténtalo de nuevo.'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
         }
       } catch (e) {
+        // Cerrar loading si está abierto
+        if (mounted) Navigator.pop(context);
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

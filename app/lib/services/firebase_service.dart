@@ -17,6 +17,7 @@ import 'dart:math' as math;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../utils/logger.dart';
 import '../models/trip_model.dart';
+import '../config/oauth_config.dart'; // ✅ NUEVO: Importar configuración OAuth
 
 /// Servicio Firebase Real para Producción
 /// Maneja toda la integración con Firebase
@@ -220,88 +221,373 @@ class FirebaseService {
   /// Usuario actual
   User? get currentUser => auth.currentUser;
 
+  // ==================== VINCULACIÓN DE CUENTAS POR EMAIL ====================
+  /// Método helper para vincular cuentas OAuth al mismo email/teléfono
+  ///
+  /// REQUISITO DEL USUARIO:
+  /// "cuando quiero continuar con google o facebook o apple... si entra con
+  /// cualquiera de esos 3 debe estar asociado al mismo correo/contraseña y
+  /// numero de telefono"
+  ///
+  /// LÓGICA:
+  /// 1. Buscar si existe un usuario con ese email en Firestore
+  /// 2. Si existe:
+  ///    - Vincular el nuevo proveedor al Firebase Auth UID existente
+  ///    - Actualizar datos del usuario manteniendo info existente
+  /// 3. Si NO existe:
+  ///    - Crear nuevo usuario con los datos del proveedor
+  Future<void> _linkOrCreateUserAccount({
+    required User firebaseUser,
+    required String authProvider,
+    required Map<String, dynamic> providerData,
+  }) async {
+    try {
+      // CORREGIDO: Obtener email de múltiples fuentes
+      final String? providerEmail = providerData['email'] as String?;
+      final String? firebaseEmail = firebaseUser.email;
+
+      // Buscar también en providerData de Firebase
+      String? providerDataEmail;
+      for (final provider in firebaseUser.providerData) {
+        if (provider.email != null && provider.email!.contains('@')) {
+          providerDataEmail = provider.email;
+          break;
+        }
+      }
+
+      // Prioridad: providerEmail > providerDataEmail > firebaseEmail
+      final String? email = (providerEmail != null && providerEmail.isNotEmpty && providerEmail.contains('@'))
+          ? providerEmail
+          : (providerDataEmail ?? firebaseEmail);
+
+      AppLogger.debug('Email detection: providerEmail=$providerEmail, providerDataEmail=$providerDataEmail, firebaseEmail=$firebaseEmail, final=$email');
+      print('📧 Email detection: providerEmail=$providerEmail, providerDataEmail=$providerDataEmail, firebaseEmail=$firebaseEmail, final=$email');
+
+      // PASO 1: Verificar si ya existe documento con este UID
+      final userDoc = await firestore.collection('users').doc(firebaseUser.uid).get();
+
+      if (userDoc.exists) {
+        // CASO A: Usuario ya existe con este UID - solo actualizar
+        final existingData = userDoc.data()!;
+        final existingEmail = existingData['email'] as String?;
+
+        AppLogger.firebase('Usuario ${firebaseUser.uid} ya existe. Actualizando datos de $authProvider');
+        print('👤 Usuario ya existe, actualizando...');
+
+        await firestore.collection('users').doc(firebaseUser.uid).update({
+          'lastLoginAt': FieldValue.serverTimestamp(),
+          'authProvider': authProvider,
+          'authProviders': FieldValue.arrayUnion([authProvider]),
+          'updatedAt': FieldValue.serverTimestamp(),
+          // Actualizar email si el existente está vacío y el nuevo es válido
+          if ((existingEmail == null || existingEmail.isEmpty || !existingEmail.contains('@')) &&
+              email != null && email.contains('@'))
+            'email': email,
+          // Actualizar nombre si está vacío
+          if ((existingData['fullName'] == null || existingData['fullName'].toString().isEmpty) &&
+              providerData['fullName'] != null && providerData['fullName'].toString().isNotEmpty)
+            'fullName': providerData['fullName'],
+          // Actualizar foto de perfil si la nueva es mejor
+          if (providerData['profilePhotoUrl'] != null &&
+              providerData['profilePhotoUrl'].toString().isNotEmpty)
+            'profilePhotoUrl': providerData['profilePhotoUrl'],
+        });
+
+        AppLogger.firebase('✅ Datos de $authProvider actualizados para usuario ${firebaseUser.uid}');
+        print('✅ Usuario actualizado correctamente');
+
+      } else {
+        // CASO B: Usuario NO existe - CREAR nuevo con el UID de Firebase Auth
+        AppLogger.firebase('Usuario ${firebaseUser.uid} no existe. Creando nuevo con $authProvider');
+        print('👤 Usuario nuevo, creando documento...');
+
+        await _createNewUserAccount(firebaseUser, authProvider, providerData);
+      }
+
+    } catch (e, stackTrace) {
+      AppLogger.error('Error en _linkOrCreateUserAccount', e, stackTrace);
+      print('❌ Error en _linkOrCreateUserAccount: $e');
+      await recordError(e, stackTrace);
+      rethrow;
+    }
+  }
+
+  /// Crear nueva cuenta de usuario en Firestore
+  Future<void> _createNewUserAccount(
+    User firebaseUser,
+    String authProvider,
+    Map<String, dynamic> providerData,
+  ) async {
+    try {
+      await firestore.collection('users').doc(firebaseUser.uid).set({
+        'fullName': providerData['fullName'] ?? firebaseUser.displayName ?? '',
+        'email': providerData['email'] ?? firebaseUser.email ?? '',
+        'profilePhotoUrl': providerData['profilePhotoUrl'] ?? firebaseUser.photoURL ?? '',
+        'phoneNumber': providerData['phoneNumber'] ?? firebaseUser.phoneNumber ?? '',
+        'userType': 'passenger',
+        'isActive': true,
+        'isVerified': true,
+        'emailVerified': firebaseUser.emailVerified || authProvider != 'email',
+        'authProvider': authProvider,
+        'authProviders': [authProvider], // Lista de proveedores usados
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastLoginAt': FieldValue.serverTimestamp(),
+        'rating': 5.0,
+        'totalTrips': 0,
+        'balance': 0.0,
+        // Campos adicionales específicos del proveedor
+        if (providerData['appleUserId'] != null)
+          'appleUserId': providerData['appleUserId'],
+      });
+
+      await logEvent('${authProvider}_signup_success', {
+        'user_id': firebaseUser.uid,
+        'email': firebaseUser.email,
+      });
+
+      AppLogger.firebase('✅ Nueva cuenta creada para ${firebaseUser.email} con $authProvider');
+    } catch (e, stackTrace) {
+      AppLogger.error('Error creando nueva cuenta', e, stackTrace);
+      await recordError(e, stackTrace);
+      rethrow;
+    }
+  }
+
   /// Iniciar sesión con Google - IMPLEMENTACIÓN v7.2.0
   Future<User?> signInWithGoogle() async {
     try {
+      // 🔍 PASO 1: Inicio
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 1: Iniciando proceso de autenticación');
       AppLogger.firebase('Iniciando autenticación con Google');
       await logEvent('google_login_attempt', {});
 
-      // Obtener instancia singleton
+      // 🔍 PASO 2: Obtener instancia
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 2: Obteniendo instancia de GoogleSignIn');
       final googleSignIn = GoogleSignIn.instance;
+      print('✅ Instancia obtenida correctamente');
 
-      // Inicializar Google Sign In (obligatorio en v7.2.0)
+      // 🔍 PASO 3: Verificar Web Client ID
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 3: Verificando Web Client ID');
+      print('   📋 Web Client ID: ${OAuthConfig.googleWebClientId}');
+      print('   📋 Longitud: ${OAuthConfig.googleWebClientId.length} caracteres');
+      print('   📋 Termina en .apps.googleusercontent.com: ${OAuthConfig.googleWebClientId.endsWith('.apps.googleusercontent.com')}');
+
+      // 🔍 PASO 4: Inicializar
+      // IMPORTANTE: En google_sign_in v7+, para Android se debe usar el Web Client ID
+      // como serverClientId para que devuelva el idToken con el email
+      // Referencia: https://pub.dev/packages/google_sign_in
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 4: Inicializando GoogleSignIn');
+      print('   📋 serverClientId (Web): ${OAuthConfig.googleWebClientId}');
       await googleSignIn.initialize(
-        hostedDomain: null, // Permitir cualquier dominio
+        hostedDomain: null, // Permitir cualquier dominio (incluye Workspace/educativas)
+        // ✅ CORREGIDO: Usar Web Client ID de google-services.json (client_type: 3)
+        // Esto es NECESARIO para que el idToken incluya el email
+        serverClientId: OAuthConfig.googleWebClientId,
       );
+      print('✅ GoogleSignIn inicializado correctamente');
 
-      // Cerrar sesión previa si existe
+      // 🔍 PASO 5: Cerrar sesión previa
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 5: Cerrando sesión previa (si existe)');
       await googleSignIn.signOut();
+      print('✅ Sesión previa cerrada');
 
-      // Iniciar proceso de autenticación (reemplaza signIn())
+      // 🔍 PASO 6: Autenticar (PUNTO CRÍTICO - aquí puede fallar)
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 6: Iniciando authenticate() - PUNTO CRÍTICO');
+      print('   ⚠️ Si falla aquí, el error será capturado en el catch');
+      // IMPORTANTE: 'openid' es NECESARIO para que el email venga en el idToken
+      // Especialmente para cuentas de Google Workspace/educativas
       final GoogleSignInAccount googleUser = await googleSignIn.authenticate(
-        scopeHint: ['email', 'profile'],
+        scopeHint: [
+          'openid',  // ✅ CRÍTICO: Necesario para que email venga en idToken
+          'email',
+          'profile',
+          'https://www.googleapis.com/auth/userinfo.email',
+          'https://www.googleapis.com/auth/userinfo.profile',
+        ],
       );
+      print('✅ authenticate() completado exitosamente');
+      print('   📧 Email obtenido (raw): ${googleUser.email}');
+      print('   👤 Display name: ${googleUser.displayName}');
+      print('   🆔 ID: ${googleUser.id}');
+      print('   📷 Photo URL: ${googleUser.photoUrl}');
+      print('   🔍 Email is empty: ${googleUser.email.isEmpty}');
+      print('   🔍 Display name is null: ${googleUser.displayName == null}');
 
-      // Obtener tokens de autenticación (es un getter, no Future)
+      // ✅ SOLUCIÓN: Guardar el email real de GoogleSignInAccount para usarlo después
+      // En v7.x de google_sign_in, el email viene en googleUser.email PERO puede estar
+      // mal configurado. Guardamos el valor para pasarlo a Firestore.
+      final String googleEmail = googleUser.email;
+      print('   📧 Email guardado para Firestore: $googleEmail');
+
+      // Verificar si parece un email válido (contiene @)
+      final bool isValidEmail = googleEmail.contains('@');
+      print('   🔍 Email es válido (contiene @): $isValidEmail');
+
+      // 🔍 PASO 7: Obtener tokens
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 7: Obteniendo tokens de autenticación');
       final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+      print('✅ Tokens obtenidos');
+      print('   🔑 idToken presente: ${googleAuth.idToken != null}');
+      print('   🔑 idToken longitud: ${googleAuth.idToken?.length ?? 0} caracteres');
 
-      // Para Firebase solo necesitamos idToken
-      // Si necesitamos accessToken, usar authorizationClient.authorizeScopes()
+      // ✅ NUEVO: Extraer email del JWT idToken (google_sign_in v7.x a veces no lo expone directamente)
+      String? emailFromJwt;
+      if (googleAuth.idToken != null) {
+        try {
+          final parts = googleAuth.idToken!.split('.');
+          if (parts.length == 3) {
+            // Decodificar el payload del JWT (segunda parte)
+            String payload = parts[1];
+            // Agregar padding si es necesario
+            while (payload.length % 4 != 0) {
+              payload += '=';
+            }
+            final decoded = utf8.decode(base64Url.decode(payload));
+            final Map<String, dynamic> jwt = jsonDecode(decoded);
+            emailFromJwt = jwt['email'] as String?;
+            print('   📧 Email extraído del JWT: $emailFromJwt');
+          }
+        } catch (e) {
+          print('   ⚠️ No se pudo extraer email del JWT: $e');
+        }
+      }
+
+      // 🔍 PASO 8: Crear credential para Firebase
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 8: Creando credential de Firebase');
+      // NOTA: En google_sign_in v7.x, solo idToken está disponible (accessToken fue removido)
       final credential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
       );
+      print('✅ Credential creado correctamente');
 
-      // Autenticar en Firebase
+      // 🔍 PASO 9: Autenticar en Firebase
+      print('🔍 DEBUG GOOGLE SIGN-IN - PASO 9: Autenticando en Firebase con credential');
       final UserCredential userCredential = await auth.signInWithCredential(credential);
+      print('✅ Autenticación en Firebase exitosa');
+
       final User? user = userCredential.user;
+      print('   👤 Usuario Firebase: ${user?.email}');
+      print('   🆔 UID: ${user?.uid}');
+      print('   👤 Display Name Firebase: ${user?.displayName}');
+      print('   📷 Photo URL Firebase: ${user?.photoURL}');
+      print('   📱 Phone Number Firebase: ${user?.phoneNumber}');
+      print('   ✅ Email Verified: ${user?.emailVerified}');
+      print('   🔍 Firebase User email is null: ${user?.email == null}');
+      print('   🔍 Firebase User email is empty: ${user?.email?.isEmpty ?? true}');
+      print('   🔍 Provider Data count: ${user?.providerData.length}');
+      if (user != null && user.providerData.isNotEmpty) {
+        print('   📋 Provider Data details:');
+        for (var i = 0; i < user.providerData.length; i++) {
+          final provider = user.providerData[i];
+          print('      Provider $i: ${provider.providerId}');
+          print('      - Email: ${provider.email}');
+          print('      - Display Name: ${provider.displayName}');
+          print('      - UID: ${provider.uid}');
+        }
+      }
 
       if (user != null) {
+        // 🔍 PASO 10: Vincular o crear cuenta
+        print('🔍 DEBUG GOOGLE SIGN-IN - PASO 10: Vinculando o creando cuenta en Firestore');
         AppLogger.firebase('Login con Google exitoso', {'uid': user.uid, 'email': user.email});
 
-        // Verificar si el usuario ya existe en Firestore
-        final userDoc = await firestore.collection('users').doc(user.uid).get();
+        // CORREGIDO v2: Obtener email de múltiples fuentes con prioridad correcta
+        // 1. Email extraído del JWT idToken (más confiable en google_sign_in v7.x)
+        // 2. Firebase Auth user.email
+        // 3. providerData del usuario de Firebase
+        // 4. GoogleSignInAccount.email
+        String? emailToSave;
 
-        if (!userDoc.exists) {
-          // Crear perfil de usuario si no existe
-          await firestore.collection('users').doc(user.uid).set({
-            'fullName': user.displayName ?? '',
-            'email': user.email ?? '',
-            'profilePhotoUrl': user.photoURL ?? '',
-            'userType': 'passenger',
-            'isActive': true,
-            'isVerified': true, // Google ya verifica el email
-            'emailVerified': true,
-            'authProvider': 'google',
-            'createdAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'rating': 5.0,
-            'totalTrips': 0,
-            'balance': 0.0,
-          });
-
-          await logEvent('google_signup_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
-        } else {
-          // Actualizar último login
-          await firestore.collection('users').doc(user.uid).update({
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'authProvider': 'google',
-          });
-
-          await logEvent('google_login_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
+        // Prioridad 1: Email del JWT (más confiable)
+        if (emailFromJwt != null && emailFromJwt.contains('@')) {
+          emailToSave = emailFromJwt;
+          print('   📧 Usando email del JWT: $emailToSave');
         }
 
+        // Prioridad 2: Firebase Auth user.email
+        if ((emailToSave == null || emailToSave.isEmpty) &&
+            user.email != null && user.email!.isNotEmpty && user.email!.contains('@')) {
+          emailToSave = user.email;
+          print('   📧 Usando email de Firebase Auth: $emailToSave');
+        }
+
+        // Prioridad 3: providerData
+        if (emailToSave == null || emailToSave.isEmpty || !emailToSave.contains('@')) {
+          for (final provider in user.providerData) {
+            if (provider.email != null && provider.email!.contains('@')) {
+              emailToSave = provider.email;
+              print('   📧 Email encontrado en providerData: $emailToSave');
+              break;
+            }
+          }
+        }
+
+        // Prioridad 4: GoogleSignInAccount.email
+        if ((emailToSave == null || emailToSave.isEmpty || !emailToSave.contains('@')) && isValidEmail) {
+          emailToSave = googleEmail;
+          print('   📧 Usando email de GoogleSignInAccount: $emailToSave');
+        }
+
+        print('   📧 Email FINAL a guardar en Firestore: $emailToSave');
+
+        // ✅ NUEVO: Actualizar email en Firebase Auth si está vacío
+        if ((user.email == null || user.email!.isEmpty) && emailToSave != null && emailToSave.contains('@')) {
+          try {
+            await user.verifyBeforeUpdateEmail(emailToSave);
+            print('   ✅ Email actualizado en Firebase Auth');
+          } catch (e) {
+            // Si falla verifyBeforeUpdateEmail, intentamos actualizar el perfil de otra manera
+            print('   ⚠️ No se pudo actualizar email en Auth (puede requerir re-autenticación): $e');
+          }
+        }
+
+        await _linkOrCreateUserAccount(
+          firebaseUser: user,
+          authProvider: 'google',
+          providerData: {
+            'fullName': googleUser.displayName ?? user.displayName ?? '',
+            'email': emailToSave ?? '',
+            'profilePhotoUrl': googleUser.photoUrl ?? user.photoURL ?? '',
+            'phoneNumber': user.phoneNumber,
+          },
+        );
+        print('✅ Cuenta vinculada/creada correctamente');
+
+        await logEvent('google_login_success', {
+          'user_id': user.uid,
+          'email': user.email,
+        });
+
+        print('🎉 DEBUG GOOGLE SIGN-IN - PROCESO COMPLETADO EXITOSAMENTE');
         return user;
       }
 
+      print('⚠️ DEBUG GOOGLE SIGN-IN - Usuario es null después de autenticación');
       return null;
     } catch (e, stackTrace) {
+      // 🔍 CAPTURA DETALLADA DE ERROR
+      print('❌ DEBUG GOOGLE SIGN-IN - ERROR CAPTURADO:');
+      print('   📛 Tipo de error: ${e.runtimeType}');
+      print('   📝 Mensaje: $e');
+      print('   📍 Stack trace:');
+      print(stackTrace.toString());
+
+      // Identificar el tipo específico de error
+      if (e.toString().contains('PlatformException')) {
+        print('   🔴 ERROR DE PLATAFORMA (PlatformException)');
+      } else if (e.toString().contains('GoogleSignInException')) {
+        print('   🔴 ERROR DE GOOGLE SIGN-IN (GoogleSignInException)');
+      } else if (e.toString().contains('FirebaseAuthException')) {
+        print('   🔴 ERROR DE FIREBASE AUTH (FirebaseAuthException)');
+      } else if (e.toString().contains('NETWORK')) {
+        print('   🔴 ERROR DE RED');
+      } else if (e.toString().contains('API_KEY')) {
+        print('   🔴 ERROR DE API KEY');
+      } else if (e.toString().contains('BLOCKED')) {
+        print('   🔴 ERROR DE BLOQUEO (cliente bloqueado)');
+      }
+
       AppLogger.error('Error en login con Google', e, stackTrace);
       await recordError(e, stackTrace);
       rethrow;
@@ -349,51 +635,29 @@ class FirebaseService {
       
       if (user != null) {
         AppLogger.firebase('Login con Facebook exitoso', {'uid': user.uid, 'email': user.email});
-        
+
         // Obtener datos adicionales del usuario desde Facebook
         final userData = await FacebookAuth.instance.getUserData(
           fields: "name,email,picture.width(200)",
         );
-        
-        // Verificar si el usuario ya existe en Firestore
-        final userDoc = await firestore.collection('users').doc(user.uid).get();
-        
-        if (!userDoc.exists) {
-          // Crear perfil de usuario si no existe
-          await firestore.collection('users').doc(user.uid).set({
+
+        // ✅ NUEVA LÓGICA: Vincular o crear cuenta basada en email
+        await _linkOrCreateUserAccount(
+          firebaseUser: user,
+          authProvider: 'facebook',
+          providerData: {
             'fullName': userData['name'] ?? user.displayName ?? '',
             'email': userData['email'] ?? user.email ?? '',
             'profilePhotoUrl': userData['picture']?['data']?['url'] ?? user.photoURL ?? '',
-            'userType': 'passenger',
-            'isActive': true,
-            'isVerified': true, // Facebook ya verifica el email
-            'emailVerified': true,
-            'authProvider': 'facebook',
-            'createdAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'rating': 5.0,
-            'totalTrips': 0,
-            'balance': 0.0,
-          });
-          
-          await logEvent('facebook_signup_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
-        } else {
-          // Actualizar último login
-          await firestore.collection('users').doc(user.uid).update({
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'authProvider': 'facebook',
-          });
-          
-          await logEvent('facebook_login_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
-        }
-        
+            'phoneNumber': user.phoneNumber,
+          },
+        );
+
+        await logEvent('facebook_login_success', {
+          'user_id': user.uid,
+          'email': user.email,
+        });
+
         return user;
       }
       
@@ -422,12 +686,18 @@ class FirebaseService {
       final nonce = _sha256ofString(rawNonce);
       
       // Solicitar credenciales de Apple
+      // ✅ CORREGIDO: Agregar webAuthenticationOptions para Android
       final appleCredential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
         nonce: nonce,
+        // ✅ NUEVO: webAuthenticationOptions requerido para Android
+        webAuthenticationOptions: WebAuthenticationOptions(
+          clientId: OAuthConfig.appleServiceId,
+          redirectUri: Uri.parse(OAuthConfig.appleRedirectUri),
+        ),
       );
       
       // Crear credencial OAuth para Firebase
@@ -442,53 +712,31 @@ class FirebaseService {
       
       if (user != null) {
         AppLogger.firebase('Login con Apple exitoso', {'uid': user.uid, 'email': user.email});
-        
-        // Verificar si el usuario ya existe en Firestore
-        final userDoc = await firestore.collection('users').doc(user.uid).get();
-        
-        if (!userDoc.exists) {
-          // Construir nombre completo desde Apple
-          String fullName = '';
-          if (appleCredential.givenName != null || appleCredential.familyName != null) {
-            fullName = '${appleCredential.givenName ?? ''} ${appleCredential.familyName ?? ''}'.trim();
-          }
-          
-          // Crear perfil de usuario si no existe
-          await firestore.collection('users').doc(user.uid).set({
+
+        // Construir nombre completo desde Apple
+        String fullName = '';
+        if (appleCredential.givenName != null || appleCredential.familyName != null) {
+          fullName = '${appleCredential.givenName ?? ''} ${appleCredential.familyName ?? ''}'.trim();
+        }
+
+        // ✅ NUEVA LÓGICA: Vincular o crear cuenta basada en email
+        await _linkOrCreateUserAccount(
+          firebaseUser: user,
+          authProvider: 'apple',
+          providerData: {
             'fullName': fullName.isNotEmpty ? fullName : user.displayName ?? '',
             'email': appleCredential.email ?? user.email ?? '',
             'profilePhotoUrl': user.photoURL ?? '',
-            'userType': 'passenger',
-            'isActive': true,
-            'isVerified': true, // Apple ya verifica el email
-            'emailVerified': true,
-            'authProvider': 'apple',
+            'phoneNumber': user.phoneNumber,
             'appleUserId': appleCredential.userIdentifier,
-            'createdAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'rating': 5.0,
-            'totalTrips': 0,
-            'balance': 0.0,
-          });
-          
-          await logEvent('apple_signup_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
-        } else {
-          // Actualizar último login
-          await firestore.collection('users').doc(user.uid).update({
-            'lastLoginAt': FieldValue.serverTimestamp(),
-            'authProvider': 'apple',
-          });
-          
-          await logEvent('apple_login_success', {
-            'user_id': user.uid,
-            'email': user.email,
-          });
-        }
-        
+          },
+        );
+
+        await logEvent('apple_login_success', {
+          'user_id': user.uid,
+          'email': user.email,
+        });
+
         return user;
       }
       

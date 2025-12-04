@@ -100,12 +100,19 @@ class RideProvider with ChangeNotifier {
     required String pickupAddress,
     required String destinationAddress,
     required String userId,
+    String paymentMethod = 'cash', // Método de pago: 'cash', 'wallet', 'yape_external', 'plin_external'
+    String? paymentMethodId, // ID opcional del método de pago
   }) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
+      // Determinar si el pago es fuera de la app (modelo InDriver)
+      final bool isPaidOutsideApp = paymentMethod == 'cash' ||
+                                     paymentMethod == 'yape_external' ||
+                                     paymentMethod == 'plin_external';
+
       // Crear documento del viaje
       final tripData = {
         'userId': userId,
@@ -125,10 +132,14 @@ class RideProvider with ChangeNotifier {
         'estimatedFare': _calculateFare(pickupLocation, destinationLocation),
         'driverId': null,
         'vehicleInfo': null,
+        // ✅ Campos de pago (modelo InDriver)
+        'paymentMethod': paymentMethod,
+        'isPaidOutsideApp': isPaidOutsideApp,
+        'paymentMethodId': paymentMethodId,
       };
 
       final docRef = await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .add(tripData);
 
       // Crear el modelo del viaje
@@ -143,12 +154,51 @@ class RideProvider with ChangeNotifier {
       // Notificar a conductores cercanos
       await _notifyNearbyDrivers(pickupLocation, docRef.id);
 
+      // ✅ CORRECCIÓN: Timeout automático si no hay conductor en 5 minutos
+      Future.delayed(const Duration(minutes: 5), () async {
+        // Verificar si el viaje sigue en estado 'requested' (no aceptado)
+        if (_currentTrip?.id == docRef.id && _tripStatus == TripStatus.requested) {
+          try {
+            // Auto-cancelar por timeout
+            await FirebaseFirestore.instance
+                .collection('rides')
+                .doc(docRef.id)
+                .update({
+              'status': 'cancelled',
+              'cancelledAt': FieldValue.serverTimestamp(),
+              'cancelledBy': 'system',
+              'cancellationReason': 'No hay conductores disponibles en este momento',
+            });
+
+            _tripStatus = TripStatus.cancelled;
+            _currentTrip = null;
+            _errorMessage = 'No se encontraron conductores disponibles. Intenta de nuevo.';
+            notifyListeners();
+
+            // Notificar al pasajero
+            await _notificationService.showNotification(
+              title: 'Viaje cancelado',
+              body: 'No hay conductores disponibles en este momento',
+            );
+
+            await _firebaseService.logEvent('ride_timeout', {
+              'trip_id': docRef.id,
+              'timeout_minutes': 5,
+            });
+          } catch (e) {
+            debugPrint('❌ Error en timeout automático: $e');
+          }
+        }
+      });
+
       await _firebaseService.logEvent('ride_requested', {
         'trip_id': docRef.id,
         'pickup_lat': pickupLocation.latitude,
         'pickup_lng': pickupLocation.longitude,
         'destination_lat': destinationLocation.latitude,
         'destination_lng': destinationLocation.longitude,
+        'payment_method': paymentMethod,
+        'is_paid_outside_app': isPaidOutsideApp,
       });
 
       _isLoading = false;
@@ -173,7 +223,7 @@ class RideProvider with ChangeNotifier {
 
     try {
       await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .doc(_currentTrip!.id)
           .update({
         'status': 'cancelled',
@@ -201,6 +251,89 @@ class RideProvider with ChangeNotifier {
     }
   }
 
+  /// Completar viaje
+  /// Llamado por el conductor al finalizar el viaje
+  /// Dispara el procesamiento automático de pagos en Cloud Function
+  Future<bool> completeTrip({
+    required String tripId,
+    required double finalFare,
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      // Validar que el viaje existe y está en progreso
+      final rideDoc = await FirebaseFirestore.instance
+          .collection('rides')
+          .doc(tripId)
+          .get();
+
+      if (!rideDoc.exists) {
+        throw Exception('Viaje no encontrado: $tripId');
+      }
+
+      final rideData = rideDoc.data();
+      if (rideData == null) {
+        throw Exception('Datos del viaje no disponibles');
+      }
+
+      final currentStatus = rideData['status'];
+      if (currentStatus != 'in_progress') {
+        throw Exception('El viaje no está en progreso (estado actual: $currentStatus)');
+      }
+
+      if (finalFare <= 0) {
+        throw Exception('La tarifa final debe ser mayor a 0');
+      }
+
+      // Actualizar viaje a completado
+      await FirebaseFirestore.instance
+          .collection('rides')
+          .doc(tripId)
+          .update({
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+        'finalFare': finalFare,
+      });
+
+      // ✅ Este cambio de status dispara onRideStatusUpdate en Cloud Function
+      // que ejecuta processCompletedTripPayment() automáticamente
+
+      debugPrint('✅ Viaje completado: $tripId con tarifa S/. ${finalFare.toStringAsFixed(2)}');
+
+      // Actualizar estado local
+      if (_currentTrip?.id == tripId) {
+        _currentTrip = _currentTrip!.copyWith(
+          status: 'completed',
+          completedAt: DateTime.now(),
+          finalFare: finalFare,
+        );
+        _tripStatus = TripStatus.completed;
+      }
+
+      // Log del evento
+      await _firebaseService.logEvent('ride_completed', {
+        'trip_id': tripId,
+        'final_fare': finalFare,
+        'payment_method': rideData['paymentMethod'] ?? 'unknown',
+        'is_paid_outside_app': rideData['isPaidOutsideApp'] ?? false,
+      });
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+
+    } catch (e) {
+      _errorMessage = 'Error completando viaje: $e';
+      debugPrint('❌ Error completando viaje: $e');
+      await _firebaseService.recordError(e, null);
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Calificar viaje
   Future<bool> rateTrip(String tripId, double rating, String? comment) async {
     _isLoading = true;
@@ -208,7 +341,7 @@ class RideProvider with ChangeNotifier {
 
     try {
       await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .update({
         'passengerRating': rating,
@@ -239,7 +372,7 @@ class RideProvider with ChangeNotifier {
   Future<void> loadTripHistory(String userId) async {
     try {
       final query = await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .where('userId', isEqualTo: userId)
           .orderBy('requestedAt', descending: true)
           .limit(50)
@@ -268,13 +401,13 @@ class RideProvider with ChangeNotifier {
 
     _tripSubscription?.cancel();
     _tripSubscription = FirebaseFirestore.instance
-        .collection('trips')
+        .collection('rides')
         .doc(_currentTrip!.id)
         .snapshots()
         .listen((snapshot) {
       if (snapshot.exists) {
         final data = snapshot.data() as Map<String, dynamic>;
-        
+
         _currentTrip = TripModel.fromJson({
           'id': snapshot.id,
           ...data,
@@ -353,8 +486,9 @@ class RideProvider with ChangeNotifier {
       }
 
       // Filtrar conductores con token FCM válido
+      final fcmService = FCMService();
       final validDrivers = _nearbyDrivers
-          .where((driver) => FCMService.isValidFCMToken(driver.fcmToken))
+          .where((driver) => driver.fcmToken != null && fcmService.isValidFCMToken(driver.fcmToken!))
           .toList();
 
       if (validDrivers.isEmpty) {
@@ -366,17 +500,16 @@ class RideProvider with ChangeNotifier {
 
       // Enviar notificaciones en paralelo usando el servicio FCM
       final successfulTokens = await _fcmService.sendRideNotificationToMultipleDrivers(
-        drivers: validDrivers,
+        driverIds: validDrivers.map((d) => d.id).toList(),
         tripId: tripId,
-        pickupAddress: _currentTrip!.pickupAddress,
-        destinationAddress: _currentTrip!.destinationAddress,
-        estimatedFare: _currentTrip!.estimatedFare,
-        estimatedDistance: _currentTrip!.estimatedDistance,
         passengerName: await _getPassengerName(),
+        origin: _currentTrip!.pickupAddress,
+        destination: _currentTrip!.destinationAddress,
+        estimatedFare: _currentTrip!.estimatedFare.toInt(),
       );
 
       // Registrar resultados
-      final successCount = successfulTokens.length;
+      final successCount = successfulTokens.values.where((v) => v).length;
       final failureCount = validDrivers.length - successCount;
 
       debugPrint('✅ Notificaciones enviadas: $successCount exitosas, $failureCount fallidas');
@@ -409,7 +542,7 @@ class RideProvider with ChangeNotifier {
     return code;
   }
 
-  /// Crear viaje con código de verificación
+  /// ✅ NUEVO: Crear viaje con código de verificación para el pasajero
   Future<TripModel?> createTripWithVerification({
     required String userId,
     required LatLng pickupLocation,
@@ -424,8 +557,9 @@ class RideProvider with ChangeNotifier {
       _errorMessage = null;
       notifyListeners();
 
-      final verificationCode = _generateVerificationCode();
-      
+      // ✅ Generar código de verificación del pasajero (4 dígitos)
+      final passengerVerificationCode = _generateVerificationCode();
+
       final tripData = {
         'userId': userId,
         'pickupLocation': {
@@ -442,12 +576,19 @@ class RideProvider with ChangeNotifier {
         'requestedAt': FieldValue.serverTimestamp(),
         'estimatedDistance': estimatedDistance,
         'estimatedFare': estimatedFare,
-        'verificationCode': verificationCode,
+        // ✅ VERIFICACIÓN MUTUA: Solo pasajero por ahora (conductor se genera al aceptar)
+        'passengerVerificationCode': passengerVerificationCode,
+        'driverVerificationCode': null, // Se genera cuando conductor acepta
+        'isPassengerVerified': false,
+        'isDriverVerified': false,
+        'verificationCompletedAt': null,
+        // Campos deprecados (compatibilidad)
+        'verificationCode': passengerVerificationCode, // Por compatibilidad
         'isVerificationCodeUsed': false,
       };
 
       final docRef = await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .add(tripData);
 
       // Obtener el documento creado
@@ -463,7 +604,7 @@ class RideProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
 
-      debugPrint('✅ Viaje creado con código de verificación: $verificationCode');
+      debugPrint('✅ Viaje creado con código de verificación del pasajero: $passengerVerificationCode');
       return trip;
     } catch (e) {
       _errorMessage = 'Error creando viaje: $e';
@@ -474,14 +615,58 @@ class RideProvider with ChangeNotifier {
     }
   }
 
-  /// Verificar código de verificación del conductor
-  Future<bool> verifyTripCode(String tripId, String enteredCode) async {
+  /// ✅ NUEVO: Generar código del conductor cuando acepta el viaje
+  Future<bool> generateDriverCodeOnAccept(String tripId, String driverId) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      // Generar código del conductor
+      final driverVerificationCode = _generateVerificationCode();
+
+      await _firebaseService.firestore
+          .collection('rides')
+          .doc(tripId)
+          .update({
+        'driverVerificationCode': driverVerificationCode,
+        'driverId': driverId,
+        'status': 'accepted',
+        'acceptedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Actualizar trip local
+      if (_currentTrip?.id == tripId) {
+        _currentTrip = _currentTrip!.copyWith(
+          driverVerificationCode: driverVerificationCode,
+          driverId: driverId,
+          status: 'accepted',
+          acceptedAt: DateTime.now(),
+        );
+        _tripStatus = TripStatus.accepted;
+      }
+
+      _isLoading = false;
+      notifyListeners();
+
+      debugPrint('✅ Código del conductor generado: $driverVerificationCode para viaje: $tripId');
+      return true;
+    } catch (e) {
+      _errorMessage = 'Error generando código del conductor: $e';
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('❌ Error generando código del conductor: $e');
+      return false;
+    }
+  }
+
+  /// ✅ NUEVO: Conductor verifica el código del pasajero
+  Future<bool> driverVerifiesPassengerCode(String tripId, String enteredCode) async {
     try {
       _isLoading = true;
       notifyListeners();
 
       final tripDoc = await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .get();
 
@@ -490,65 +675,170 @@ class RideProvider with ChangeNotifier {
       }
 
       final tripData = tripDoc.data() as Map<String, dynamic>;
-      final correctCode = tripData['verificationCode'];
-      final isCodeUsed = tripData['isVerificationCodeUsed'] ?? false;
-
-      if (isCodeUsed) {
-        _errorMessage = 'Este código ya fue utilizado';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
+      final correctCode = tripData['passengerVerificationCode'];
 
       if (enteredCode == correctCode) {
-        // Código correcto - marcar como usado y actualizar estado
+        // Código correcto - marcar que el conductor verificó al pasajero
         await _firebaseService.firestore
-            .collection('trips')
+            .collection('rides')
             .doc(tripId)
             .update({
-          'isVerificationCodeUsed': true,
-          'status': 'in_progress',
-          'startedAt': FieldValue.serverTimestamp(),
+          'isPassengerVerified': true,
         });
 
-        // Actualizar el trip local
+        // Actualizar trip local
         if (_currentTrip?.id == tripId) {
           _currentTrip = _currentTrip!.copyWith(
-            status: 'in_progress',
-            isVerificationCodeUsed: true,
-            startedAt: DateTime.now(),
+            isPassengerVerified: true,
           );
-          _tripStatus = TripStatus.inProgress;
         }
 
         _isLoading = false;
         notifyListeners();
-        
-        debugPrint('✅ Código verificado correctamente para viaje: $tripId');
+
+        debugPrint('✅ Conductor verificó al pasajero correctamente: $tripId');
         return true;
       } else {
-        _errorMessage = 'Código de verificación incorrecto';
+        _errorMessage = 'Código del pasajero incorrecto';
         _isLoading = false;
         notifyListeners();
-        
-        debugPrint('❌ Código incorrecto para viaje: $tripId');
+
+        debugPrint('❌ Código del pasajero incorrecto: $tripId');
         return false;
       }
     } catch (e) {
-      _errorMessage = 'Error verificando código: $e';
+      _errorMessage = 'Error verificando código del pasajero: $e';
       _isLoading = false;
       notifyListeners();
-      debugPrint('❌ Error verificando código: $e');
+      debugPrint('❌ Error verificando código del pasajero: $e');
       return false;
     }
   }
 
-  /// Obtener código de verificación del viaje actual
+  /// ✅ NUEVO: Pasajero verifica el código del conductor
+  Future<bool> passengerVerifiesDriverCode(String tripId, String enteredCode) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      final tripDoc = await _firebaseService.firestore
+          .collection('rides')
+          .doc(tripId)
+          .get();
+
+      if (!tripDoc.exists) {
+        throw Exception('Viaje no encontrado');
+      }
+
+      final tripData = tripDoc.data() as Map<String, dynamic>;
+      final correctCode = tripData['driverVerificationCode'];
+      final isPassengerVerified = tripData['isPassengerVerified'] ?? false;
+
+      if (enteredCode == correctCode) {
+        // Código correcto - marcar que el pasajero verificó al conductor
+        final Map<String, dynamic> updateData = {
+          'isDriverVerified': true,
+        };
+
+        // Si ambos están verificados, marcar como completo y cambiar a 'in_progress'
+        if (isPassengerVerified) {
+          updateData['verificationCompletedAt'] = FieldValue.serverTimestamp();
+          updateData['status'] = 'in_progress';
+          updateData['startedAt'] = FieldValue.serverTimestamp();
+          updateData['isVerificationCodeUsed'] = true; // Compatibilidad
+        }
+
+        await _firebaseService.firestore
+            .collection('rides')
+            .doc(tripId)
+            .update(updateData);
+
+        // Actualizar trip local
+        if (_currentTrip?.id == tripId) {
+          _currentTrip = _currentTrip!.copyWith(
+            isDriverVerified: true,
+            verificationCompletedAt: isPassengerVerified ? DateTime.now() : null,
+            status: isPassengerVerified ? 'in_progress' : _currentTrip!.status,
+            startedAt: isPassengerVerified ? DateTime.now() : _currentTrip!.startedAt,
+            isVerificationCodeUsed: isPassengerVerified, // Compatibilidad
+          );
+
+          if (isPassengerVerified) {
+            _tripStatus = TripStatus.inProgress;
+          }
+        }
+
+        _isLoading = false;
+        notifyListeners();
+
+        if (isPassengerVerified) {
+          debugPrint('✅ VERIFICACIÓN MUTUA COMPLETADA - Viaje iniciado: $tripId');
+        } else {
+          debugPrint('✅ Pasajero verificó al conductor - Esperando verificación del conductor: $tripId');
+        }
+        return true;
+      } else {
+        _errorMessage = 'Código del conductor incorrecto';
+        _isLoading = false;
+        notifyListeners();
+
+        debugPrint('❌ Código del conductor incorrecto: $tripId');
+        return false;
+      }
+    } catch (e) {
+      _errorMessage = 'Error verificando código del conductor: $e';
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('❌ Error verificando código del conductor: $e');
+      return false;
+    }
+  }
+
+  /// ⚠️ DEPRECADO: Usar driverVerifiesPassengerCode o passengerVerifiesDriverCode
+  @Deprecated('Usar driverVerifiesPassengerCode o passengerVerifiesDriverCode según corresponda')
+  Future<bool> verifyTripCode(String tripId, String enteredCode) async {
+    // Por ahora delegamos al método del conductor para compatibilidad
+    return driverVerifiesPassengerCode(tripId, enteredCode);
+  }
+
+  /// ✅ NUEVO: Obtener código de verificación del pasajero
+  String? get passengerVerificationCode {
+    return _currentTrip?.passengerVerificationCode;
+  }
+
+  /// ✅ NUEVO: Obtener código de verificación del conductor
+  String? get driverVerificationCode {
+    return _currentTrip?.driverVerificationCode;
+  }
+
+  /// ✅ NUEVO: Verificar si el conductor ya verificó al pasajero
+  bool get isPassengerVerified {
+    return _currentTrip?.isPassengerVerified ?? false;
+  }
+
+  /// ✅ NUEVO: Verificar si el pasajero ya verificó al conductor
+  bool get isDriverVerified {
+    return _currentTrip?.isDriverVerified ?? false;
+  }
+
+  /// ✅ NUEVO: Verificar si la verificación mutua está completa
+  bool get isMutualVerificationComplete {
+    return _currentTrip?.isMutualVerificationComplete ?? false;
+  }
+
+  /// ✅ NUEVO: Verificar si el viaje puede iniciar (ambos verificados)
+  bool get canStartRide {
+    return _currentTrip?.canStartRide ?? false;
+  }
+
+  /// ⚠️ DEPRECADO: Usar passengerVerificationCode en su lugar
+  @Deprecated('Usar passengerVerificationCode en su lugar')
   String? get currentTripVerificationCode {
     return _currentTrip?.verificationCode;
   }
 
-  /// Verificar si el código del viaje actual ya fue usado
+  /// ⚠️ DEPRECADO: Usar isMutualVerificationComplete en su lugar
+  @Deprecated('Usar isMutualVerificationComplete en su lugar')
   bool get isCurrentTripCodeUsed {
     return _currentTrip?.isVerificationCodeUsed ?? false;
   }
@@ -557,7 +847,7 @@ class RideProvider with ChangeNotifier {
   Future<void> markDriverArrived(String tripId) async {
     try {
       await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .update({
         'status': 'driver_arriving',
@@ -582,7 +872,7 @@ class RideProvider with ChangeNotifier {
   Future<List<TripModel>> getUserTripHistory(String userId) async {
     try {
       final query = await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .where('userId', isEqualTo: userId)
           .orderBy('requestedAt', descending: true)
           .limit(50)
@@ -608,7 +898,7 @@ class RideProvider with ChangeNotifier {
   }) async {
     try {
       Query query = _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .where('driverId', isEqualTo: driverId)
           .where('status', isEqualTo: 'completed');
 
@@ -663,7 +953,7 @@ class RideProvider with ChangeNotifier {
   Future<void> _updateNotificationMetrics(String tripId, int successCount, int failureCount) async {
     try {
       await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .update({
         'notificationMetrics': {
@@ -719,11 +1009,13 @@ class RideProvider with ChangeNotifier {
     if (_currentTrip == null) return;
 
     try {
+      // Obtener userId desde el fcmToken (necesitamos buscarlo en Firebase)
+      // Por ahora enviamos la notificación genérica
       await _fcmService.sendTripStatusNotification(
-        userFcmToken: fcmToken,
+        userId: _currentTrip!.userId, // Usamos el ID del usuario (pasajero)
         tripId: _currentTrip!.id,
         status: status,
-        additionalData: additionalData,
+        message: additionalData?['message'],
       );
     } catch (e) {
       debugPrint('Error enviando notificación de estado: $e');
@@ -735,7 +1027,7 @@ class RideProvider with ChangeNotifier {
   Future<Map<String, int>?> getTripNotificationStats(String tripId) async {
     try {
       final tripDoc = await _firebaseService.firestore
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .get();
 
@@ -814,7 +1106,7 @@ class RideProvider with ChangeNotifier {
 
       // Actualizar calificación en Firebase
       await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .update({
         'rating': rating,
@@ -826,7 +1118,7 @@ class RideProvider with ChangeNotifier {
 
       // También crear registro en la subcolección de calificaciones
       await FirebaseFirestore.instance
-          .collection('trips')
+          .collection('rides')
           .doc(tripId)
           .collection('ratings')
           .doc(userId)

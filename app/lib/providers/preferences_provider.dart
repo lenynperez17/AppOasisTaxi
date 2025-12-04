@@ -362,9 +362,13 @@ class PreferencesProvider extends ChangeNotifier {
   }
 
   Future<void> setDarkMode(bool value) async {
+    print('🌙 DEBUG: setDarkMode llamado con value=$value');
     _darkMode = value;
+    print('🌙 DEBUG: _darkMode actualizado a $_darkMode');
     await _prefs.setBool('dark_mode', value);
+    print('🌙 DEBUG: SharedPreferences guardado');
     notifyListeners();
+    print('🌙 DEBUG: notifyListeners() ejecutado');
   }
 
   Future<void> setLanguage(String value) async {

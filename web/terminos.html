@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Términos y Condiciones - Oasis Taxi</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2E7D32;
+            --primary-dark: #1B5E20;
+            --primary-light: #4CAF50;
+            --dark: #1a1a2e;
+            --gray: #6c757d;
+            --light: #f8f9fa;
+            --white: #ffffff;
+            --gradient: linear-gradient(135deg, #1B5E20 0%, #2E7D32 50%, #43A047 100%);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: var(--light); color: var(--dark); line-height: 1.8; }
+
+        .header {
+            background: var(--gradient);
+            color: white;
+            padding: 100px 5% 60px;
+            text-align: center;
+            position: relative;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -50px;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: var(--light);
+            border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+        }
+        .header-content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 30px;
+            transition: color 0.3s;
+        }
+        .back-link:hover { color: white; }
+        .back-link svg { width: 20px; height: 20px; }
+        .header h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 700; margin-bottom: 15px; }
+        .header p { font-size: 18px; opacity: 0.9; }
+        .update-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-size: 13px;
+            margin-top: 20px;
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+            position: relative;
+            z-index: 2;
+        }
+        .card {
+            background: var(--white);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h2 .icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, rgba(46, 125, 50, 0.1) 0%, rgba(76, 175, 80, 0.15) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        h3 {
+            color: var(--dark);
+            font-size: 18px;
+            font-weight: 600;
+            margin: 25px 0 12px;
+        }
+        p { color: var(--gray); margin-bottom: 15px; }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        li {
+            color: var(--gray);
+            padding: 8px 0 8px 28px;
+            position: relative;
+        }
+        li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 16px;
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+        }
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .footer {
+            background: var(--dark);
+            color: white;
+            padding: 30px 5%;
+            text-align: center;
+        }
+        .footer p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; }
+        .footer a { color: var(--primary-light); }
+
+        @media (max-width: 600px) {
+            .header { padding: 80px 5% 40px; }
+            .card { padding: 25px; border-radius: 16px; }
+            h2 { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="index.html" class="back-link">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg>
+                Volver al inicio
+            </a>
+            <h1>Términos y Condiciones</h1>
+            <p>Reglas y condiciones de uso del servicio</p>
+            <span class="update-badge">Última actualización: Diciembre 2025</span>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="card">
+            <p>Al usar la aplicación Oasis Taxi, aceptas estos términos y condiciones. Lee cuidadosamente antes de usar nuestros servicios.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📖</span> Definiciones</h2>
+            <ul>
+                <li><strong>"Aplicación":</strong> Software móvil Oasis Taxi</li>
+                <li><strong>"Usuario":</strong> Cualquier persona que use la aplicación</li>
+                <li><strong>"Pasajero":</strong> Usuario que solicita servicios de transporte</li>
+                <li><strong>"Conductor":</strong> Usuario que ofrece servicios de transporte</li>
+                <li><strong>"Viaje":</strong> Servicio de transporte contratado a través de la aplicación</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📱</span> Descripción del Servicio</h2>
+            <p>Oasis Taxi es una plataforma tecnológica que conecta pasajeros con conductores independientes. No somos una empresa de transporte; facilitamos la conexión entre usuarios.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">✓</span> Requisitos de Uso</h2>
+            <h3>Para todos los usuarios:</h3>
+            <ul>
+                <li>Ser mayor de 18 años</li>
+                <li>Proporcionar información veraz y actualizada</li>
+                <li>Mantener la confidencialidad de tu cuenta</li>
+                <li>Cumplir con las leyes locales aplicables</li>
+            </ul>
+
+            <h3>Para conductores:</h3>
+            <ul>
+                <li>Poseer licencia de conducir válida</li>
+                <li>Contar con seguro vehicular vigente</li>
+                <li>Vehículo en condiciones óptimas</li>
+                <li>Aprobar verificación de antecedentes</li>
+                <li>Cumplir con regulaciones de transporte locales</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">👍</span> Uso Aceptable</h2>
+            <p>Los usuarios se comprometen a:</p>
+            <ul>
+                <li>Tratar con respeto a otros usuarios</li>
+                <li>No discriminar por ningún motivo</li>
+                <li>No usar la aplicación para actividades ilegales</li>
+                <li>No transportar sustancias prohibidas</li>
+                <li>No acosar, amenazar o intimidar</li>
+                <li>Respetar las normas de tránsito</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">💵</span> Tarifas y Pagos</h2>
+            <ul>
+                <li>Las tarifas se establecen mediante negociación entre pasajero y conductor</li>
+                <li>El precio acordado antes del viaje es el precio final</li>
+                <li>Oasis Taxi puede cobrar una comisión por el servicio</li>
+                <li>Los pagos pueden realizarse en efectivo o medios electrónicos</li>
+                <li>Las cancelaciones pueden estar sujetas a cargos</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">❌</span> Cancelaciones</h2>
+            <ul>
+                <li>Los pasajeros pueden cancelar antes de que el conductor llegue</li>
+                <li>Cancelaciones frecuentes pueden resultar en restricciones</li>
+                <li>Los conductores pueden cancelar por razones justificadas</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">⚖️</span> Responsabilidades</h2>
+            <h3>De Oasis Taxi:</h3>
+            <ul>
+                <li>Mantener la plataforma operativa</li>
+                <li>Verificar la identidad de conductores</li>
+                <li>Proporcionar soporte al usuario</li>
+                <li>Proteger los datos personales</li>
+            </ul>
+
+            <h3>Limitaciones:</h3>
+            <p>Oasis Taxi no es responsable de:</p>
+            <ul>
+                <li>Accidentes durante los viajes</li>
+                <li>Objetos perdidos u olvidados</li>
+                <li>Comportamiento de usuarios</li>
+                <li>Interrupciones del servicio por causas externas</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🛡️</span> Seguridad</h2>
+            <ul>
+                <li>Todos los viajes son rastreados por GPS</li>
+                <li>Función de emergencia SOS disponible</li>
+                <li>Sistema de calificaciones para mantener calidad</li>
+                <li>Opción de compartir viaje con contactos</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">©️</span> Propiedad Intelectual</h2>
+            <p>Todo el contenido de la aplicación (logos, diseños, código) es propiedad de Oasis Taxi y está protegido por leyes de propiedad intelectual.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🚫</span> Suspensión y Terminación</h2>
+            <p>Podemos suspender o terminar cuentas que:</p>
+            <ul>
+                <li>Violen estos términos</li>
+                <li>Cometan fraude</li>
+                <li>Reciban calificaciones consistentemente bajas</li>
+                <li>Representen riesgo para otros usuarios</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🤝</span> Resolución de Disputas</h2>
+            <p>Las disputas se resolverán mediante:</p>
+            <ul>
+                <li>Contacto con soporte al cliente</li>
+                <li>Mediación amigable</li>
+                <li>Arbitraje según las leyes locales</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🌎</span> Ley Aplicable</h2>
+            <p>Estos términos se rigen por las leyes de la República del Perú.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📧</span> Contacto</h2>
+            <p>Para consultas sobre estos términos:</p>
+            <ul>
+                <li>Email legal: <a href="mailto:legal@oasistaxis.com">legal@oasistaxis.com</a></li>
+                <li>Soporte: <a href="mailto:soporte@oasistaxis.com">soporte@oasistaxis.com</a></li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2025 Oasis Taxi. Todos los derechos reservados. | <a href="index.html">Inicio</a> | <a href="privacidad.html">Privacidad</a></p>
+    </footer>
+</body>
+</html>

@@ -19,14 +19,14 @@ class LoadingOverlay extends StatelessWidget {
         child,
         if (isLoading)
           Container(
-            color: Colors.black54,
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   CircularProgressIndicator(
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      Theme.of(context).primaryColor,
+                      Theme.of(context).colorScheme.primary,
                     ),
                   ),
                   if (message != null) ...[
@@ -34,7 +34,7 @@ class LoadingOverlay extends StatelessWidget {
                     Text(
                       message!,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                         fontSize: 16,
                       ),
                     ),

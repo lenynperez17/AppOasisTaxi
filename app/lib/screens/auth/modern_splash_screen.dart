@@ -1,14 +1,21 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider; // ✅ Para verificar proveedores
 import 'dart:math' as math;
+import '../../generated/l10n/app_localizations.dart';
 import '../../core/theme/modern_theme.dart';
 import '../../utils/logger.dart';
+import '../../providers/auth_provider.dart';
 
+/// Pantalla de splash con animaciones modernas
+///
+/// Muestra el logo de Oasis Taxi con animaciones mientras
+/// se inicializa el AuthProvider y determina la ruta inicial
 class ModernSplashScreen extends StatefulWidget {
   const ModernSplashScreen({super.key});
 
   @override
-  _ModernSplashScreenState createState() => _ModernSplashScreenState();
+  State<ModernSplashScreen> createState() => _ModernSplashScreenState();
 }
 
 class _ModernSplashScreenState extends State<ModernSplashScreen>
@@ -31,22 +38,22 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
     AppLogger.lifecycle('ModernSplashScreen', 'initState');
     
     _logoController = AnimationController(
-      duration: Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
-    
+
     _textController = AnimationController(
-      duration: Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     _rippleController = AnimationController(
-      duration: Duration(seconds: 2),
+      duration: const Duration(seconds: 2),
       vsync: this,
     );
-    
+
     _carController = AnimationController(
-      duration: Duration(seconds: 3),
+      duration: const Duration(seconds: 3),
       vsync: this,
     );
     
@@ -101,25 +108,159 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
     _startAnimations();
   }
   
-  void _startAnimations() async {
+  Future<void> _startAnimations() async {
     AppLogger.info('Iniciando animaciones del Splash Screen');
-    await Future.delayed(Duration(milliseconds: 300));
+    await Future.delayed(const Duration(milliseconds: 300));
     _logoController.forward();
-    
-    await Future.delayed(Duration(milliseconds: 800));
+
+    await Future.delayed(const Duration(milliseconds: 800));
     _textController.forward();
     _rippleController.repeat();
     _carController.repeat();
-    
-    AppLogger.info('Esperando 3 segundos antes de navegar...');
-    await Future.delayed(Duration(seconds: 3));
-    _navigateToLogin();
-  }
-  
-  void _navigateToLogin() {
-    AppLogger.navigation('ModernSplashScreen', '/login');
+
+    AppLogger.info('Esperando a que AuthProvider se inicialice...');
+
+    // Esperar a que AuthProvider termine de inicializar (máximo 10 segundos)
     if (!mounted) return;
-    Navigator.pushReplacementNamed(context, '/login');
+    final authProvider = context.read<AuthProvider>();
+    final startTime = DateTime.now();
+    const maxWaitTime = Duration(seconds: 10);
+
+    // Esperar a que isInitializing sea false
+    while (authProvider.isInitializing &&
+           DateTime.now().difference(startTime) < maxWaitTime) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    // Esperar al menos 2 segundos totales para mostrar el splash
+    final elapsedTime = DateTime.now().difference(startTime);
+    if (elapsedTime < const Duration(seconds: 2)) {
+      await Future.delayed(const Duration(seconds: 2) - elapsedTime);
+    }
+
+    AppLogger.info('AuthProvider listo. Navegando...', {
+      'tiempoEspera': DateTime.now().difference(startTime).inMilliseconds,
+      'isAuthenticated': authProvider.isAuthenticated,
+      'hasUser': authProvider.currentUser != null,
+    });
+
+    _navigateToHome();
+  }
+
+  /// Navegar a pantalla correspondiente según estado de autenticación y modo
+  ///
+  /// Implementa navegación inteligente estilo InDriver:
+  /// - Usuario sin perfil completo → /auth/complete-profile
+  /// - Usuario dual con currentMode='passenger' → /passenger/home
+  /// - Usuario dual con currentMode='driver' → /driver/home
+  /// - Usuario passenger (puro) → /passenger/home
+  /// - Usuario driver (puro) → /driver/home
+  /// - Usuario admin → /admin/dashboard
+  /// - Sin autenticación → /login
+  void _navigateToHome() {
+    if (!mounted) return;
+
+    final authProvider = context.read<AuthProvider>();
+
+    // Verificar si hay usuario autenticado
+    if (authProvider.isAuthenticated && authProvider.currentUser != null) {
+      final user = authProvider.currentUser!;
+
+      AppLogger.info('Usuario autenticado detectado', {
+        'userId': user.id,
+        'userType': user.userType,
+        'currentMode': user.currentMode,
+        'isDualAccount': user.isDualAccount,
+      });
+
+      // ✅ NUEVO: Verificar si necesita completar perfil ANTES de navegar a home
+      if (authProvider.needsProfileCompletion()) {
+        // Determinar método de login basado en proveedores vinculados
+        String loginMethod = 'email';
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null) {
+          for (final provider in firebaseUser.providerData) {
+            if (provider.providerId == 'google.com') {
+              loginMethod = 'google';
+              break;
+            } else if (provider.providerId == 'facebook.com') {
+              loginMethod = 'facebook';
+              break;
+            } else if (provider.providerId == 'apple.com') {
+              loginMethod = 'apple';
+              break;
+            }
+          }
+        }
+
+        AppLogger.navigation('ModernSplashScreen', '/auth/complete-profile', {
+          'reason': 'Perfil incompleto - falta teléfono o contraseña',
+          'loginMethod': loginMethod,
+        });
+        Navigator.pushReplacementNamed(
+          context,
+          '/auth/complete-profile',
+          arguments: {'loginMethod': loginMethod},
+        );
+        return;
+      }
+
+      // Determinar ruta según tipo y modo
+      String route;
+
+      if (user.isAdmin) {
+        // Admin siempre va al dashboard
+        route = '/admin/dashboard';
+        AppLogger.navigation('ModernSplashScreen', route, {'reason': 'Usuario admin'});
+      } else {
+        // Usuario dual o single: usar currentMode o activeMode
+        final mode = user.activeMode; // Usa currentMode si existe, sino userType
+
+        if (mode == 'driver') {
+          // Verificar si el conductor tiene documentos aprobados
+          if (user.documentVerified) {
+            route = '/driver/home';
+            AppLogger.navigation('ModernSplashScreen', route, {
+              'reason': 'Conductor aprobado',
+              'isDual': user.isDualAccount,
+            });
+          } else {
+            // Conductor sin documentos aprobados
+            // Verificar si ya envió documentos (pending_approval) o es nuevo
+            final driverStatus = user.driverStatus ?? 'pending_documents';
+
+            if (driverStatus == 'pending_approval') {
+              // Ya envió documentos, puede usar como pasajero mientras espera
+              route = '/passenger/home';
+              AppLogger.navigation('ModernSplashScreen', route, {
+                'reason': 'Conductor esperando aprobación - usando como pasajero',
+                'driverStatus': driverStatus,
+              });
+            } else {
+              // Conductor nuevo, debe subir documentos
+              route = '/upgrade-to-driver';
+              AppLogger.navigation('ModernSplashScreen', route, {
+                'reason': 'Conductor nuevo - debe subir documentos',
+                'driverStatus': driverStatus,
+              });
+            }
+          }
+        } else {
+          // Default: modo pasajero (passenger o cualquier otro)
+          route = '/passenger/home';
+          AppLogger.navigation('ModernSplashScreen', route, {
+            'reason': 'Usuario en modo pasajero',
+            'isDual': user.isDualAccount,
+          });
+        }
+      }
+
+      Navigator.pushReplacementNamed(context, route);
+    } else {
+      // Sin autenticación → Login
+      AppLogger.navigation('ModernSplashScreen', '/login', {'reason': 'Sin autenticación'});
+      Navigator.pushReplacementNamed(context, '/login');
+    }
   }
 
   @override
@@ -162,7 +303,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.2 * (1 - animValue)),
+                          color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2 * (1 - animValue)),
                           width: 2,
                         ),
                       ),
@@ -184,13 +325,13 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                     child: Icon(
                       Icons.directions_car,
                       size: 40,
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.onPrimary,
                     ),
                   ),
                 );
               },
             ),
-            
+
             AnimatedBuilder(
               animation: _carAnimation,
               builder: (context, child) {
@@ -204,7 +345,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                       child: Icon(
                         Icons.directions_car,
                         size: 30,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                       ),
                     ),
                   ),
@@ -229,11 +370,11 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                             width: 150,
                             height: 150,
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.surface,
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
                                   blurRadius: 30,
                                   spreadRadius: 10,
                                 ),
@@ -244,7 +385,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                               children: [
                                 // Logo real de Oasis Taxi
                                 Container(
-                                  padding: EdgeInsets.all(20),
+                                  padding: const EdgeInsets.all(20),
                                   child: Image.asset(
                                     'assets/images/logo_oasis_taxi.png',
                                     width: 110,
@@ -252,7 +393,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                                     fit: BoxFit.contain,
                                     errorBuilder: (context, error, stackTrace) {
                                       // Fallback al ícono si la imagen no carga
-                                      return Icon(
+                                      return const Icon(
                                         Icons.local_taxi,
                                         size: 80,
                                         color: ModernTheme.primaryOrange,
@@ -268,11 +409,11 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                                     width: 20,
                                     height: 20,
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      color: Theme.of(context).colorScheme.surface,
                                       shape: BoxShape.circle,
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.white,
+                                          color: Theme.of(context).colorScheme.surface,
                                           blurRadius: 10,
                                           spreadRadius: 5,
                                         ),
@@ -288,8 +429,8 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                     },
                   ),
                   
-                  SizedBox(height: 40),
-                  
+                  const SizedBox(height: 40),
+
                   // Texto animado
                   AnimatedBuilder(
                     animation: Listenable.merge([_textFadeAnimation, _textSlideAnimation]),
@@ -301,32 +442,32 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                           child: Column(
                             children: [
                               Text(
-                                'OASIS TAXI',
+                                AppLocalizations.of(context)!.oasisTaxi,
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.onPrimary,
                                   fontSize: 42,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 3,
                                   shadows: [
                                     Shadow(
-                                      color: Colors.black.withValues(alpha: 0.3),
-                                      offset: Offset(2, 2),
+                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+                                      offset: const Offset(2, 2),
                                       blurRadius: 10,
                                     ),
                                   ],
                                 ),
                               ),
-                              SizedBox(height: 8),
+                              const SizedBox(height: 8),
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
+                                  color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(
-                                  'Tu viaje, tu precio',
+                                  AppLocalizations.of(context)!.tagline,
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Theme.of(context).colorScheme.onPrimary,
                                     fontSize: 18,
                                     fontWeight: FontWeight.w500,
                                     letterSpacing: 1,
@@ -339,8 +480,8 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                       );
                     },
                   ),
-                  
-                  SizedBox(height: 80),
+
+                  const SizedBox(height: 80),
                   
                   // Indicador de carga
                   AnimatedBuilder(
@@ -354,15 +495,15 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                               width: 60,
                               height: 60,
                               child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                                 strokeWidth: 3,
                               ),
                             ),
-                            SizedBox(height: 20),
+                            const SizedBox(height: 20),
                             Text(
-                              'Preparando tu experiencia...',
+                              AppLocalizations.of(context)!.preparingExperience,
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.9),
+                                color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.9),
                                 fontSize: 14,
                               ),
                             ),
@@ -386,10 +527,10 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
                   return Opacity(
                     opacity: _textFadeAnimation.value,
                     child: Text(
-                      'Versión 2.0.0',
+                      AppLocalizations.of(context)!.appVersion,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
                         fontSize: 12,
                       ),
                     ),

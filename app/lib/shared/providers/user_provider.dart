@@ -31,8 +31,10 @@ class UserProvider extends ChangeNotifier {
   String? get userPhone => _currentUser?.phone;
   String? get userPhoto => _currentUser?.profilePhotoUrl;
   
-  bool get isDriver => _currentUser?.userType == 'driver';
-  bool get isPassenger => _currentUser?.userType == 'passenger';
+  // ✅ DUAL-ACCOUNT: Usar activeMode para validar rol activo
+  // activeMode siempre retorna 'driver' o 'passenger', incluso para cuentas dual
+  bool get isDriver => _currentUser?.activeMode == 'driver';
+  bool get isPassenger => _currentUser?.activeMode == 'passenger';
   bool get isAdmin => _currentUser?.userType == 'admin';
   bool get isEmailVerified => _currentUser?.emailVerified ?? false;
   bool get isPhoneVerified => _currentUser?.phoneVerified ?? false;

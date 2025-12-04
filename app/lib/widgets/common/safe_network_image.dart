@@ -50,13 +50,13 @@ class SafeNetworkImage extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.grey.shade300,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         shape: BoxShape.circle,
       ),
       child: Icon(
         Icons.person,
         size: width * 0.6,
-        color: Colors.grey.shade600,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
       ),
     );
   }
@@ -66,13 +66,13 @@ class SafeNetworkImage extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.grey.shade300,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         shape: BoxShape.circle,
       ),
       child: Icon(
         Icons.person,
         size: width * 0.6,
-        color: Colors.grey.shade600,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
       ),
     );
   }
@@ -82,7 +82,7 @@ class SafeNetworkImage extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.grey.shade200,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         shape: BoxShape.circle,
       ),
       child: Center(
@@ -118,11 +118,11 @@ class SafeCircleAvatar extends StatelessWidget {
     if (imageUrl == null || imageUrl!.isEmpty) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: backgroundColor ?? Colors.grey.shade300,
+        backgroundColor: backgroundColor ?? Theme.of(context).colorScheme.surfaceContainerHighest,
         child: child ?? Icon(
           Icons.person,
           size: radius * 1.2,
-          color: Colors.grey.shade600,
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
         ),
       );
     }
@@ -130,7 +130,7 @@ class SafeCircleAvatar extends StatelessWidget {
     // Intentar cargar la imagen
     return CircleAvatar(
       radius: radius,
-      backgroundColor: backgroundColor ?? Colors.grey.shade300,
+      backgroundColor: backgroundColor ?? Theme.of(context).colorScheme.surfaceContainerHighest,
       backgroundImage: NetworkImage(imageUrl!),
       onBackgroundImageError: (exception, stackTrace) {
         // El error se maneja mostrando el child o ícono por defecto

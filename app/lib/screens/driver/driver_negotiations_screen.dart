@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme/modern_theme.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/currency_formatter.dart';
@@ -17,15 +19,131 @@ class DriverNegotiationsScreen extends StatefulWidget {
 }
 
 class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
+  // Timer para actualizar el cronómetro cada segundo
+  Timer? _countdownTimer;
+
+  // Stream de negociaciones en tiempo real
+  StreamSubscription<QuerySnapshot>? _negotiationsSubscription;
+  List<PriceNegotiation> _negotiations = [];
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    _loadActiveNegotiations();
+    _startCountdownTimer();
+    _listenToNegotiations();
   }
 
-  Future<void> _loadActiveNegotiations() async {
-    final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
-    await provider.loadDriverRequests();
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _negotiationsSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _startCountdownTimer() {
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          // Forzar rebuild para actualizar el cronómetro
+        });
+      }
+    });
+  }
+
+  void _listenToNegotiations() {
+    // Escuchar negociaciones en tiempo real desde Firestore
+    _negotiationsSubscription = FirebaseFirestore.instance
+        .collection('negotiations')
+        .where('status', whereIn: ['waiting', 'negotiating'])
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final now = DateTime.now();
+      final negotiations = snapshot.docs
+          .map((doc) {
+            try {
+              final data = doc.data();
+              final expiresAt = DateTime.parse(data['expiresAt'] ?? now.toIso8601String());
+
+              // Filtrar expiradas
+              if (now.isAfter(expiresAt)) return null;
+
+              return PriceNegotiation(
+                id: doc.id,
+                passengerId: data['passengerId'] ?? '',
+                passengerName: data['passengerName'] ?? 'Usuario',
+                passengerPhoto: data['passengerPhoto'] ?? '',
+                passengerRating: (data['passengerRating'] ?? 5.0).toDouble(),
+                pickup: LocationPoint(
+                  latitude: (data['pickup']?['latitude'] ?? 0.0).toDouble(),
+                  longitude: (data['pickup']?['longitude'] ?? 0.0).toDouble(),
+                  address: data['pickup']?['address'] ?? '',
+                  reference: data['pickup']?['reference'],
+                ),
+                destination: LocationPoint(
+                  latitude: (data['destination']?['latitude'] ?? 0.0).toDouble(),
+                  longitude: (data['destination']?['longitude'] ?? 0.0).toDouble(),
+                  address: data['destination']?['address'] ?? '',
+                  reference: data['destination']?['reference'],
+                ),
+                suggestedPrice: (data['suggestedPrice'] ?? 0.0).toDouble(),
+                offeredPrice: (data['offeredPrice'] ?? 0.0).toDouble(),
+                distance: (data['distance'] ?? 0.0).toDouble(),
+                estimatedTime: data['estimatedTime'] ?? 0,
+                createdAt: DateTime.parse(data['createdAt'] ?? now.toIso8601String()),
+                expiresAt: expiresAt,
+                status: _parseStatus(data['status']),
+                driverOffers: [],
+                paymentMethod: _parsePaymentMethod(data['paymentMethod']),
+                notes: data['notes'],
+              );
+            } catch (e) {
+              debugPrint('Error parsing negotiation: $e');
+              return null;
+            }
+          })
+          .whereType<PriceNegotiation>()
+          .toList();
+
+      setState(() {
+        _negotiations = negotiations;
+        _isLoading = false;
+      });
+    }, onError: (e) {
+      debugPrint('Error listening to negotiations: $e');
+      setState(() => _isLoading = false);
+    });
+  }
+
+  NegotiationStatus _parseStatus(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'waiting': return NegotiationStatus.waiting;
+      case 'negotiating': return NegotiationStatus.negotiating;
+      case 'accepted': return NegotiationStatus.accepted;
+      case 'completed': return NegotiationStatus.completed;
+      case 'cancelled': return NegotiationStatus.cancelled;
+      case 'expired': return NegotiationStatus.expired;
+      default: return NegotiationStatus.waiting;
+    }
+  }
+
+  PaymentMethod _parsePaymentMethod(String? method) {
+    switch (method?.toLowerCase()) {
+      case 'card': return PaymentMethod.card;
+      case 'wallet': return PaymentMethod.wallet;
+      default: return PaymentMethod.cash;
+    }
+  }
+
+  Future<void> _refreshNegotiations() async {
+    // El stream se actualiza automáticamente, pero podemos forzar un refresh
+    setState(() => _isLoading = true);
+    await Future.delayed(const Duration(milliseconds: 500));
+    setState(() => _isLoading = false);
   }
 
   @override
@@ -37,33 +155,24 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadActiveNegotiations,
+            onPressed: _refreshNegotiations,
           ),
         ],
       ),
-      body: Consumer<PriceNegotiationProvider>(
-        builder: (context, provider, _) {
-          final activeNegotiations = provider.driverVisibleRequests
-              .where((n) => n.status == NegotiationStatus.waiting ||
-                           n.status == NegotiationStatus.negotiating)
-              .toList();
-
-          if (activeNegotiations.isEmpty) {
-            return _buildEmptyState();
-          }
-
-          return RefreshIndicator(
-            onRefresh: _loadActiveNegotiations,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: activeNegotiations.length,
-              itemBuilder: (context, index) {
-                return _buildNegotiationCard(activeNegotiations[index]);
-              },
-            ),
-          );
-        },
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _negotiations.isEmpty
+              ? _buildEmptyState()
+              : RefreshIndicator(
+                  onRefresh: _refreshNegotiations,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _negotiations.length,
+                    itemBuilder: (context, index) {
+                      return _buildNegotiationCard(_negotiations[index]);
+                    },
+                  ),
+                ),
     );
   }
 
@@ -75,7 +184,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
           Icon(
             Icons.search_off,
             size: 80,
-            color: Colors.grey[400],
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
           ),
           const SizedBox(height: 16),
           Text(
@@ -83,13 +192,13 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[600],
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Las nuevas solicitudes aparecerán aquí',
-            style: TextStyle(color: Colors.grey[500]),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
           ),
         ],
       ),
@@ -140,6 +249,8 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       Row(
                         children: [
@@ -148,7 +259,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                           Text(
                             negotiation.passengerRating.toStringAsFixed(1),
                             style: TextStyle(
-                              color: Colors.grey[600],
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                               fontSize: 14,
                             ),
                           ),
@@ -247,18 +358,18 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.notes, size: 16, color: Colors.grey[600]),
+                        Icon(Icons.notes, size: 16, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             negotiation.notes!,
-                            style: TextStyle(color: Colors.grey[700]),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
                           ),
                         ),
                       ],
@@ -331,12 +442,12 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.timer, size: 16, color: Colors.white),
+          Icon(Icons.timer, size: 16, color: Theme.of(context).colorScheme.onPrimary),
           const SizedBox(width: 4),
           Text(
             '$minutes:${seconds.toString().padLeft(2, '0')}',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -364,7 +475,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -387,20 +498,20 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: Colors.grey[700]),
+          Icon(icon, size: 16, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
               label,
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.grey[700],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
@@ -429,7 +540,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Hacer una oferta'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -437,7 +548,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
           children: [
             Text(
               'Precio sugerido: ${negotiation.suggestedPrice.toCurrency()}',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
             ),
             Text(
               'Precio del pasajero: ${negotiation.offeredPrice.toCurrency()}',
@@ -458,27 +569,33 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
               'Ingresa el precio al que estás dispuesto a aceptar este viaje',
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
             onPressed: () async {
               final price = double.tryParse(priceController.text);
               if (price == null || price <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Ingresa un precio válido')),
-                );
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    const SnackBar(content: Text('Ingresa un precio válido')),
+                  );
+                }
                 return;
               }
 
-              Navigator.pop(context);
+              if (dialogContext.mounted) {
+                Navigator.pop(dialogContext);
+              }
+
+              if (!context.mounted) return;
 
               final provider = Provider.of<PriceNegotiationProvider>(
                 context,

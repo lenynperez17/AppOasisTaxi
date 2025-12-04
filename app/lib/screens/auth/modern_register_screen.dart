@@ -4,10 +4,13 @@ import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:async'; // Para TimeoutException
 import 'package:provider/provider.dart';
+import '../../generated/l10n/app_localizations.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart';
 import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../providers/auth_provider.dart';
 
+import '../../utils/logger.dart';
 class ModernRegisterScreen extends StatefulWidget {
   const ModernRegisterScreen({super.key});
 
@@ -82,32 +85,106 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
 
   // Función de registro real con Firebase
   Future<void> _registerUser() async {
-    print('🔍 ========================================');
-    print('🔍 _registerUser INICIO');
-    print('🔍 ========================================');
-
-    print('🔍 PASO 1: Obteniendo AuthProvider...');
+    AppLogger.debug('🔍 ========================================');
+    AppLogger.debug('🔍 _registerUser INICIO');
+    AppLogger.debug('🔍 ========================================');
+    AppLogger.debug('🔍 PASO 1: Obteniendo AuthProvider...');
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    print('🔍 AuthProvider obtenido: $authProvider');
-
+    AppLogger.debug('🔍 AuthProvider obtenido: $authProvider');
     try {
-      print('🔍 PASO 2: Iniciando bloque try...');
-      print('🔍 PASO 3: Setting _isLoading = true');
+      AppLogger.debug('🔍 PASO 2: Iniciando bloque try...');
+      AppLogger.debug('🔍 PASO 3: Setting _isLoading = true');
       setState(() => _isLoading = true);
-      print('🔍 _isLoading ahora es: $_isLoading');
-
+      AppLogger.debug('🔍 _isLoading ahora es: $_isLoading');
       // Usar el email ingresado por el usuario
-      print('🔍 PASO 4: Preparando datos de usuario...');
+      AppLogger.debug('🔍 PASO 4: Preparando datos de usuario...');
       String email = _emailController.text.trim();
-      print('🔍 Email: $email');
-      print('🔍 Password length: ${_passwordController.text.length}');
-      print('🔍 Full name: ${_nameController.text}');
-      print('🔍 Phone: ${_phoneController.text}');
-      print('🔍 User type: $_userType');
+      AppLogger.debug('🔍 Email: $email');
+      AppLogger.debug('🔍 Password length: ${_passwordController.text.length}');
+      AppLogger.debug('🔍 Full name: ${_nameController.text}');
+      AppLogger.debug('🔍 Phone: ${_phoneController.text}');
+      AppLogger.debug('🔍 User type: $_userType');
+      // ✅ NUEVO: Verificar primero si el email ya existe
+      AppLogger.debug('🔍 PASO 4.5: Verificando si email ya está registrado...');
+      final emailCheck = await authProvider.checkEmailExists(email);
+      AppLogger.debug('🔍 Resultado de verificación email: $emailCheck');
+      if (emailCheck['exists'] == true) {
+        AppLogger.debug('🔍 ⚠️ EMAIL YA EXISTE');
+        final userType = emailCheck['userType'];
 
+        if (!mounted) return;
+
+        // Mostrar diálogo profesional
+        final appLocalizations = AppLocalizations.of(context)!;
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(appLocalizations.emailAlreadyRegistered),
+            content: Text(
+              appLocalizations.emailAlreadyRegisteredMessage(email, userType)
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(appLocalizations.cancel),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/login');
+                },
+                child: Text(appLocalizations.goToLoginButton),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      AppLogger.debug('🔍 ✅ Email disponible');
+      // ✅ NUEVO: Verificar si el teléfono ya existe
+      AppLogger.debug('🔍 PASO 4.6: Verificando si teléfono ya está registrado...');
+      final phoneCheck = await authProvider.checkPhoneExists(_phoneController.text);
+      AppLogger.debug('🔍 Resultado de verificación teléfono: $phoneCheck');
+      if (phoneCheck['exists'] == true) {
+        AppLogger.debug('🔍 ⚠️ TELÉFONO YA EXISTE');
+        final existingEmail = phoneCheck['email'];
+        final userType = phoneCheck['userType'];
+
+        if (!mounted) return;
+
+        // Mostrar diálogo profesional
+        final appLocalizations = AppLocalizations.of(context)!;
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(appLocalizations.phoneAlreadyRegistered),
+            content: Text(
+              appLocalizations.phoneAlreadyRegisteredMessage(_phoneController.text, existingEmail, userType)
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(appLocalizations.cancel),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/login');
+                },
+                child: Text(appLocalizations.goToLoginButton),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // Email Y Teléfono disponibles - continuar con registro
+      AppLogger.debug('🔍 ✅ Email y teléfono disponibles, continuando con registro...');
       // Registrar usuario en Firebase CON TIMEOUT DE 30 SEGUNDOS
-      print('🔍 PASO 5: Llamando authProvider.register()...');
-      print('🔍 ⏳ ESPERANDO RESPUESTA DE FIREBASE (timeout: 30s)...');
+      AppLogger.debug('🔍 PASO 5: Llamando authProvider.register()...');
+      AppLogger.debug('🔍 ⏳ ESPERANDO RESPUESTA DE FIREBASE (timeout: 30s)...');
       final success = await authProvider.register(
         email: email,
         password: _passwordController.text,
@@ -117,32 +194,29 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
       ).timeout(
         Duration(seconds: 30),
         onTimeout: () {
-          print('🔍 ⏱️ TIMEOUT! Firebase no respondió en 30 segundos');
+          AppLogger.debug('🔍 ⏱️ TIMEOUT! Firebase no respondió en 30 segundos');
           throw TimeoutException('La conexión con Firebase tardó demasiado. Verifica tu conexión a internet e intenta nuevamente.');
         },
       );
-      print('🔍 ✅ authProvider.register() COMPLETADO');
-      print('🔍 Resultado success: $success (tipo: ${success.runtimeType})');
-
+      AppLogger.debug('🔍 ✅ authProvider.register() COMPLETADO');
+      AppLogger.debug('🔍 Resultado success: $success (tipo: ${success.runtimeType})');
       // Verificar que el widget siga montado antes de usar context
-      print('🔍 PASO 6: Verificando si widget está montado...');
+      AppLogger.debug('🔍 PASO 6: Verificando si widget está montado...');
       if (!mounted) {
-        print('🔍 ⚠️ Widget NO MONTADO - terminando función');
+        AppLogger.debug('🔍 ⚠️ Widget NO MONTADO - terminando función');
         return;
       }
-      print('🔍 ✅ Widget SÍ está montado');
-
+      AppLogger.debug('🔍 ✅ Widget SÍ está montado');
       // Si el registro fue exitoso, navegar a la pantalla de verificación de email
-      print('🔍 PASO 7: Evaluando resultado de success...');
+      AppLogger.debug('🔍 PASO 7: Evaluando resultado de success...');
       if (success) {
-        print('🔍 ✅ SUCCESS ES TRUE - navegando a /email-verification');
-        print('🔍 Email para verificación: $email');
-
+        AppLogger.debug('🔍 ✅ SUCCESS ES TRUE - navegando a /email-verification');
+        AppLogger.debug('🔍 Email para verificación: $email');
         // MOSTRAR MENSAJE DE ÉXITO EN PANTALLA
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ REGISTRO EXITOSO! Redirigiendo...'),
-            backgroundColor: Colors.green,
+            content: Text(AppLocalizations.of(context)!.registrationSuccess),
+            backgroundColor: ModernTheme.success,
             duration: Duration(seconds: 2),
           ),
         );
@@ -152,34 +226,31 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
           '/email-verification',
           arguments: email,
         );
-        print('🔍 ✅ Navegación iniciada');
+        AppLogger.debug('🔍 ✅ Navegación iniciada');
       } else {
-        print('🔍 ❌ SUCCESS ES FALSE - registro falló sin excepción');
-
+        AppLogger.debug('🔍 ❌ SUCCESS ES FALSE - registro falló sin excepción');
         // OBTENER EL ERROR ESPECÍFICO DE AUTHPROVIDER
         final errorMsg = authProvider.errorMessage ?? '❌ El registro falló. Intenta nuevamente.';
-        print('🔍 Error del AuthProvider: $errorMsg');
-
+        AppLogger.debug('🔍 Error del AuthProvider: $errorMsg');
         // MOSTRAR MENSAJE DE ERROR ESPECÍFICO EN PANTALLA
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMsg),
-            backgroundColor: Colors.orange,
+            backgroundColor: ModernTheme.warning,
             duration: Duration(seconds: 6),
           ),
         );
       }
 
     } on TimeoutException catch (e) {
-      print('🔍 ========================================');
-      print('🔍 ⏱️⏱️⏱️ TIMEOUT EXCEPTION ⏱️⏱️⏱️');
-      print('🔍 ========================================');
-      print('🔍 Firebase no respondió en 30 segundos');
-      print('🔍 Error: ${e.message}');
-      print('🔍 ========================================');
-
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 ⏱️⏱️⏱️ TIMEOUT EXCEPTION ⏱️⏱️⏱️');
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 Firebase no respondió en 30 segundos');
+      AppLogger.debug('🔍 Error: ${e.message}');
+      AppLogger.debug('🔍 ========================================');
       if (!mounted) {
-        print('🔍 Widget no montado, no se puede mostrar SnackBar');
+        AppLogger.debug('🔍 Widget no montado, no se puede mostrar SnackBar');
         return;
       }
 
@@ -191,21 +262,20 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
               '• Conexión a internet lenta o inestable\n'
               '• Configuración de Firebase incorrecta\n'
               '• Problema con el servidor de Firebase'),
-          backgroundColor: Colors.orange.shade800,
+          backgroundColor: ModernTheme.warning,
           duration: Duration(seconds: 8),
         ),
       );
     } catch (e, stackTrace) {
-      print('🔍 ========================================');
-      print('🔍 ❌❌❌ ERROR CAPTURADO EN CATCH ❌❌❌');
-      print('🔍 ========================================');
-      print('🔍 Error: ${e.toString()}');
-      print('🔍 Error type: ${e.runtimeType}');
-      print('🔍 Stack trace: $stackTrace');
-      print('🔍 ========================================');
-
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 ❌❌❌ ERROR CAPTURADO EN CATCH ❌❌❌');
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 Error: ${e.toString()}');
+      AppLogger.debug('🔍 Error type: ${e.runtimeType}');
+      AppLogger.debug('🔍 Stack trace: $stackTrace');
+      AppLogger.debug('🔍 ========================================');
       if (!mounted) {
-        print('🔍 Widget no montado, no se puede mostrar SnackBar');
+        AppLogger.debug('🔍 Widget no montado, no se puede mostrar SnackBar');
         return;
       }
 
@@ -213,20 +283,20 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error al registrar: ${e.toString()}'),
-          backgroundColor: Colors.red,
+          backgroundColor: ModernTheme.error,
           duration: Duration(seconds: 4),
         ),
       );
     } finally {
-      print('🔍 ========================================');
-      print('🔍 BLOQUE FINALLY');
-      print('🔍 ========================================');
-      print('🔍 PASO 8: Setting _isLoading = false');
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 BLOQUE FINALLY');
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 PASO 8: Setting _isLoading = false');
       setState(() => _isLoading = false);
-      print('🔍 _isLoading ahora es: $_isLoading');
-      print('🔍 ========================================');
-      print('🔍 _registerUser FINALIZADO');
-      print('🔍 ========================================');
+      AppLogger.debug('🔍 _isLoading ahora es: $_isLoading');
+      AppLogger.debug('🔍 ========================================');
+      AppLogger.debug('🔍 _registerUser FINALIZADO');
+      AppLogger.debug('🔍 ========================================');
     }
   }
 
@@ -272,13 +342,13 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                         Row(
                           children: [
                             IconButton(
-                              icon: Icon(Icons.arrow_back, color: Colors.white),
+                              icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
                               onPressed: () => Navigator.pop(context),
                             ),
                             Text(
-                              'Crear cuenta',
+                              AppLocalizations.of(context)!.createAccount,
                               style: TextStyle(
-                                color: Colors.white,
+                                color: Theme.of(context).colorScheme.onPrimary,
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -292,7 +362,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                     Container(
                       padding: EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -302,9 +372,9 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                               margin: EdgeInsets.symmetric(horizontal: 4),
                               height: 4,
                               decoration: BoxDecoration(
-                                color: index <= _currentStep 
-                                  ? Colors.white 
-                                  : Colors.white.withValues(alpha: 0.3),
+                                color: index <= _currentStep
+                                  ? Theme.of(context).colorScheme.onPrimary
+                                  : Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.3),
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
@@ -319,9 +389,9 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                         Container(
                           padding: EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.surface,
                             borderRadius: BorderRadius.circular(24),
-                            boxShadow: ModernTheme.floatingShadow,
+                            boxShadow: ModernTheme.getFloatingShadow(context),
                           ),
                           child: _buildCurrentStep(),
                         ),
@@ -351,17 +421,18 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
   }
   
   Widget _buildUserTypeStep() {
+    final appLocalizations = AppLocalizations.of(context)!;
     return Column(
       children: [
         Text(
-          '¿Cómo quieres usar Oasis Taxi?',
+          appLocalizations.howToUseOasis,
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
         SizedBox(height: 30),
-        
+
         AnimatedElevatedCard(
           onTap: () {
             setState(() {
@@ -370,7 +441,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
             });
           },
           borderRadius: 16,
-          color: _userType == 'passenger' 
+          color: _userType == 'passenger'
             ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
             : null,
           child: Padding(
@@ -395,14 +466,14 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Pasajero',
+                        appLocalizations.passenger,
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        'Solicita viajes y negocia precios',
+                        appLocalizations.requestTrips,
                         style: TextStyle(
                           color: ModernTheme.textSecondary,
                         ),
@@ -415,9 +486,9 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
             ),
           ),
         ),
-        
+
         SizedBox(height: 16),
-        
+
         AnimatedElevatedCard(
           onTap: () {
             setState(() {
@@ -426,7 +497,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
             });
           },
           borderRadius: 16,
-          color: _userType == 'driver' 
+          color: _userType == 'driver'
             ? ModernTheme.oasisBlack.withValues(alpha: 0.1)
             : null,
           child: Padding(
@@ -451,14 +522,14 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Conductor',
+                        appLocalizations.driver,
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        'Acepta viajes y gana dinero',
+                        appLocalizations.acceptTrips,
                         style: TextStyle(
                           color: ModernTheme.textSecondary,
                         ),
@@ -476,10 +547,11 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
   }
   
   Widget _buildPersonalInfoStep() {
+    final appLocalizations = AppLocalizations.of(context)!;
     return Column(
       children: [
         Text(
-          'Información personal',
+          appLocalizations.personalInfo,
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -493,19 +565,19 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
           textInputAction: TextInputAction.next, // ✅ Botón Next para ir a teléfono
           onFieldSubmitted: (_) => _phoneFocusNode.requestFocus(), // ✅ Avanza al campo de teléfono
           decoration: InputDecoration(
-            labelText: 'Nombre completo',
+            labelText: appLocalizations.fullName,
             prefixIcon: Icon(Icons.person_outline, color: ModernTheme.oasisGreen),
           ),
           validator: (value) {
             if (value == null || value.isEmpty) {
-              return 'Ingresa tu nombre';
+              return appLocalizations.enterName;
             }
             return null;
           },
         ),
-        
+
         SizedBox(height: 16),
-        
+
         TextFormField(
           controller: _phoneController,
           focusNode: _phoneFocusNode, // ✅ FocusNode configurado
@@ -513,30 +585,30 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
           textInputAction: TextInputAction.next, // ✅ Botón Next para ir a email
           onFieldSubmitted: (_) => _emailFocusNode.requestFocus(), // ✅ Avanza al campo de email
           decoration: InputDecoration(
-            labelText: 'Número de teléfono',
+            labelText: appLocalizations.phoneNumber,
             prefixIcon: Icon(Icons.phone, color: ModernTheme.oasisGreen),
             prefixText: '+51 ',
-            helperText: '9 dígitos',
+            helperText: appLocalizations.nineDigits,
           ),
           validator: (value) {
             if (value == null || value.isEmpty) {
-              return 'Ingresa tu número';
+              return appLocalizations.enterPhoneNumberShort;
             }
             // Validar formato peruano: 9 dígitos
             final phoneRegex = RegExp(r'^\d{9}$');
             if (!phoneRegex.hasMatch(value)) {
-              return 'Debe tener exactamente 9 dígitos';
+              return appLocalizations.mustBeNineDigits;
             }
             // Validar que empiece con 9 (típico de móviles en Perú)
             if (!value.startsWith('9')) {
-              return 'Número móvil debe empezar con 9';
+              return appLocalizations.mustStartWith9;
             }
             return null;
           },
         ),
-        
+
         SizedBox(height: 16),
-        
+
         TextFormField(
           controller: _emailController,
           focusNode: _emailFocusNode, // ✅ FocusNode configurado
@@ -548,22 +620,22 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
             }
           },
           decoration: InputDecoration(
-            labelText: 'Correo electrónico',
+            labelText: appLocalizations.email,
             prefixIcon: Icon(Icons.email_outlined, color: ModernTheme.oasisGreen),
           ),
           validator: (value) {
             if (value == null || value.isEmpty) {
-              return 'Ingresa tu correo';
+              return appLocalizations.enterEmail;
             }
             if (!value.contains('@')) {
-              return 'Ingresa un correo válido';
+              return appLocalizations.enterValidEmail;
             }
             return null;
           },
         ),
-        
+
         SizedBox(height: 24),
-        
+
         Row(
           children: [
             Expanded(
@@ -577,14 +649,14 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                     borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                child: Text('Atrás'),
+                child: Text(appLocalizations.back),
               ),
             ),
             SizedBox(width: 16),
             Expanded(
               flex: 2,
               child: AnimatedPulseButton(
-                text: 'Continuar',
+                text: appLocalizations.continueButton,
                 onPressed: () {
                   if (_formKey.currentState!.validate()) {
                     setState(() => _currentStep = 2);
@@ -599,10 +671,11 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
   }
 
   Widget _buildAccountStep() {
+    final appLocalizations = AppLocalizations.of(context)!;
     return Column(
       children: [
         Text(
-          'Crea tu contraseña',
+          appLocalizations.createPassword,
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -617,40 +690,40 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
           textInputAction: TextInputAction.next, // ✅ Botón Next para ir a confirmar contraseña
           onFieldSubmitted: (_) => _confirmPasswordFocusNode.requestFocus(), // ✅ Avanza al campo de confirmar contraseña
           decoration: InputDecoration(
-            labelText: 'Contraseña',
+            labelText: appLocalizations.password,
             prefixIcon: Icon(Icons.lock_outline, color: ModernTheme.oasisGreen),
             suffixIcon: IconButton(
               icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
               onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
             ),
-            helperText: 'Mín. 8 caracteres: MAYÚSCULA, minúscula, número y especial (!@#\$%)',
+            helperText: appLocalizations.passwordRequirements,
             helperMaxLines: 2,
           ),
           validator: (value) {
             if (value == null || value.isEmpty) {
-              return 'Ingresa una contraseña';
+              return appLocalizations.enterPasswordShort;
             }
             if (value.length < 8) {
-              return 'Mínimo 8 caracteres';
+              return appLocalizations.minimumEightChars;
             }
             if (!value.contains(RegExp(r'[A-Z]'))) {
-              return 'Debe incluir al menos una MAYÚSCULA';
+              return appLocalizations.mustIncludeUppercase;
             }
             if (!value.contains(RegExp(r'[a-z]'))) {
-              return 'Debe incluir al menos una minúscula';
+              return appLocalizations.mustIncludeLowercase;
             }
             if (!value.contains(RegExp(r'[0-9]'))) {
-              return 'Debe incluir al menos un número';
+              return appLocalizations.mustIncludeNumber;
             }
             if (!value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'))) {
-              return 'Debe incluir un carácter especial (!@#\$%^&*)';
+              return appLocalizations.mustIncludeSpecialChar;
             }
             return null;
           },
         ),
-        
+
         SizedBox(height: 16),
-        
+
         TextFormField(
           controller: _confirmPasswordController,
           focusNode: _confirmPasswordFocusNode, // ✅ FocusNode configurado
@@ -662,7 +735,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
             }
           },
           decoration: InputDecoration(
-            labelText: 'Confirmar contraseña',
+            labelText: appLocalizations.confirmPassword,
             prefixIcon: Icon(Icons.lock_outline, color: ModernTheme.oasisGreen),
             suffixIcon: IconButton(
               icon: Icon(_obscureConfirmPassword ? Icons.visibility : Icons.visibility_off),
@@ -671,41 +744,41 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
           ),
           validator: (value) {
             if (value != _passwordController.text) {
-              return 'Las contraseñas no coinciden';
+              return appLocalizations.passwordsDoNotMatch;
             }
             return null;
           },
         ),
-        
+
         SizedBox(height: 20),
 
         Container(
           decoration: BoxDecoration(
             color: _acceptTerms
               ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
-              : Colors.red.withValues(alpha: 0.05),
+              : ModernTheme.error.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: _acceptTerms
                 ? ModernTheme.oasisGreen.withValues(alpha: 0.3)
-                : Colors.red.withValues(alpha: 0.2),
+                : ModernTheme.error.withValues(alpha: 0.2),
               width: 1,
             ),
           ),
           child: CheckboxListTile(
             value: _acceptTerms,
             onChanged: (value) {
-              print('🔍 Checkbox changed: $value');
+              AppLogger.debug('🔍 Checkbox changed: $value');
               setState(() {
                 _acceptTerms = value!;
-                print('🔍 _acceptTerms ahora es: $_acceptTerms');
+                AppLogger.debug('🔍 _acceptTerms ahora es: $_acceptTerms');
               });
             },
             title: Text(
-              'Acepto los términos y condiciones',
+              appLocalizations.acceptTerms,
               style: TextStyle(
                 fontSize: 14,
-                color: _acceptTerms ? Colors.black87 : Colors.red.shade700,
+                color: _acceptTerms ? context.primaryText : ModernTheme.error,
                 fontWeight: _acceptTerms ? FontWeight.normal : FontWeight.w600,
               ),
             ),
@@ -713,10 +786,10 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
               ? Padding(
                   padding: EdgeInsets.only(top: 4),
                   child: Text(
-                    'Debes aceptar los términos para continuar',
+                    appLocalizations.mustAcceptTerms,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.red.shade600,
+                      color: ModernTheme.error,
                     ),
                   ),
                 )
@@ -727,7 +800,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
         ),
 
         SizedBox(height: 24),
-        
+
         Row(
           children: [
             Expanded(
@@ -741,7 +814,7 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
                     borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                child: Text('Atrás'),
+                child: Text(appLocalizations.back),
               ),
             ),
             SizedBox(width: 16),
@@ -749,29 +822,30 @@ class _ModernRegisterScreenState extends State<ModernRegisterScreen>
               flex: 2,
               child: ElevatedButton(
                 onPressed: _acceptTerms ? () async {
-                  print('🔍🔍🔍 ELEVATED BUTTON TAP!!!');
-                  print('🔍 _acceptTerms: $_acceptTerms');
-                  print('🔍 _isLoading: $_isLoading');
+                  AppLogger.debug('🔍🔍🔍 ELEVATED BUTTON TAP!!!');
+                  AppLogger.debug('🔍 _acceptTerms: $_acceptTerms');
+                  AppLogger.debug('🔍 _isLoading: $_isLoading');
                   // MOSTRAR EN PANTALLA para que el usuario VEA que el botón detectó el click
+                  final appLocalizations = AppLocalizations.of(context)!;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('✅ BOTÓN PRESIONADO!'),
-                      backgroundColor: Colors.blue,
+                      content: Text(appLocalizations.buttonPressed),
+                      backgroundColor: ModernTheme.info,
                       duration: Duration(seconds: 2),
                     ),
                   );
                   if (_formKey.currentState!.validate()) {
-                    print('🔍 EJECUTANDO _registerUser()');
+                    AppLogger.debug('🔍 EJECUTANDO _registerUser()');
                     await _registerUser();
                   }
                 } : null,
                 style: ElevatedButton.styleFrom(
                   padding: EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: Colors.green,
+                  backgroundColor: ModernTheme.success,
                 ),
                 child: _isLoading
-                    ? CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    : Text('CREAR CUENTA', style: TextStyle(fontSize: 16, color: Colors.white)),
+                    ? CircularProgressIndicator(color: Theme.of(context).colorScheme.onPrimary, strokeWidth: 2)
+                    : Text(appLocalizations.createAccountButton, style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onPrimary)),
               ),
             ),
           ],

@@ -5,6 +5,8 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
+import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart';
 import '../../services/tracking_service.dart';
 import '../../services/firebase_service.dart';
 import '../../widgets/loading_overlay.dart';
@@ -108,8 +110,8 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
 
   Future<void> _loadCustomIcons() async {
     try {
-      _driverIcon = await _createCustomIcon('🚗', Colors.blue);
-      _destinationIcon = await _createCustomIcon('🏁', Colors.red);
+      _driverIcon = await _createCustomIcon('🚗', ModernTheme.info);
+      _destinationIcon = await _createCustomIcon('🏁', ModernTheme.error);
     } catch (e) {
       debugPrint('Error cargando íconos: $e');
       // Usar íconos por defecto si hay error
@@ -136,7 +138,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
 
     // Dibujar borde
     final borderPaint = Paint()
-      ..color = Colors.white
+      ..color = ModernTheme.oasisWhite
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4.0;
     
@@ -290,7 +292,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
           Polyline(
             polylineId: const PolylineId('route'),
             points: _decodePolyline(routePolyline),
-            color: _hasDeviation ? Colors.orange : Colors.blue,
+            color: _hasDeviation ? ModernTheme.warning : ModernTheme.info,
             width: 5,
             patterns: _hasDeviation ? [PatternItem.dash(20), PatternItem.gap(10)] : [],
           ),
@@ -381,7 +383,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
       SnackBar(
         content: Row(
           children: [
-            const Icon(Icons.warning, color: Colors.white),
+            Icon(Icons.warning, color: Theme.of(context).colorScheme.onPrimary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -391,11 +393,11 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
             ),
           ],
         ),
-        backgroundColor: Colors.orange,
+        backgroundColor: ModernTheme.warning,
         duration: const Duration(seconds: 5),
         action: SnackBarAction(
           label: 'VER',
-          textColor: Colors.white,
+          textColor: Theme.of(context).colorScheme.onPrimary,
           onPressed: () {
             if (_currentDriverLocation != null) {
               _centerMapOnRoute();
@@ -412,7 +414,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.red,
+        backgroundColor: ModernTheme.error,
         duration: const Duration(seconds: 4),
       ),
     );
@@ -502,9 +504,9 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
               top: MediaQuery.of(context).padding.top + 8,
               left: 8,
               child: CircleAvatar(
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.surface,
                 child: IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  icon: Icon(Icons.arrow_back, color: context.primaryText),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ),
@@ -536,13 +538,13 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _hasDeviation ? Colors.orange : Colors.green,
+                    color: _hasDeviation ? ModernTheme.warning : ModernTheme.success,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     _hasDeviation ? 'DESVIADO' : 'EN RUTA',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onPrimary,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -558,7 +560,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
                     icon: Icons.access_time,
                     label: 'ETA',
                     value: _formatETA(),
-                    color: Colors.blue,
+                    color: ModernTheme.info,
                   ),
                 ),
                 Expanded(
@@ -566,7 +568,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
                     icon: Icons.straighten,
                     label: 'Distancia',
                     value: _formatDistance(_totalDistance),
-                    color: Colors.green,
+                    color: ModernTheme.success,
                   ),
                 ),
                 if (_hasDeviation)
@@ -575,7 +577,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
                       icon: Icons.warning,
                       label: 'Estado',
                       value: 'Desviado',
-                      color: Colors.orange,
+                      color: ModernTheme.warning,
                     ),
                   ),
               ],
@@ -600,7 +602,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey.shade600,
+            color: context.secondaryText,
           ),
         ),
         Text(
@@ -618,7 +620,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
   Widget _buildFollowButton() {
     return FloatingActionButton(
       mini: true,
-      backgroundColor: _followDriver ? Colors.blue : Colors.grey,
+      backgroundColor: _followDriver ? ModernTheme.info : context.secondaryText,
       onPressed: () {
         setState(() {
           _followDriver = !_followDriver;
@@ -629,7 +631,7 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
       },
       child: Icon(
         Icons.my_location,
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.onPrimary,
       ),
     );
   }
@@ -637,11 +639,11 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
   Widget _buildCenterButton() {
     return FloatingActionButton(
       mini: true,
-      backgroundColor: Colors.green,
+      backgroundColor: ModernTheme.success,
       onPressed: _centerMapOnRoute,
-      child: const Icon(
+      child: Icon(
         Icons.center_focus_strong,
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.onPrimary,
       ),
     );
   }
@@ -649,15 +651,15 @@ class _LiveTrackingMapScreenState extends State<LiveTrackingMapScreen>
   Widget _buildRefreshButton() {
     return FloatingActionButton(
       mini: true,
-      backgroundColor: Colors.orange,
+      backgroundColor: ModernTheme.warning,
       onPressed: () async {
         setState(() => _isLoading = true);
         await _loadTrackingInfo();
         setState(() => _isLoading = false);
       },
-      child: const Icon(
+      child: Icon(
         Icons.refresh,
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.onPrimary,
       ),
     );
   }

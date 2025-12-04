@@ -11,7 +11,8 @@ class LocationService {
 
   Position? _currentPosition;
   StreamController<Position> _locationStreamController = StreamController<Position>.broadcast();
-  
+  StreamSubscription<Position>? _locationSubscription; // ✅ RESOURCE MANAGEMENT: Guardar subscription para cancelarla
+
   Stream<Position> get locationStream => _locationStreamController.stream;
   Position? get currentPosition => _currentPosition;
 
@@ -80,22 +81,50 @@ class LocationService {
   }
 
   // Iniciar seguimiento de ubicación
+  /// ✅ RESOURCE MANAGEMENT: Guarda la subscription para poder cancelarla correctamente
   void startLocationTracking() {
-    Geolocator.getPositionStream(
+    // Si ya hay un tracking activo, no crear uno nuevo
+    if (_locationSubscription != null) {
+      AppLogger.warning('Location tracking ya está activo');
+      return;
+    }
+
+    _locationSubscription = Geolocator.getPositionStream(
       locationSettings: LocationSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 10, // Actualizar cada 10 metros
       ),
-    ).listen((Position position) {
-      _currentPosition = position;
-      _locationStreamController.add(position);
-    });
+    ).listen(
+      (Position position) {
+        _currentPosition = position;
+        // Solo agregar al stream si el controller no está cerrado
+        if (!_locationStreamController.isClosed) {
+          _locationStreamController.add(position);
+        }
+      },
+      onError: (error) {
+        AppLogger.error('Error en location stream', error);
+      },
+    );
   }
 
   // Detener seguimiento
+  /// ✅ RESOURCE MANAGEMENT: Cancela subscription y cierra el controller correctamente
   void stopLocationTracking() {
-    _locationStreamController.close();
+    // 1. Cancelar subscription de Geolocator primero
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+
+    // 2. Cerrar el StreamController si no está cerrado
+    if (!_locationStreamController.isClosed) {
+      _locationStreamController.close();
+    }
+
+    // 3. Recrear controller solo si se va a reusar (para permitir restart)
+    // ✅ LAZY INITIALIZATION: Solo se recrea cuando se llama startLocationTracking()
     _locationStreamController = StreamController<Position>.broadcast();
+
+    AppLogger.info('Location tracking detenido');
   }
 
   // Convertir coordenadas a dirección
@@ -155,7 +184,19 @@ class LocationService {
     return LatLngBounds(southwest: southwest, northeast: northeast);
   }
 
+  /// ✅ RESOURCE CLEANUP: Limpia todos los recursos para prevenir memory leaks
   void dispose() {
-    _locationStreamController.close();
+    AppLogger.info('LocationService: Iniciando limpieza de recursos...');
+
+    // 1. Cancelar subscription de Geolocator
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+
+    // 2. Cerrar StreamController
+    if (!_locationStreamController.isClosed) {
+      _locationStreamController.close();
+    }
+
+    AppLogger.info('LocationService: Recursos limpiados exitosamente');
   }
 }

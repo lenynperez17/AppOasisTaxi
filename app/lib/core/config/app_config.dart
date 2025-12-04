@@ -1,11 +1,47 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConfig {
   // API Configuration
-  static const String apiBaseUrl = String.fromEnvironment('apiBaseUrl', defaultValue: 'https://api.oasistaxi.com.pe/v1');
-  
-  // Google Maps API Keys - Configuración centralizada desde .env
-  static const String googleMapsApiKey = String.fromEnvironment('googleMapsApiKey', defaultValue: '');
-  static const String googlePlacesApiKey = String.fromEnvironment('googlePlacesApiKey', defaultValue: '');
-  static const String googleDirectionsApiKey = String.fromEnvironment('googleDirectionsApiKey', defaultValue: '');
+  static const String apiBaseUrl = 'https://api.oasistaxi.com.pe/v1';
+
+  // 🔐 GOOGLE MAPS API KEY - Cargada desde archivo .env
+  // ============================================================================
+  // ✅ CONFIGURACIÓN AUTOMÁTICA - Solo configura una vez en el archivo .env
+  //
+  // INSTRUCCIONES SIMPLES:
+  // 1. Copia .env.example a .env en la carpeta app/
+  //    Comando: cp .env.example .env
+  //
+  // 2. Edita .env y reemplaza GOOGLE_MAPS_API_KEY con tu API Key real
+  //
+  // 3. Ejecuta: flutter run
+  //    ¡Sin parámetros adicionales! La app carga automáticamente el .env
+  //
+  // El archivo .env está en .gitignore - tus credenciales están seguras.
+  //
+  // La API Key debe tener restricciones configuradas en Google Cloud Console:
+  // - Android: Restringir por SHA-1/SHA-256 del keystore
+  // - iOS: Restringir por Bundle ID
+  // - APIs habilitadas: Places API, Directions API, Geocoding API
+  // ============================================================================
+  static String get googleMapsApiKey {
+    final key = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+    if (key.isEmpty || key.startsWith('X')) {
+      throw Exception(
+        '⚠️ Google Maps API Key no configurada.\n\n'
+        'Por favor:\n'
+        '1. Copia .env.example a .env\n'
+        '2. Edita .env y configura tu GOOGLE_MAPS_API_KEY\n'
+        '3. Ejecuta: flutter pub get\n'
+        '4. Ejecuta: flutter run\n'
+      );
+    }
+    return key;
+  }
+
+  // Alias para compatibilidad con código existente
+  static String get googlePlacesApiKey => googleMapsApiKey;
+  static String get googleDirectionsApiKey => googleMapsApiKey;
   
   // Environment Configuration
   static const String environment = String.fromEnvironment('environment', defaultValue: 'development');

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_service.dart';
 import 'location_service.dart';
 import '../utils/logger.dart';
@@ -31,7 +32,8 @@ class EmergencyService {
 
   final FirebaseService _firebaseService = FirebaseService();
   final LocationService _locationService = LocationService();
-  
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   bool _initialized = false;
   bool _emergencyActive = false;
   String? _activeEmergencyId;
@@ -267,7 +269,7 @@ class EmergencyService {
     }
   }
 
-  /// Agregar contacto de emergencia
+  /// ✅ IMPLEMENTACIÓN REAL: Agregar contacto de emergencia a Firebase (subcolección)
   Future<bool> addEmergencyContact({
     required String userId,
     required String name,
@@ -276,20 +278,21 @@ class EmergencyService {
   }) async {
     try {
       if (!_validatePeruvianPhoneNumber(phoneNumber)) {
+        debugPrint('🚨 EmergencyService: Número de teléfono inválido');
         return false;
       }
 
-      final contact = EmergencyContact(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: name,
-        phoneNumber: phoneNumber,
-        relationship: relationship,
-      );
-
-      final userRef = _firebaseService.firestore.collection('users').doc(userId);
-      
-      await userRef.update({
-        'emergencyContacts': FieldValue.arrayUnion([contact.toMap()])
+      // Guardar en subcolección emergency_contacts
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('emergency_contacts')
+          .add({
+        'name': name,
+        'phoneNumber': phoneNumber,
+        'relationship': relationship,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       await _firebaseService.analytics.logEvent(
@@ -300,9 +303,81 @@ class EmergencyService {
         },
       );
 
+      AppLogger.info('✅ Contacto de emergencia agregado exitosamente');
       return true;
     } catch (e) {
-      debugPrint('🚨 EmergencyService: Error agregando contacto - $e');
+      AppLogger.error('Error agregando contacto de emergencia', e);
+      return false;
+    }
+  }
+
+  /// ✅ NUEVO: Actualizar contacto de emergencia
+  Future<bool> updateEmergencyContact({
+    required String userId,
+    required String contactId,
+    required String name,
+    required String phoneNumber,
+    required String relationship,
+  }) async {
+    try {
+      if (!_validatePeruvianPhoneNumber(phoneNumber)) {
+        debugPrint('🚨 EmergencyService: Número de teléfono inválido');
+        return false;
+      }
+
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('emergency_contacts')
+          .doc(contactId)
+          .update({
+        'name': name,
+        'phoneNumber': phoneNumber,
+        'relationship': relationship,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await _firebaseService.analytics.logEvent(
+        name: 'emergency_contact_updated',
+        parameters: {
+          'user_id': userId,
+          'contact_id': contactId,
+        },
+      );
+
+      AppLogger.info('✅ Contacto de emergencia actualizado exitosamente');
+      return true;
+    } catch (e) {
+      AppLogger.error('Error actualizando contacto de emergencia', e);
+      return false;
+    }
+  }
+
+  /// ✅ NUEVO: Eliminar contacto de emergencia
+  Future<bool> deleteEmergencyContact({
+    required String userId,
+    required String contactId,
+  }) async {
+    try {
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('emergency_contacts')
+          .doc(contactId)
+          .delete();
+
+      await _firebaseService.analytics.logEvent(
+        name: 'emergency_contact_deleted',
+        parameters: {
+          'user_id': userId,
+          'contact_id': contactId,
+        },
+      );
+
+      AppLogger.info('✅ Contacto de emergencia eliminado exitosamente');
+      return true;
+    } catch (e) {
+      AppLogger.error('Error eliminando contacto de emergencia', e);
       return false;
     }
   }
@@ -316,27 +391,35 @@ class EmergencyService {
         return [];
       }
 
-      // Implementar servicio de contactos real
+      // ✅ IMPLEMENTACIÓN REAL: Obtener contactos de emergencia desde Firebase
       try {
-        // Implementación básica que devuelve contactos de emergencia configurados
-        // En una implementación completa, esto se conectaría con los contactos del dispositivo
-        final emergencyContacts = [
-          EmergencyContact(
-            id: 'emergency_1',
-            name: 'Contacto de Emergencia 1',
-            phoneNumber: '+51987654321',
-            relationship: 'Familiar',
-          ),
-          EmergencyContact(
-            id: 'emergency_2', 
-            name: 'Contacto de Emergencia 2',
-            phoneNumber: '+51987654322',
-            relationship: 'Amigo',
-          ),
-        ];
+        // Obtener usuario actual
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          return [];
+        }
+
+        // Obtener contactos de emergencia desde Firestore
+        final contactsSnapshot = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('emergency_contacts')
+            .orderBy('createdAt', descending: false)
+            .get();
+
+        final emergencyContacts = contactsSnapshot.docs.map((doc) {
+          final data = doc.data();
+          return EmergencyContact(
+            id: doc.id,
+            name: data['name'] ?? '',
+            phoneNumber: data['phoneNumber'] ?? '',
+            relationship: data['relationship'] ?? '',
+          );
+        }).toList();
+
         return emergencyContacts;
       } catch (e) {
-        AppLogger.error('Error obteniendo contactos de emergencia', e);
+        AppLogger.error('Error obteniendo contactos de emergencia desde Firebase', e);
         return [];
       }
 

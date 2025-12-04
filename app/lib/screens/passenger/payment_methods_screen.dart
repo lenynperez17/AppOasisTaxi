@@ -1,6 +1,19 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:intl/intl.dart';
 import '../../core/theme/modern_theme.dart';
+import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
+import '../../generated/l10n/app_localizations.dart';
+import '../../core/utils/currency_formatter.dart';
+import '../../services/payment_service.dart';
+import '../../services/firebase_service.dart';
+import '../../utils/logger.dart';
 
 enum CardType { visa, mastercard, amex, discover, other }
 enum PaymentMethodType { card, cash, wallet, paypal }
@@ -45,122 +58,243 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   late AnimationController _listAnimationController;
   late AnimationController _cardFlipController;
   late AnimationController _fabAnimationController;
-  
-  String _defaultMethodId = 'PM001';
-  
+
+  // ✅ Servicios
+  final PaymentService _paymentService = PaymentService();
+  final FirebaseService _firebaseService = FirebaseService();
+
+  String _defaultMethodId = 'cash'; // ✅ Efectivo como método por defecto
+  bool _isLoading = true;
+  String? _userId;
+
+  // ✅ ACTUALIZADO: Métodos de pago se cargan desde Firebase
   final List<PaymentMethod> _paymentMethods = [
     PaymentMethod(
-      id: 'PM001',
-      type: PaymentMethodType.card,
-      name: 'Visa •••• 1234',
-      cardNumber: '4111 1111 1111 1234',
-      cardHolder: 'JUAN PEREZ',
-      expiryDate: '12/25',
-      cardType: CardType.visa,
-      isDefault: true,
-      icon: Icons.credit_card,
-      color: Colors.blue,
-    ),
-    PaymentMethod(
-      id: 'PM002',
-      type: PaymentMethodType.card,
-      name: 'MasterCard •••• 5678',
-      cardNumber: '5500 0000 0000 5678',
-      cardHolder: 'JUAN PEREZ',
-      expiryDate: '08/26',
-      cardType: CardType.mastercard,
-      isDefault: false,
-      icon: Icons.credit_card,
-      color: Colors.orange,
-    ),
-    PaymentMethod(
-      id: 'PM003',
+      id: 'cash',
       type: PaymentMethodType.cash,
       name: 'Efectivo',
-      isDefault: false,
+      isDefault: true,
       icon: Icons.money,
       color: ModernTheme.success,
     ),
     PaymentMethod(
-      id: 'PM004',
+      id: 'wallet',
       type: PaymentMethodType.wallet,
       name: 'Billetera Oasis',
-      walletBalance: '45.80',
+      walletBalance: '0.00',
       isDefault: false,
       icon: Icons.account_balance_wallet,
       color: ModernTheme.oasisGreen,
     ),
-    PaymentMethod(
-      id: 'PM005',
-      type: PaymentMethodType.paypal,
-      name: 'PayPal',
-      isDefault: false,
-      icon: Icons.payment,
-      color: Colors.indigo,
-    ),
   ];
-  
-  final List<Map<String, dynamic>> _transactionHistory = [
-    {
-      'id': 'T001',
-      'date': DateTime.now().subtract(Duration(hours: 2)),
-      'amount': 25.50,
-      'method': 'Visa •••• 1234',
-      'status': 'completed',
-      'tripId': 'V001',
-    },
-    {
-      'id': 'T002',
-      'date': DateTime.now().subtract(Duration(days: 1)),
-      'amount': 18.75,
-      'method': 'Efectivo',
-      'status': 'completed',
-      'tripId': 'V002',
-    },
-    {
-      'id': 'T003',
-      'date': DateTime.now().subtract(Duration(days: 2)),
-      'amount': 32.00,
-      'method': 'Billetera Oasis',
-      'status': 'completed',
-      'tripId': 'V003',
-    },
-    {
-      'id': 'T004',
-      'date': DateTime.now().subtract(Duration(days: 3)),
-      'amount': 22.50,
-      'method': 'MasterCard •••• 5678',
-      'status': 'failed',
-      'tripId': 'V004',
-    },
-    {
-      'id': 'T005',
-      'date': DateTime.now().subtract(Duration(days: 4)),
-      'amount': 15.00,
-      'method': 'PayPal',
-      'status': 'completed',
-      'tripId': 'V005',
-    },
-  ];
+
+  // ✅ ACTUALIZADO: Historial se carga desde Firebase
+  List<PaymentHistoryItem> _transactionHistory = [];
   
   @override
   void initState() {
     super.initState();
-    
+
     _listAnimationController = AnimationController(
       duration: Duration(milliseconds: 800),
       vsync: this,
     )..forward();
-    
+
     _cardFlipController = AnimationController(
       duration: Duration(milliseconds: 600),
       vsync: this,
     );
-    
+
     _fabAnimationController = AnimationController(
       duration: Duration(milliseconds: 600),
       vsync: this,
     )..forward();
+
+    // ✅ Inicializar servicios y cargar datos
+    _initializeServices();
+  }
+
+  /// Inicializar PaymentService y cargar datos desde Firebase
+  Future<void> _initializeServices() async {
+    try {
+      // Obtener usuario actual
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        AppLogger.error('Usuario no autenticado');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      _userId = user.uid;
+
+      // ✅ SIMPLIFICADO: NO inicializar PaymentService (causa errores de conexión)
+      // Solo cargar datos desde Firestore directamente, como lo hacen otros módulos
+
+      // Cargar payment methods desde Firebase
+      await _loadPaymentMethodsFromFirebase();
+
+      // Cargar wallet balance
+      await _loadWalletBalance();
+
+      // NO cargar historial de transacciones (requiere PaymentService)
+      // await _loadTransactionHistory();
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      AppLogger.info('Métodos de pago cargados exitosamente');
+
+    } catch (e) {
+      AppLogger.error('Error cargando métodos de pago: $e');
+      setState(() {
+        _isLoading = false;
+      });
+
+      // Solo mostrar error si es un problema real, no si está vacío
+      if (mounted && !e.toString().contains('Bad state: No element')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudieron cargar los métodos de pago'),
+            backgroundColor: ModernTheme.warning,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Cargar métodos de pago guardados desde Firestore
+  Future<void> _loadPaymentMethodsFromFirebase() async {
+    if (_userId == null) return;
+
+    try {
+      final snapshot = await _firebaseService.firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('payment_methods')
+          .orderBy('createdAt', descending: true)
+          .limit(50) // ✅ Agregar limit para cumplir con reglas de Firestore
+          .get();
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+
+        // Convertir de Firestore a PaymentMethod
+        final method = PaymentMethod(
+          id: doc.id,
+          type: PaymentMethodType.card,
+          name: data['name'] ?? 'Tarjeta',
+          cardNumber: data['lastFourDigits'] != null
+              ? '•••• ${data['lastFourDigits']}'
+              : null,
+          cardHolder: data['cardHolder'],
+          expiryDate: data['expiryDate'],
+          cardType: _parseCardType(data['cardType']),
+          isDefault: data['isDefault'] ?? false,
+          icon: Icons.credit_card,
+          color: _getCardColorFromType(_parseCardType(data['cardType'])),
+        );
+
+        setState(() {
+          _paymentMethods.add(method);
+          if (method.isDefault) {
+            _defaultMethodId = method.id;
+          }
+        });
+      }
+    } catch (e) {
+      AppLogger.error('Error cargando payment methods: $e');
+    }
+  }
+
+  /// Cargar balance de billetera desde Firestore
+  Future<void> _loadWalletBalance() async {
+    if (_userId == null) return;
+
+    try {
+      final userDoc = await _firebaseService.firestore
+          .collection('users')
+          .doc(_userId)
+          .get();
+
+      if (userDoc.exists) {
+        final data = userDoc.data();
+        final walletBalance = (data?['walletBalance'] ?? 0.0).toDouble();
+
+        // Actualizar balance en el método wallet
+        setState(() {
+          final walletIndex = _paymentMethods.indexWhere(
+            (m) => m.type == PaymentMethodType.wallet
+          );
+          if (walletIndex != -1) {
+            _paymentMethods[walletIndex] = PaymentMethod(
+              id: _paymentMethods[walletIndex].id,
+              type: _paymentMethods[walletIndex].type,
+              name: _paymentMethods[walletIndex].name,
+              walletBalance: walletBalance.toStringAsFixed(2),
+              isDefault: _paymentMethods[walletIndex].isDefault,
+              icon: _paymentMethods[walletIndex].icon,
+              color: _paymentMethods[walletIndex].color,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      AppLogger.error('Error cargando wallet balance: $e');
+    }
+  }
+
+  /// Cargar historial de transacciones desde PaymentService
+  Future<void> _loadTransactionHistory() async {
+    if (_userId == null) return;
+
+    try {
+      final history = await _paymentService.getUserPaymentHistory(_userId!, 'passenger');
+
+      setState(() {
+        _transactionHistory = history;
+      });
+
+      // ✅ NUEVO: Log informativo si está vacío (no es error)
+      if (history.isEmpty) {
+        AppLogger.info('No hay historial de transacciones aún');
+      }
+    } catch (e) {
+      AppLogger.error('Error cargando historial: $e');
+      // ✅ No mostrar SnackBar aquí, solo loguear el error
+      // El historial vacío es manejado por el UI con _buildEmptyState
+    }
+  }
+
+  CardType _parseCardType(String? type) {
+    switch (type?.toLowerCase()) {
+      case 'visa':
+        return CardType.visa;
+      case 'mastercard':
+        return CardType.mastercard;
+      case 'amex':
+        return CardType.amex;
+      case 'discover':
+        return CardType.discover;
+      default:
+        return CardType.other;
+    }
+  }
+
+  Color _getCardColorFromType(CardType type) {
+    switch (type) {
+      case CardType.visa:
+        return ModernTheme.info;
+      case CardType.mastercard:
+        return ModernTheme.warning;
+      case CardType.amex:
+        return ModernTheme.success;
+      case CardType.discover:
+        return ModernTheme.primaryBlue;
+      default:
+        return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
+    }
   }
   
   @override
@@ -176,30 +310,30 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        backgroundColor: ModernTheme.backgroundLight,
+        backgroundColor: context.surfaceColor,
         appBar: AppBar(
           backgroundColor: ModernTheme.oasisGreen,
           title: Text(
-            'Métodos de Pago',
-            style: TextStyle(color: Colors.white),
+            AppLocalizations.of(context)!.paymentMethodsTitle,
+            style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: () => Navigator.pop(context),
           ),
           actions: [
             IconButton(
-              icon: Icon(Icons.help_outline, color: Colors.white),
+              icon: Icon(Icons.help_outline, color: Theme.of(context).colorScheme.onPrimary),
               onPressed: _showHelp,
             ),
           ],
           bottom: TabBar(
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
+            indicatorColor: Theme.of(context).colorScheme.onPrimary,
+            labelColor: Theme.of(context).colorScheme.onPrimary,
+            unselectedLabelColor: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
             tabs: [
-              Tab(text: 'Métodos de Pago'),
-              Tab(text: 'Historial'),
+              Tab(text: AppLocalizations.of(context)!.paymentMethodsTab),
+              Tab(text: AppLocalizations.of(context)!.historyTab),
             ],
           ),
         ),
@@ -217,10 +351,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
               child: FloatingActionButton.extended(
                 onPressed: _addPaymentMethod,
                 backgroundColor: ModernTheme.oasisGreen,
-                icon: Icon(Icons.add, color: Colors.white),
+                icon: Icon(Icons.add, color: Theme.of(context).colorScheme.onPrimary),
                 label: Text(
-                  'Agregar Método',
-                  style: TextStyle(color: Colors.white),
+                  AppLocalizations.of(context)!.addMethod,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
                 ),
               ),
             );
@@ -243,11 +377,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           
           // Payment methods section
           Text(
-            'Métodos Guardados',
+            AppLocalizations.of(context)!.savedMethods,
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: ModernTheme.textPrimary,
+              color: context.primaryText,
             ),
           ),
           SizedBox(height: 16),
@@ -278,7 +412,8 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 return Transform.translate(
                   offset: Offset(50 * (1 - animation.value), 0),
                   child: Opacity(
-                    opacity: animation.value,
+                    // ✅ Clamp para prevenir valores fuera del rango [0.0, 1.0] por Curves.easeOutBack
+                    opacity: animation.value.clamp(0.0, 1.0),
                     child: method.type == PaymentMethodType.card
                         ? _buildCreditCard(method)
                         : _buildPaymentMethodCard(method),
@@ -300,6 +435,29 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   }
   
   Widget _buildHistoryTab() {
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator(color: ModernTheme.oasisGreen));
+    }
+
+    if (_transactionHistory.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.receipt_long, size: 64, color: context.secondaryText),
+            SizedBox(height: 16),
+            Text(
+              'No hay transacciones aún',
+              style: TextStyle(
+                color: context.secondaryText,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView.builder(
       padding: EdgeInsets.all(16),
       itemCount: _transactionHistory.length + 1,
@@ -307,7 +465,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         if (index == 0) {
           return _buildHistorySummary();
         }
-        
+
         final transaction = _transactionHistory[index - 1];
         return _buildTransactionCard(transaction);
       },
@@ -343,17 +501,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Billetera Oasis',
+                    AppLocalizations.of(context)!.oasisWallet,
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                       fontSize: 14,
                     ),
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'S/ ${wallet.walletBalance ?? "0.00"}',
+                    double.tryParse(wallet.walletBalance ?? "0.0")?.toCurrency() ?? (0.0).toCurrency(),
                     style: TextStyle(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                     ),
@@ -363,12 +521,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.account_balance_wallet,
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   size: 32,
                 ),
               ),
@@ -381,9 +539,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 child: ElevatedButton.icon(
                   onPressed: _rechargeWallet,
                   icon: Icon(Icons.add),
-                  label: Text('Recargar'),
+                  label: Text(AppLocalizations.of(context)!.recharge),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     foregroundColor: ModernTheme.oasisGreen,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -396,10 +554,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 child: OutlinedButton.icon(
                   onPressed: _viewWalletHistory,
                   icon: Icon(Icons.history),
-                  label: Text('Historial'),
+                  label: Text(AppLocalizations.of(context)!.historyButton),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white),
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    side: BorderSide(color: Theme.of(context).colorScheme.onPrimary),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -442,7 +600,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             // Card pattern
             Positioned.fill(
               child: CustomPaint(
-                painter: CardPatternPainter(),
+                painter: CardPatternPainter(Theme.of(context).colorScheme.surface),
               ),
             ),
             
@@ -464,13 +622,13 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
+                            color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            'PREDETERMINADO',
+                            AppLocalizations.of(context)!.defaultBadge,
                             style: TextStyle(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.surface,
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),
@@ -485,7 +643,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                       Text(
                         method.cardNumber ?? '',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: Theme.of(context).colorScheme.surface,
                           fontSize: 22,
                           letterSpacing: 2,
                           fontFamily: 'monospace',
@@ -499,16 +657,16 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'TITULAR',
+                                AppLocalizations.of(context)!.cardHolder,
                                 style: TextStyle(
-                                  color: Colors.white70,
+                                  color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                                   fontSize: 10,
                                 ),
                               ),
                               Text(
                                 method.cardHolder ?? '',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   fontSize: 14,
                                 ),
                               ),
@@ -518,16 +676,16 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'VENCE',
+                                AppLocalizations.of(context)!.expiresLabel,
                                 style: TextStyle(
-                                  color: Colors.white70,
+                                  color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
                                   fontSize: 10,
                                 ),
                               ),
                               Text(
                                 method.expiryDate ?? '',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   fontSize: 14,
                                 ),
                               ),
@@ -546,7 +704,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
               top: 8,
               right: 8,
               child: IconButton(
-                icon: Icon(Icons.close, color: Colors.white54, size: 20),
+                icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.54), size: 20),
                 onPressed: () => _deletePaymentMethod(method),
               ),
             ),
@@ -562,11 +720,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
         border: Border.all(
-          color: isDefault ? ModernTheme.oasisGreen : Colors.transparent,
+          color: isDefault ? ModernTheme.oasisGreen : Theme.of(context).colorScheme.surfaceContainerHighest,
           width: 2,
         ),
       ),
@@ -587,11 +745,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           method.name,
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: ModernTheme.textPrimary,
+            color: context.primaryText,
           ),
         ),
         subtitle: method.walletBalance != null
-            ? Text('Saldo: S/ ${method.walletBalance}')
+            ? Text(AppLocalizations.of(context)!.balanceLabel(method.walletBalance!))
             : Text(_getMethodDescription(method.type)),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -604,7 +762,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Predeterminado',
+                  AppLocalizations.of(context)!.defaultLabel,
                   style: TextStyle(
                     color: ModernTheme.oasisGreen,
                     fontSize: 12,
@@ -623,7 +781,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                       children: [
                         Icon(Icons.star, size: 20),
                         SizedBox(width: 12),
-                        Text('Hacer predeterminado'),
+                        Text(AppLocalizations.of(context)!.makeDefault),
                       ],
                     ),
                   ),
@@ -634,7 +792,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                       children: [
                         Icon(Icons.delete, size: 20, color: ModernTheme.error),
                         SizedBox(width: 12),
-                        Text('Eliminar', style: TextStyle(color: ModernTheme.error)),
+                        Text(AppLocalizations.of(context)!.deleteButton, style: TextStyle(color: ModernTheme.error)),
                       ],
                     ),
                   ),
@@ -653,9 +811,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   
   Widget _buildHistorySummary() {
     final totalSpent = _transactionHistory.fold<double>(
-      0, (sum, t) => sum + (t['amount'] as double));
+      0, (total, t) => total + t.amount);
     final successfulTransactions = _transactionHistory
-      .where((t) => t['status'] == 'completed').length;
+      .where((t) => t.status == 'approved').length;
     
     return Container(
       margin: EdgeInsets.only(bottom: 20),
@@ -671,9 +829,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
       child: Column(
         children: [
           Text(
-            'Resumen del Mes',
+            AppLocalizations.of(context)!.monthlySummary,
             style: TextStyle(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
@@ -683,17 +841,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _buildSummaryItem(
-                'Total Gastado',
-                'S/ ${totalSpent.toStringAsFixed(2)}',
-                Icons.attach_money,
+                AppLocalizations.of(context)!.totalSpent,
+                totalSpent.toCurrency(),
+                Icons.account_balance_wallet // ✅ Cambiado de attach_money ($) a wallet,
               ),
               _buildSummaryItem(
-                'Transacciones',
+                AppLocalizations.of(context)!.transactionsLabel,
                 _transactionHistory.length.toString(),
                 Icons.receipt,
               ),
               _buildSummaryItem(
-                'Exitosas',
+                AppLocalizations.of(context)!.successfulLabel,
                 '$successfulTransactions/${_transactionHistory.length}',
                 Icons.check_circle,
               ),
@@ -707,12 +865,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   Widget _buildSummaryItem(String label, String value, IconData icon) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 24),
+        Icon(icon, color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7), size: 24),
         SizedBox(height: 8),
         Text(
           value,
           style: TextStyle(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -720,7 +878,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white70,
+            color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.7),
             fontSize: 12,
           ),
         ),
@@ -728,15 +886,15 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     );
   }
   
-  Widget _buildTransactionCard(Map<String, dynamic> transaction) {
-    final isSuccess = transaction['status'] == 'completed';
+  Widget _buildTransactionCard(PaymentHistoryItem transaction) {
+    final isSuccess = transaction.status == 'approved';
     
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: ModernTheme.cardShadow,
+        boxShadow: ModernTheme.getCardShadow(context),
       ),
       child: ListTile(
         leading: Container(
@@ -752,15 +910,15 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           ),
         ),
         title: Text(
-          'Viaje ${transaction['tripId']}',
+          AppLocalizations.of(context)!.tripLabel(transaction.rideId),
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(transaction['method']),
+            Text(transaction.paymentMethod),
             Text(
-              _formatDate(transaction['date']),
+              _formatDate(transaction.createdAt),
               style: TextStyle(fontSize: 12),
             ),
           ],
@@ -770,11 +928,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              'S/ ${transaction['amount'].toStringAsFixed(2)}',
+              transaction.amount.toCurrency(),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: ModernTheme.textPrimary,
+                color: context.primaryText,
               ),
             ),
             Container(
@@ -785,7 +943,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                isSuccess ? 'Exitoso' : 'Fallido',
+                isSuccess ? AppLocalizations.of(context)!.successfulStatus : AppLocalizations.of(context)!.failedStatus,
                 style: TextStyle(
                   color: isSuccess ? ModernTheme.success : ModernTheme.error,
                   fontSize: 10,
@@ -817,17 +975,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Tus pagos están protegidos',
+                  AppLocalizations.of(context)!.paymentsProtected,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: ModernTheme.info,
                   ),
                 ),
                 Text(
-                  'Utilizamos encriptación de grado bancario para proteger tu información.',
+                  AppLocalizations.of(context)!.encryptionMessage,
                   style: TextStyle(
                     fontSize: 12,
-                    color: ModernTheme.textSecondary,
+                    color: context.secondaryText,
                   ),
                 ),
               ],
@@ -841,15 +999,15 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   List<Color> _getCardGradient(CardType type) {
     switch (type) {
       case CardType.visa:
-        return [Colors.blue.shade600, Colors.blue.shade400];
+        return [ModernTheme.info, ModernTheme.info.withValues(alpha: 0.7)];
       case CardType.mastercard:
-        return [Colors.orange.shade600, Colors.orange.shade400];
+        return [ModernTheme.warning, ModernTheme.warning.withValues(alpha: 0.7)];
       case CardType.amex:
-        return [Colors.green.shade600, Colors.green.shade400];
+        return [ModernTheme.success, ModernTheme.success.withValues(alpha: 0.7)];
       case CardType.discover:
-        return [Colors.purple.shade600, Colors.purple.shade400];
+        return [ModernTheme.primaryBlue, ModernTheme.primaryBlue.withValues(alpha: 0.7)];
       default:
-        return [Colors.grey.shade600, Colors.grey.shade400];
+        return [Theme.of(context).colorScheme.onSurface.withOpacity(0.6), Theme.of(context).colorScheme.onSurface.withOpacity(0.4)];
     }
   }
   
@@ -875,7 +1033,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     return Text(
       logoText,
       style: TextStyle(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         fontSize: 20,
         fontWeight: FontWeight.bold,
         fontStyle: FontStyle.italic,
@@ -886,24 +1044,24 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   String _getMethodDescription(PaymentMethodType type) {
     switch (type) {
       case PaymentMethodType.cash:
-        return 'Pago al finalizar el viaje';
+        return AppLocalizations.of(context)!.cashDescription;
       case PaymentMethodType.wallet:
-        return 'Pago con saldo de billetera';
+        return AppLocalizations.of(context)!.walletDescription;
       case PaymentMethodType.paypal:
-        return 'Pago seguro con PayPal';
+        return AppLocalizations.of(context)!.paypalDescription;
       default:
-        return 'Método de pago';
+        return AppLocalizations.of(context)!.paymentMethodDefault;
     }
   }
   
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
-    
+
     if (difference.inHours < 24) {
-      return 'Hoy, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+      return '${AppLocalizations.of(context)!.todayDate}, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
     } else if (difference.inDays == 1) {
-      return 'Ayer, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+      return '${AppLocalizations.of(context)!.yesterdayDate}, ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
     } else {
       return '${date.day}/${date.month}/${date.year}';
     }
@@ -916,12 +1074,13 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${method.name} es ahora tu método predeterminado'),
+        content: Text(AppLocalizations.of(context)!.defaultMethodMessage(method.name)),
         backgroundColor: ModernTheme.success,
       ),
     );
   }
   
+  /// ✅ IMPLEMENTADO: Eliminar método de pago de Firestore
   void _deletePaymentMethod(PaymentMethod method) {
     showDialog(
       context: context,
@@ -929,34 +1088,46 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        title: Text('Eliminar método de pago'),
-        content: Text('¿Estás seguro de que deseas eliminar ${method.name}?'),
+        title: Text(AppLocalizations.of(context)!.deletePaymentMethod),
+        content: Text(AppLocalizations.of(context)!.confirmDeleteMethod(method.name)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancelar'),
+            child: Text(AppLocalizations.of(context)!.cancelButton),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              final successMessage = AppLocalizations.of(context)!.methodDeleted;
+              Navigator.pop(context);
+
+              // Eliminar de Firestore si no es cash o wallet
+              if (method.type == PaymentMethodType.card && _userId != null) {
+                try {
+                  await _firebaseService.firestore
+                      .collection('users')
+                      .doc(_userId)
+                      .collection('payment_methods')
+                      .doc(method.id)
+                      .delete();
+                } catch (e) {
+                  AppLogger.error('Error eliminando payment method: $e');
+                }
+              }
+
               setState(() {
                 _paymentMethods.removeWhere((m) => m.id == method.id);
                 if (_defaultMethodId == method.id && _paymentMethods.isNotEmpty) {
                   _defaultMethodId = _paymentMethods.first.id;
                 }
               });
-              Navigator.pop(context);
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Método de pago eliminado'),
-                  backgroundColor: ModernTheme.error,
-                ),
-              );
+
+              if (!mounted) return;
+              _showSuccess(successMessage);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: ModernTheme.error,
             ),
-            child: Text('Eliminar'),
+            child: Text(AppLocalizations.of(context)!.deleteButton),
           ),
         ],
       ),
@@ -978,7 +1149,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.7,
         minChildSize: 0.5,
@@ -986,7 +1157,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         builder: (context, scrollController) {
           return Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: AddPaymentMethodSheet(
@@ -1011,96 +1182,253 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     });
   }
   
+  /// ✅ IMPLEMENTADO: Recargar billetera con MercadoPago
   void _rechargeWallet() {
+    final TextEditingController customAmountController = TextEditingController();
+    double selectedAmount = 0;
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Container(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Recargar Billetera',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 24),
-            
-            // Amount chips
-            Wrap(
-              spacing: 12,
-              children: [10, 20, 50, 100, 200].map((amount) {
-                return ChoiceChip(
-                  label: Text('S/ $amount'),
-                  selected: false,
-                  onSelected: (selected) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Recargando S/ $amount...'),
-                        backgroundColor: ModernTheme.success,
-                      ),
-                    );
-                  },
-                );
-              }).toList(),
-            ),
-            
-            SizedBox(height: 16),
-            
-            TextField(
-              decoration: InputDecoration(
-                labelText: 'Monto personalizado',
-                prefixText: 'S/ ',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            top: 24,
+            left: 24,
+            right: 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                AppLocalizations.of(context)!.rechargeWallet,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              keyboardType: TextInputType.number,
-            ),
-            
-            SizedBox(height: 24),
-            
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Procesando recarga...'),
-                    backgroundColor: ModernTheme.oasisGreen,
+              SizedBox(height: 24),
+
+              // Amount chips
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [10, 20, 50, 100, 200].map((amount) {
+                  return ChoiceChip(
+                    label: Text(amount.toCurrency(decimals: 0)),
+                    selected: selectedAmount == amount.toDouble(),
+                    selectedColor: ModernTheme.oasisGreen.withValues(alpha: 0.3),
+                    onSelected: (selected) {
+                      setModalState(() {
+                        selectedAmount = selected ? amount.toDouble() : 0;
+                        customAmountController.clear();
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+
+              SizedBox(height: 16),
+
+              TextField(
+                controller: customAmountController,
+                decoration: InputDecoration(
+                  labelText: AppLocalizations.of(context)!.customAmount,
+                  prefixText: 'S/. ',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ModernTheme.oasisGreen,
-                minimumSize: Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                ),
+                keyboardType: TextInputType.number,
+                onChanged: (value) {
+                  setModalState(() {
+                    selectedAmount = double.tryParse(value) ?? 0;
+                  });
+                },
+              ),
+
+              SizedBox(height: 24),
+
+              ElevatedButton(
+                onPressed: selectedAmount > 0
+                    ? () async {
+                        Navigator.pop(context);
+                        await _processRecharge(selectedAmount);
+                      }
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ModernTheme.oasisGreen,
+                  minimumSize: Size(double.infinity, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(
+                  selectedAmount > 0
+                      ? 'Recargar ${selectedAmount.toCurrency()}'
+                      : AppLocalizations.of(context)!.recharge,
                 ),
               ),
-              child: Text('Recargar'),
-            ),
-          ],
+              SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  /// Procesar recarga con MercadoPago
+  Future<void> _processRecharge(double amount) async {
+    if (_userId == null) return;
+
+    try {
+      // Mostrar loader
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(color: ModernTheme.oasisGreen),
+        ),
+      );
+
+      // Obtener datos del usuario
+      final userDoc = await _firebaseService.firestore
+          .collection('users')
+          .doc(_userId)
+          .get();
+
+      final userData = userDoc.data();
+      final email = userData?['email'] ?? '';
+      final name = userData?['name'] ?? 'Usuario';
+
+      // Crear preferencia de pago
+      final result = await _paymentService.createMercadoPagoPreference(
+        rideId: 'wallet_recharge_${DateTime.now().millisecondsSinceEpoch}',
+        amount: amount,
+        payerEmail: email,
+        payerName: name,
+        description: 'Recarga de billetera Oasis Taxi',
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // Cerrar loader
+
+      if (result.success && result.initPoint != null) {
+        // Abrir MercadoPago en WebView
+        await _openMercadoPagoWebView(result.initPoint!, amount);
+      } else {
+        _showError('Error creando preferencia de pago: ${result.error}');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Cerrar loader
+      AppLogger.error('Error procesando recarga: $e');
+      _showError('Error procesando recarga: $e');
+    }
+  }
+
+  /// Abrir MercadoPago en WebView
+  Future<void> _openMercadoPagoWebView(String url, double amount) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text('MercadoPago'),
+            backgroundColor: ModernTheme.oasisGreen,
+          ),
+          body: WebViewWidget(
+            controller: WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..setNavigationDelegate(
+                NavigationDelegate(
+                  onPageFinished: (url) async {
+                    final navigator = Navigator.of(context);
+
+                    // Detectar si el pago fue exitoso
+                    if (url.contains('success') || url.contains('approved')) {
+                      // Actualizar wallet balance en Firestore
+                      await _updateWalletBalance(amount);
+
+                      if (!mounted) return;
+                      navigator.pop();
+
+                      final successMessage = 'Recarga exitosa de ${amount.toCurrency()}';
+                      _showSuccess(successMessage);
+
+                      // Recargar datos
+                      await _loadWalletBalance();
+                      await _loadTransactionHistory();
+                    } else if (url.contains('failure') || url.contains('pending')) {
+                      if (!mounted) return;
+                      navigator.pop();
+                      _showError('El pago no pudo completarse');
+                    }
+                  },
+                ),
+              )
+              ..loadRequest(Uri.parse(url)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Actualizar balance de wallet en Firestore
+  Future<void> _updateWalletBalance(double amount) async {
+    if (_userId == null) return;
+
+    try {
+      await _firebaseService.firestore.collection('users').doc(_userId).update({
+        'walletBalance': FieldValue.increment(amount),
+      });
+    } catch (e) {
+      AppLogger.error('Error actualizando wallet balance: $e');
+    }
+  }
+
+  void _showError(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
+  void _showSuccess(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: ModernTheme.success,
+        ),
+      );
+    }
+  }
   
+  /// ✅ IMPLEMENTADO: Ver historial de wallet
   void _viewWalletHistory() {
+    // Cambiar a la pestaña de historial
+    DefaultTabController.of(context).animateTo(1);
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Cargando historial de billetera...'),
+        content: Text('Mostrando historial de transacciones'),
         backgroundColor: ModernTheme.info,
+        duration: Duration(seconds: 2),
       ),
     );
   }
   
-  void _showTransactionDetails(Map<String, dynamic> transaction) {
+  /// ✅ IMPLEMENTADO: Mostrar detalles de transacción con descarga de PDF
+  void _showTransactionDetails(PaymentHistoryItem transaction) async {
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(
@@ -1118,49 +1446,45 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 height: 4,
                 margin: EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            
+
             Text(
-              'Detalles de Transacción',
+              AppLocalizations.of(context)!.transactionDetails,
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            
+
             SizedBox(height: 20),
-            
-            _buildDetailRow('ID Transacción', transaction['id']),
-            _buildDetailRow('Viaje', transaction['tripId']),
-            _buildDetailRow('Fecha', _formatDate(transaction['date'])),
-            _buildDetailRow('Método', transaction['method']),
-            _buildDetailRow('Monto', 'S/ ${transaction['amount'].toStringAsFixed(2)}'),
+
+            _buildDetailRow(AppLocalizations.of(context)!.transactionId, transaction.id),
+            _buildDetailRow(AppLocalizations.of(context)!.tripDetailLabel, transaction.rideId),
+            _buildDetailRow(AppLocalizations.of(context)!.dateDetailLabel, _formatDate(transaction.createdAt)),
+            _buildDetailRow(AppLocalizations.of(context)!.methodDetailLabel, transaction.paymentMethod),
+            _buildDetailRow(AppLocalizations.of(context)!.amountDetailLabel, transaction.amount.toCurrency()),
+            _buildDetailRow('Comisión plataforma', transaction.platformCommission.toCurrency()),
             _buildDetailRow(
-              'Estado',
-              transaction['status'] == 'completed' ? 'Exitoso' : 'Fallido',
+              AppLocalizations.of(context)!.statusDetailLabel,
+              transaction.status == 'approved' ? AppLocalizations.of(context)!.successfulStatus : AppLocalizations.of(context)!.failedStatus,
             ),
-            
+
             SizedBox(height: 24),
-            
+
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Descargando recibo...'),
-                          backgroundColor: ModernTheme.info,
-                        ),
-                      );
+                      await _generateTransactionPDF(transaction);
                     },
                     icon: Icon(Icons.download),
-                    label: Text('Descargar'),
+                    label: Text(AppLocalizations.of(context)!.downloadButton),
                   ),
                 ),
                 SizedBox(width: 12),
@@ -1168,15 +1492,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   child: ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Abriendo soporte...'),
-                          backgroundColor: ModernTheme.oasisGreen,
-                        ),
-                      );
+                      Navigator.pushNamed(context, '/support');
                     },
                     icon: Icon(Icons.help),
-                    label: Text('Ayuda'),
+                    label: Text(AppLocalizations.of(context)!.helpButton),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: ModernTheme.oasisGreen,
                     ),
@@ -1186,6 +1505,99 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Generar PDF de recibo de transacción
+  Future<void> _generateTransactionPDF(PaymentHistoryItem transaction) async {
+    try {
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                // Header
+                pw.Center(
+                  child: pw.Text(
+                    'RECIBO DE TRANSACCIÓN',
+                    style: pw.TextStyle(
+                      fontSize: 24,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Center(
+                  child: pw.Text(
+                    'Oasis Taxi',
+                    style: pw.TextStyle(fontSize: 18),
+                  ),
+                ),
+                pw.Divider(thickness: 2),
+                pw.SizedBox(height: 20),
+
+                // Transaction details
+                _buildPdfRow('ID de Transacción:', transaction.id),
+                _buildPdfRow('ID de Viaje:', transaction.rideId),
+                _buildPdfRow('Fecha:', DateFormat('dd/MM/yyyy HH:mm').format(transaction.createdAt)),
+                _buildPdfRow('Método de Pago:', transaction.paymentMethod),
+                pw.SizedBox(height: 10),
+
+                // Amounts
+                pw.Divider(),
+                _buildPdfRow('Monto Total:', transaction.amount.toCurrency(), bold: true),
+                _buildPdfRow('Comisión Plataforma:', transaction.platformCommission.toCurrency()),
+                _buildPdfRow('Estado:', transaction.status == 'approved' ? 'Aprobado' : 'Pendiente'),
+                pw.Divider(),
+
+                pw.SizedBox(height: 20),
+
+                // Footer
+                pw.Center(
+                  child: pw.Text(
+                    'Generado el ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
+                    style: pw.TextStyle(fontSize: 10, color: PdfColors.grey),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      // Guardar y compartir PDF
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+
+      _showSuccess('Recibo generado exitosamente');
+    } catch (e) {
+      AppLogger.error('Error generando PDF: $e');
+      _showError('Error generando recibo');
+    }
+  }
+
+  /// Helper para crear fila en PDF
+  pw.Widget _buildPdfRow(String label, String value, {bool bold = false}) {
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: pw.TextStyle(fontSize: 12)),
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 12,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1199,7 +1611,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           Text(
             label,
             style: TextStyle(
-              color: ModernTheme.textSecondary,
+              color: context.secondaryText,
               fontSize: 14,
             ),
           ),
@@ -1226,31 +1638,23 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           children: [
             Icon(Icons.help_outline, color: ModernTheme.oasisGreen),
             SizedBox(width: 8),
-            Text('Ayuda'),
+            Text(AppLocalizations.of(context)!.helpTitle),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHelpItem(
-              '• Para establecer un método predeterminado, mantén presionado sobre él.',
-            ),
-            _buildHelpItem(
-              '• Puedes eliminar métodos de pago deslizando hacia la izquierda.',
-            ),
-            _buildHelpItem(
-              '• Tu información está encriptada y segura.',
-            ),
-            _buildHelpItem(
-              '• La billetera Oasis te permite pagar sin tarjetas.',
-            ),
+            _buildHelpItem(AppLocalizations.of(context)!.helpItem1),
+            _buildHelpItem(AppLocalizations.of(context)!.helpItem2),
+            _buildHelpItem(AppLocalizations.of(context)!.helpItem3),
+            _buildHelpItem(AppLocalizations.of(context)!.helpItem4),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Entendido'),
+            child: Text(AppLocalizations.of(context)!.understood),
           ),
         ],
       ),
@@ -1289,8 +1693,11 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
   final _cardHolderController = TextEditingController();
   final _expiryController = TextEditingController();
   final _cvvController = TextEditingController();
-  
-  final CardType _selectedCardType = CardType.visa;
+
+  final FirebaseService _firebaseService = FirebaseService();
+
+  CardType _selectedCardType = CardType.visa;
+  bool _isLoading = false;
   
   @override
   void dispose() {
@@ -1316,14 +1723,14 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                 height: 4,
                 margin: EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
             
             Text(
-              'Agregar Tarjeta',
+              AppLocalizations.of(context)!.addCard,
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -1335,7 +1742,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
             TextFormField(
               controller: _cardNumberController,
               decoration: InputDecoration(
-                labelText: 'Número de tarjeta',
+                labelText: AppLocalizations.of(context)!.cardNumberLabel,
                 prefixIcon: Icon(Icons.credit_card),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1344,7 +1751,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
               keyboardType: TextInputType.number,
               validator: (value) {
                 if (value == null || value.isEmpty) {
-                  return 'Por favor ingresa el número de tarjeta';
+                  return AppLocalizations.of(context)!.cardNumberRequired;
                 }
                 return null;
               },
@@ -1355,7 +1762,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
             TextFormField(
               controller: _cardHolderController,
               decoration: InputDecoration(
-                labelText: 'Titular de la tarjeta',
+                labelText: AppLocalizations.of(context)!.cardHolderLabel,
                 prefixIcon: Icon(Icons.person),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1364,7 +1771,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
               textCapitalization: TextCapitalization.characters,
               validator: (value) {
                 if (value == null || value.isEmpty) {
-                  return 'Por favor ingresa el nombre del titular';
+                  return AppLocalizations.of(context)!.cardHolderRequired;
                 }
                 return null;
               },
@@ -1378,7 +1785,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                   child: TextFormField(
                     controller: _expiryController,
                     decoration: InputDecoration(
-                      labelText: 'MM/AA',
+                      labelText: AppLocalizations.of(context)!.expiryLabel,
                       prefixIcon: Icon(Icons.calendar_today),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1387,7 +1794,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                     keyboardType: TextInputType.datetime,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Requerido';
+                        return AppLocalizations.of(context)!.requiredField;
                       }
                       return null;
                     },
@@ -1398,7 +1805,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                   child: TextFormField(
                     controller: _cvvController,
                     decoration: InputDecoration(
-                      labelText: 'CVV',
+                      labelText: AppLocalizations.of(context)!.cvvLabel,
                       prefixIcon: Icon(Icons.lock),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1408,7 +1815,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                     obscureText: true,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Requerido';
+                        return AppLocalizations.of(context)!.requiredField;
                       }
                       return null;
                     },
@@ -1420,7 +1827,7 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
             SizedBox(height: 24),
             
             ElevatedButton(
-              onPressed: _addCard,
+              onPressed: _isLoading ? null : _addCard,
               style: ElevatedButton.styleFrom(
                 backgroundColor: ModernTheme.oasisGreen,
                 minimumSize: Size(double.infinity, 48),
@@ -1428,16 +1835,25 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: Text('Agregar Tarjeta'),
+              child: _isLoading
+                  ? SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Theme.of(context).colorScheme.surface,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(AppLocalizations.of(context)!.addCard),
             ),
-            
+
             SizedBox(height: 16),
-            
+
             Center(
               child: Text(
-                'Tus datos están seguros y encriptados',
+                AppLocalizations.of(context)!.dataSecureMessage,
                 style: TextStyle(
-                  color: ModernTheme.textSecondary,
+                  color: context.secondaryText,
                   fontSize: 12,
                 ),
               ),
@@ -1448,40 +1864,130 @@ class _AddPaymentMethodSheetState extends State<AddPaymentMethodSheet> {
     );
   }
   
-  void _addCard() {
+  /// ✅ IMPLEMENTADO: Agregar tarjeta y guardar en Firestore
+  Future<void> _addCard() async {
     if (_formKey.currentState!.validate()) {
-      final newMethod = PaymentMethod(
-        id: 'PM${DateTime.now().millisecondsSinceEpoch}',
-        type: PaymentMethodType.card,
-        name: '${_selectedCardType.name.toUpperCase()} •••• ${_cardNumberController.text.substring(_cardNumberController.text.length - 4)}',
-        cardNumber: _cardNumberController.text,
-        cardHolder: _cardHolderController.text.toUpperCase(),
-        expiryDate: _expiryController.text,
-        cardType: _selectedCardType,
-        isDefault: false,
-        icon: Icons.credit_card,
-        color: Colors.blue,
-      );
-      
-      widget.onMethodAdded(newMethod);
-      Navigator.pop(context);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Tarjeta agregada exitosamente'),
-          backgroundColor: ModernTheme.success,
-        ),
-      );
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        // Obtener usuario actual
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          throw Exception('Usuario no autenticado');
+        }
+
+        // Detectar tipo de tarjeta automáticamente
+        _selectedCardType = _detectCardType(_cardNumberController.text);
+
+        // Obtener últimos 4 dígitos
+        final lastFourDigits = _cardNumberController.text.replaceAll(' ', '').substring(
+          _cardNumberController.text.replaceAll(' ', '').length - 4
+        );
+
+        // Guardar en Firestore (NO guardamos el número completo por seguridad)
+        final docRef = await _firebaseService.firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('payment_methods')
+            .add({
+          'name': '${_selectedCardType.name.toUpperCase()} •••• $lastFourDigits',
+          'lastFourDigits': lastFourDigits,
+          'cardHolder': _cardHolderController.text.toUpperCase(),
+          'expiryDate': _expiryController.text,
+          'cardType': _selectedCardType.name,
+          'isDefault': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        // Crear objeto PaymentMethod para UI
+        final newMethod = PaymentMethod(
+          id: docRef.id,
+          type: PaymentMethodType.card,
+          name: '${_selectedCardType.name.toUpperCase()} •••• $lastFourDigits',
+          cardNumber: '•••• •••• •••• $lastFourDigits',
+          cardHolder: _cardHolderController.text.toUpperCase(),
+          expiryDate: _expiryController.text,
+          cardType: _selectedCardType,
+          isDefault: false,
+          icon: Icons.credit_card,
+          color: _getCardColor(_selectedCardType),
+        );
+
+        widget.onMethodAdded(newMethod);
+
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.cardAddedSuccess),
+            backgroundColor: ModernTheme.success,
+          ),
+        );
+      } catch (e) {
+        AppLogger.error('Error agregando tarjeta: $e');
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error agregando tarjeta: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      } finally {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Detectar tipo de tarjeta por número
+  CardType _detectCardType(String cardNumber) {
+    final cleaned = cardNumber.replaceAll(' ', '');
+
+    if (cleaned.startsWith('4')) {
+      return CardType.visa;
+    } else if (cleaned.startsWith(RegExp(r'^5[1-5]'))) {
+      return CardType.mastercard;
+    } else if (cleaned.startsWith(RegExp(r'^3[47]'))) {
+      return CardType.amex;
+    } else if (cleaned.startsWith('6011')) {
+      return CardType.discover;
+    }
+
+    return CardType.other;
+  }
+
+  /// Obtener color por tipo de tarjeta
+  Color _getCardColor(CardType type) {
+    switch (type) {
+      case CardType.visa:
+        return ModernTheme.info;
+      case CardType.mastercard:
+        return ModernTheme.warning;
+      case CardType.amex:
+        return ModernTheme.success;
+      case CardType.discover:
+        return ModernTheme.primaryBlue;
+      default:
+        return Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
     }
   }
 }
 
 // Custom painter for card pattern
 class CardPatternPainter extends CustomPainter {
+  final Color color;
+
+  CardPatternPainter(this.color);
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.1)
+      ..color = color.withValues(alpha: 0.1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     

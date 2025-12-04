@@ -25,8 +25,24 @@ class TripModel {
   final String? driverComment;
   final Map<String, dynamic>? vehicleInfo;
   final List<LatLng>? route;
-  final String? verificationCode; // Código de 4 dígitos para verificación
-  final bool isVerificationCodeUsed; // Si el código ya fue usado
+
+  // ✅ SISTEMA DE PAGOS (Modelo InDriver)
+  final String paymentMethod; // 'cash', 'wallet', 'yape_external', 'plin_external'
+  final bool isPaidOutsideApp; // true si es Yape/Plin/cash (fuera de app), false si es wallet
+  final String? paymentMethodId; // ID del método de pago si aplica (referencia opcional)
+
+  // ✅ SISTEMA DE VERIFICACIÓN MUTUA
+  final String? passengerVerificationCode; // Código del pasajero (4 dígitos)
+  final String? driverVerificationCode; // Código del conductor (4 dígitos)
+  final bool isPassengerVerified; // Si el conductor verificó al pasajero
+  final bool isDriverVerified; // Si el pasajero verificó al conductor
+  final DateTime? verificationCompletedAt; // Cuándo se completó la verificación mutua
+
+  // ⚠️ DEPRECADO - Mantener por compatibilidad
+  @Deprecated('Usar passengerVerificationCode en su lugar')
+  final String? verificationCode;
+  @Deprecated('Usar isPassengerVerified e isDriverVerified en su lugar')
+  final bool isVerificationCodeUsed;
 
   TripModel({
     required this.id,
@@ -52,6 +68,17 @@ class TripModel {
     this.driverComment,
     this.vehicleInfo,
     this.route,
+    // Campos de pagos (modelo InDriver)
+    this.paymentMethod = 'cash', // Por defecto efectivo (mayoría paga fuera de app)
+    this.isPaidOutsideApp = true, // Por defecto pago externo (Yape/Plin/Efectivo)
+    this.paymentMethodId,
+    // Nuevos campos de verificación mutua
+    this.passengerVerificationCode,
+    this.driverVerificationCode,
+    this.isPassengerVerified = false,
+    this.isDriverVerified = false,
+    this.verificationCompletedAt,
+    // Campos deprecados
     this.verificationCode,
     this.isVerificationCodeUsed = false,
   });
@@ -87,7 +114,7 @@ class TripModel {
       driverRating: json['driverRating']?.toDouble(),
       driverComment: json['driverComment'],
       vehicleInfo: json['vehicleInfo'],
-      route: json['route'] != null 
+      route: json['route'] != null
           ? (json['route'] as List)
               .map((point) => LatLng(
                     point['lat'].toDouble(),
@@ -95,6 +122,17 @@ class TripModel {
                   ))
               .toList()
           : null,
+      // Campos de pagos (retrocompatibilidad con 'cash' por defecto)
+      paymentMethod: json['paymentMethod'] ?? 'cash',
+      isPaidOutsideApp: json['isPaidOutsideApp'] ?? true,
+      paymentMethodId: json['paymentMethodId'],
+      // Nuevos campos de verificación mutua
+      passengerVerificationCode: json['passengerVerificationCode'],
+      driverVerificationCode: json['driverVerificationCode'],
+      isPassengerVerified: json['isPassengerVerified'] ?? false,
+      isDriverVerified: json['isDriverVerified'] ?? false,
+      verificationCompletedAt: _parseDateTime(json['verificationCompletedAt']),
+      // Campos deprecados (compatibilidad)
       verificationCode: json['verificationCode'],
       isVerificationCodeUsed: json['isVerificationCodeUsed'] ?? false,
     );
@@ -145,7 +183,20 @@ class TripModel {
         'lat': point.latitude,
         'lng': point.longitude,
       }).toList(),
+      // Campos de pagos (modelo InDriver)
+      'paymentMethod': paymentMethod,
+      'isPaidOutsideApp': isPaidOutsideApp,
+      'paymentMethodId': paymentMethodId,
+      // Nuevos campos de verificación mutua
+      'passengerVerificationCode': passengerVerificationCode,
+      'driverVerificationCode': driverVerificationCode,
+      'isPassengerVerified': isPassengerVerified,
+      'isDriverVerified': isDriverVerified,
+      'verificationCompletedAt': verificationCompletedAt?.toIso8601String(),
+      // Campos deprecados (compatibilidad) - Ignorar warnings intencionalmente
+      // ignore: deprecated_member_use_from_same_package
       'verificationCode': verificationCode,
+      // ignore: deprecated_member_use_from_same_package
       'isVerificationCodeUsed': isVerificationCodeUsed,
     };
   }
@@ -175,6 +226,17 @@ class TripModel {
     String? driverComment,
     Map<String, dynamic>? vehicleInfo,
     List<LatLng>? route,
+    // Campos de pagos (modelo InDriver)
+    String? paymentMethod,
+    bool? isPaidOutsideApp,
+    String? paymentMethodId,
+    // Nuevos campos de verificación mutua
+    String? passengerVerificationCode,
+    String? driverVerificationCode,
+    bool? isPassengerVerified,
+    bool? isDriverVerified,
+    DateTime? verificationCompletedAt,
+    // Campos deprecados
     String? verificationCode,
     bool? isVerificationCodeUsed,
   }) {
@@ -202,10 +264,29 @@ class TripModel {
       driverComment: driverComment ?? this.driverComment,
       vehicleInfo: vehicleInfo ?? this.vehicleInfo,
       route: route ?? this.route,
+      // Campos de pagos (modelo InDriver)
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      isPaidOutsideApp: isPaidOutsideApp ?? this.isPaidOutsideApp,
+      paymentMethodId: paymentMethodId ?? this.paymentMethodId,
+      // Nuevos campos de verificación mutua
+      passengerVerificationCode: passengerVerificationCode ?? this.passengerVerificationCode,
+      driverVerificationCode: driverVerificationCode ?? this.driverVerificationCode,
+      isPassengerVerified: isPassengerVerified ?? this.isPassengerVerified,
+      isDriverVerified: isDriverVerified ?? this.isDriverVerified,
+      verificationCompletedAt: verificationCompletedAt ?? this.verificationCompletedAt,
+      // Campos deprecados - Ignorar warnings intencionalmente
+      // ignore: deprecated_member_use_from_same_package
       verificationCode: verificationCode ?? this.verificationCode,
+      // ignore: deprecated_member_use_from_same_package
       isVerificationCodeUsed: isVerificationCodeUsed ?? this.isVerificationCodeUsed,
     );
   }
+
+  /// ✅ Verificar si ambos códigos han sido verificados (verificación mutua completa)
+  bool get isMutualVerificationComplete => isPassengerVerified && isDriverVerified;
+
+  /// ✅ Verificar si el viaje está listo para iniciar (ambos verificados)
+  bool get canStartRide => isMutualVerificationComplete && status == 'accepted';
 
   /// Verificar si el viaje está activo
   bool get isActive {

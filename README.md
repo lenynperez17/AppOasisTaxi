@@ -3,9 +3,10 @@
 > Plataforma completa de movilidad urbana con negociación de precios estilo InDriver
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)](https://flutter.dev)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-20-green)](https://nodejs.org)
 [![Firebase](https://img.shields.io/badge/Firebase-10+-orange)](https://firebase.google.com)
-[![MercadoPago](https://img.shields.io/badge/MercadoPago-2.0-blue)](https://mercadopago.com)
+[![MercadoPago](https://img.shields.io/badge/MercadoPago-Producción-blue)](https://mercadopago.com)
+[![Estado](https://img.shields.io/badge/Estado-Producción-success)](https://github.com)
 
 ## 🎯 Descripción
 
@@ -36,10 +37,10 @@ OASIS TAXI
 
 ### Prerrequisitos
 - Flutter 3.x
-- Node.js 18+
+- Node.js 20 (última versión estable)
 - Firebase project
 - Google Maps API
-- MercadoPago account
+- MercadoPago account (Producción configurada)
 
 ### Instalación
 
@@ -112,12 +113,14 @@ MERCADOPAGO_ACCESS_TOKEN=tu_access_token
 
 ## 📊 Estado del Proyecto
 
-✅ **Aplicación Flutter**: 100% Completada (38/38 features)  
-✅ **Backend Node.js**: 100% Implementado  
-✅ **Integración Firebase**: Configurada  
-✅ **Pagos MercadoPago**: Funcional  
-✅ **Google Maps**: Integrado  
-✅ **Chat en Tiempo Real**: Activo  
+✅ **Aplicación Flutter**: 100% Completada (38/38 features)
+✅ **Backend Node.js 20**: 100% Implementado y Desplegado
+✅ **Integración Firebase**: Configurada
+✅ **Pagos MercadoPago**: ✅ PRODUCCIÓN ACTIVA (Octubre 2025)
+✅ **Google Maps**: Integrado
+✅ **Chat en Tiempo Real**: Activo
+✅ **Cloud Functions**: Desplegadas (us-central1)
+✅ **Webhook MercadoPago**: Configurado y Funcionando  
 
 ## 🎨 Diseño
 
@@ -161,6 +164,9 @@ flutter build apk --release
 
 - [Checklist de Features](arreglar_o_implementar.md)
 - [Documentación Técnica](docs/)
+- [✅ Verificación MercadoPago](VERIFICACION_MERCADOPAGO.md)
+- [🔧 Configuración Técnica MercadoPago](docs/CONFIGURACION_TECNICA_MERCADOPAGO.md)
+- [📖 Setup MercadoPago](docs/MERCADOPAGO_SETUP.md)
 - [API Documentation](src/)
 
 ## 🤝 Contribuir

@@ -61,16 +61,59 @@ class ModernTheme {
     colors: [oasisGreen, Color(0xFF00E000)],
   );
   
-  // Sombras modernas
+  // Sombras modernas adaptativas al tema
+  static List<BoxShadow> getCardShadow(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return [
+      BoxShadow(
+        color: isDark
+          ? Color(0xFF000000).withValues(alpha: 0.3)
+          : Color(0xFF000000).withValues(alpha: 0.08),
+        blurRadius: 20,
+        offset: Offset(0, 10),
+        spreadRadius: 0,
+      ),
+    ];
+  }
+
+  static List<BoxShadow> getButtonShadow(BuildContext context) {
+    return [
+      BoxShadow(
+        color: oasisGreen.withValues(alpha: 0.3),
+        blurRadius: 15,
+        offset: Offset(0, 8),
+        spreadRadius: 0,
+      ),
+    ];
+  }
+
+  static List<BoxShadow> getFloatingShadow(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return [
+      BoxShadow(
+        color: isDark
+          ? Color(0xFF000000).withValues(alpha: 0.4)
+          : Color(0xFF000000).withValues(alpha: 0.15),
+        blurRadius: 30,
+        offset: Offset(0, 15),
+        spreadRadius: 0,
+      ),
+    ];
+  }
+
+  // DEPRECATED: Use getCardShadow(context) instead
+  @Deprecated('Use getCardShadow(context) for theme-aware shadows')
   static List<BoxShadow> cardShadow = [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.08),
+      color: Color(0xFF000000).withValues(alpha: 0.08),
       blurRadius: 20,
       offset: Offset(0, 10),
       spreadRadius: 0,
     ),
   ];
-  
+
+  // DEPRECATED: Use getButtonShadow(context) instead
+  @Deprecated('Use getButtonShadow(context) for theme-aware shadows')
   static List<BoxShadow> buttonShadow = [
     BoxShadow(
       color: oasisGreen.withValues(alpha: 0.3),
@@ -79,10 +122,12 @@ class ModernTheme {
       spreadRadius: 0,
     ),
   ];
-  
+
+  // DEPRECATED: Use getFloatingShadow(context) instead
+  @Deprecated('Use getFloatingShadow(context) for theme-aware shadows')
   static List<BoxShadow> floatingShadow = [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.15),
+      color: Color(0xFF000000).withValues(alpha: 0.15),
       blurRadius: 30,
       offset: Offset(0, 15),
       spreadRadius: 0,
@@ -227,6 +272,35 @@ class ModernTheme {
       ),
       clipBehavior: Clip.antiAlias,
     ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Color(0xFF374151), // Gris oscuro para campos de texto
+      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Color(0xFF4B5563), width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: oasisGreen, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: error, width: 1),
+      ),
+      hintStyle: TextStyle(
+        color: Color(0xFF9CA3AF), // Gris claro para hints
+        fontSize: 14,
+      ),
+      labelStyle: TextStyle(
+        color: Color(0xFF9CA3AF), // Gris claro para labels
+        fontSize: 14,
+      ),
+    ),
     bottomNavigationBarTheme: BottomNavigationBarThemeData(
       backgroundColor: cardBackgroundDark,
       selectedItemColor: oasisGreen,
@@ -235,6 +309,28 @@ class ModernTheme {
       showUnselectedLabels: true,
       type: BottomNavigationBarType.fixed,
       elevation: 0,
+    ),
+    dividerTheme: DividerThemeData(
+      color: Color(0xFF374151), // Gris oscuro para divisores
+      thickness: 1,
+      space: 1,
+    ),
+    textTheme: TextTheme(
+      displayLarge: TextStyle(color: textLight),
+      displayMedium: TextStyle(color: textLight),
+      displaySmall: TextStyle(color: textLight),
+      headlineLarge: TextStyle(color: textLight),
+      headlineMedium: TextStyle(color: textLight),
+      headlineSmall: TextStyle(color: textLight),
+      titleLarge: TextStyle(color: textLight),
+      titleMedium: TextStyle(color: textLight),
+      titleSmall: TextStyle(color: textLight),
+      bodyLarge: TextStyle(color: textLight),
+      bodyMedium: TextStyle(color: textLight),
+      bodySmall: TextStyle(color: Color(0xFF9CA3AF)),
+      labelLarge: TextStyle(color: textLight),
+      labelMedium: TextStyle(color: textLight),
+      labelSmall: TextStyle(color: Color(0xFF9CA3AF)),
     ),
   );
 }

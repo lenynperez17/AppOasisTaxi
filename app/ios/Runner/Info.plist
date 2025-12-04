@@ -52,16 +52,15 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<!-- Replace with your Facebook App ID -->
-				<string>fb1234567890123456</string>
+				<!-- ✅ Facebook App ID URL Scheme (CONFIGURADO) -->
+				<string>fb1289349759483925</string>
 			</array>
 		</dict>
 		<!-- Google Sign In -->
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<!-- Replace with your REVERSED_CLIENT_ID from GoogleService-Info.plist -->
-				<string>com.googleusercontent.apps.123456789012-abcdefghijklmnopqrstuvwxyz</string>
+				<string>com.googleusercontent.apps.747030072271-9s3d31dadde9bipp954jbpp0stc92k12</string>
 			</array>
 		</dict>
 		<!-- App Deep Links -->
@@ -73,11 +72,12 @@
 		</dict>
 	</array>
 	
-	<!-- Facebook App ID and Display Name -->
+	<!-- ✅ Facebook App ID and Display Name (CONFIGURADO) -->
 	<key>FacebookAppID</key>
-	<string>1234567890123456</string>
+	<string>1289349759483925</string>
+	<!-- ✅ Client Token configurado -->
 	<key>FacebookClientToken</key>
-	<string>abcdef1234567890abcdef1234567890</string>
+	<string>367f0737179dbc29554a3f3f48ac3aaa</string>
 	<key>FacebookDisplayName</key>
 	<string>Oasis Taxi</string>
 	
@@ -90,23 +90,87 @@
 		<string>fbshareextension</string>
 	</array>
 	
-	<!-- Permissions -->
+	<!-- ==================== PERMISOS DE UBICACIÓN ==================== -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Oasis Taxi necesita acceder a tu ubicación para mostrarte conductores cercanos y calcular rutas</string>
+	<string>Oasis Taxi necesita acceder a tu ubicación para mostrarte conductores cercanos y calcular rutas de tus viajes</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Oasis Taxi necesita acceder a tu ubicación para seguimiento del viaje incluso en segundo plano</string>
+	<string>Oasis Taxi necesita acceder a tu ubicación para seguimiento del viaje incluso cuando la app está en segundo plano</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Oasis Taxi necesita acceder a tu ubicación para el seguimiento continuo del viaje</string>
+	<string>Oasis Taxi necesita acceder a tu ubicación constantemente para el seguimiento continuo y seguridad del viaje</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Oasis Taxi detecta el movimiento para mejorar la precisión del seguimiento</string>
+	<string>Oasis Taxi detecta el movimiento del dispositivo para mejorar la precisión del seguimiento y detectar tipo de transporte</string>
+
+	<!-- ==================== PERMISOS DE CÁMARA Y FOTOS ==================== -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Oasis Taxi necesita acceso a tu galería para que puedas subir tu foto de perfil</string>
+	<string>Oasis Taxi necesita acceso a tu galería de fotos para que puedas subir tu foto de perfil, documentos de conductor y fotos del vehículo</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Oasis Taxi necesita guardar fotos en tu galería, como recibos de viajes y comprobantes de pago</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Oasis Taxi necesita acceso a la cámara para tomar fotos de perfil y documentos</string>
+	<string>Oasis Taxi necesita acceso a la cámara para tomar fotos de perfil, documentos de identidad, licencia de conducir y fotos del vehículo</string>
+
+	<!-- ==================== PERMISOS DE AUDIO Y LLAMADAS ==================== -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Oasis Taxi necesita acceso al micrófono para llamadas con el conductor</string>
+	<string>Oasis Taxi necesita acceso al micrófono para realizar llamadas de voz con el conductor o pasajero durante el viaje</string>
+
+	<!-- ==================== PERMISOS DE CONTACTOS ==================== -->
 	<key>NSContactsUsageDescription</key>
-	<string>Oasis Taxi necesita acceso a tus contactos para compartir viajes</string>
+	<string>Oasis Taxi necesita acceso a tus contactos para que puedas compartir tu ubicación o invitar amigos a usar la aplicación</string>
+
+	<!-- ==================== PERMISOS DE CALENDARIO ==================== -->
+	<key>NSCalendarsUsageDescription</key>
+	<string>Oasis Taxi puede agregar viajes programados a tu calendario para recordatorios</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Oasis Taxi puede crear recordatorios para viajes programados próximos</string>
+
+	<!-- ==================== PERMISOS DE NOTIFICACIONES ==================== -->
+	<key>NSUserNotificationAlertStyle</key>
+	<string>alert</string>
+	<key>NSUserNotificationSoundEnabled</key>
+	<true/>
+
+	<!-- ==================== PERMISOS DE COMPARTIR ==================== -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Oasis Taxi puede guardar recibos y comprobantes en tu galería de fotos</string>
+
+	<!-- ==================== PERMISOS DE BLUETOOTH ==================== -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Oasis Taxi puede usar Bluetooth para conectarse con dispositivos de audio manos libres durante el viaje</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Oasis Taxi puede usar Bluetooth para mejorar la conectividad con accesorios y dispositivos externos</string>
+
+	<!-- ==================== PERMISOS DE TELÉFONO ==================== -->
+	<key>NSPhoneCallUsageDescription</key>
+	<string>Oasis Taxi puede realizar llamadas directas al conductor o pasajero para coordinar el viaje</string>
+
+	<!-- ==================== PERMISOS DE MEDIOS ==================== -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Oasis Taxi puede acceder a tu biblioteca de música para reproducción durante el viaje</string>
+	<key>NSMediaLibraryUsageDescription</key>
+	<string>Oasis Taxi puede acceder a tu biblioteca de medios para una mejor experiencia</string>
+
+	<!-- ==================== PERMISOS DE RECONOCIMIENTO DE VOZ ==================== -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Oasis Taxi puede usar reconocimiento de voz para comandos por voz y búsqueda de destinos</string>
+
+	<!-- ==================== PERMISOS DE SIRI ==================== -->
+	<key>NSSiriUsageDescription</key>
+	<string>Oasis Taxi puede integrarse con Siri para solicitar viajes por voz</string>
+
+	<!-- ==================== PERMISOS DE FACE ID / TOUCH ID ==================== -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Oasis Taxi usa Face ID para autenticación segura y confirmación de pagos</string>
+
+	<!-- ==================== PERMISOS DE SALUD (OPCIONAL) ==================== -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>Oasis Taxi puede acceder a datos de salud para detectar emergencias y mejorar la seguridad</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Oasis Taxi puede registrar actividad de viajes en la app de Salud</string>
+
+	<!-- ==================== PERMISOS DE ARCHIVOS ==================== -->
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Oasis Taxi necesita acceso a la carpeta de documentos para guardar recibos y comprobantes de viaje</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Oasis Taxi puede guardar archivos descargados como facturas y comprobantes de pago</string>
 	
 	<!-- App Transport Security for Facebook -->
 	<key>NSAppTransportSecurity</key>
@@ -141,7 +205,7 @@
 	
 	<!-- Google Maps API Key -->
 	<key>GMSApiKey</key>
-	<string>AIzaSyD_xxxxxxxxxxxxxxxxxxxxxxxxxx</string>
+	<string>AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U</string>
 	
 	<!-- Firebase Configuration -->
 	<key>FirebaseAppDelegateProxyEnabled</key>
