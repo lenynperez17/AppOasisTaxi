@@ -20,9 +20,7 @@ workflows:
         script: |
           app-store-connect fetch-signing-files com.oasistaxis.app \
             --type IOS_APP_STORE \
-            --platform IOS \
-            --create \
-            --certificate-key=@file:$HOME/private_key
+            --create
       - name: Add certificates to keychain
         script: |
           keychain add-certificates
