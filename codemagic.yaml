@@ -9,6 +9,10 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.oasistaxis.app
+        provisioning_profiles:
+          - Oasis Taxi App Store
+        certificates:
+          - Oasis Taxi Distribution
       flutter: stable
       xcode: latest
       cocoapods: default
@@ -16,11 +20,6 @@ workflows:
       - name: Set up keychain
         script: |
           keychain initialize
-      - name: Fetch signing files
-        script: |
-          app-store-connect fetch-signing-files com.oasistaxis.app \
-            --type IOS_APP_STORE \
-            --create
       - name: Add certificates to keychain
         script: |
           keychain add-certificates
