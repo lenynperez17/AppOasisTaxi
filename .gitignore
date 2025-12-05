@@ -202,4 +202,4 @@ secrets/
 # Custom
 .oasis-taxi-local/
 local-data/
-test-reports/
+test-reports/app/ios/AuthKey*.p8
