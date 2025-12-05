@@ -10,7 +10,7 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.oasistaxis.app
       flutter: stable
-      xcode: 15.4
+      xcode: latest
       cocoapods: default
     scripts:
       - name: Set up code signing
