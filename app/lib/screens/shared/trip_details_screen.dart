@@ -211,22 +211,37 @@ class _TripDetailsScreenState extends State<TripDetailsScreen>
   Future<void> _openInMaps() async {
     if (_trip == null) return;
 
-    final pickup = _trip!.pickupLocation;
-    final destination = _trip!.destinationLocation;
+    final pickupAddress = _trip!.pickupAddress;
+    final destinationAddress = _trip!.destinationAddress;
 
-    final googleMapsUrl = 'https://www.google.com/maps/dir/${pickup.latitude},${pickup.longitude}/${destination.latitude},${destination.longitude}';
+    // Codificar las direcciones para URL
+    final encodedPickup = Uri.encodeComponent(pickupAddress);
+    final encodedDestination = Uri.encodeComponent(destinationAddress);
+
+    // Usar direcciones en lugar de coordenadas para mejor visualización
+    final googleMapsUrl = 'https://www.google.com/maps/dir/?api=1&origin=$encodedPickup&destination=$encodedDestination&travelmode=driving';
     final uri = Uri.parse(googleMapsUrl);
 
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context)!.cannotOpenMaps),
-          backgroundColor: ModernTheme.error,
-        ),
-      );
+      // Fallback con coordenadas si falla con direcciones
+      final pickup = _trip!.pickupLocation;
+      final destination = _trip!.destinationLocation;
+      final fallbackUrl = 'https://www.google.com/maps/dir/?api=1&origin=${pickup.latitude},${pickup.longitude}&destination=${destination.latitude},${destination.longitude}&travelmode=driving';
+      final fallbackUri = Uri.parse(fallbackUrl);
+
+      if (await canLaunchUrl(fallbackUri)) {
+        await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.cannotOpenMaps),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
     }
   }
 

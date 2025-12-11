@@ -912,26 +912,42 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
     if (_currentTrip == null) return;
 
     LatLng destination;
+    String destinationAddress;
 
     if (_tripState == DriverTripState.goingToPickup ||
-        _tripState == DriverTripState.arrivedAtPickup) {
+        _tripState == DriverTripState.arrivedAtPickup ||
+        _tripState == DriverTripState.waitingVerification) {
       destination = LatLng(
         _currentTrip!.pickupLocation.latitude,
         _currentTrip!.pickupLocation.longitude,
       );
+      destinationAddress = _currentTrip!.pickupAddress;
     } else {
       destination = LatLng(
         _currentTrip!.destinationLocation.latitude,
         _currentTrip!.destinationLocation.longitude,
       );
+      destinationAddress = _currentTrip!.destinationAddress;
     }
 
+    // Codificar la dirección para URL
+    final encodedAddress = Uri.encodeComponent(destinationAddress);
+
+    // Usar la dirección como destino principal, con coordenadas como respaldo
     final Uri mapsUri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving',
+      'https://www.google.com/maps/dir/?api=1&destination=$encodedAddress&destination_place_id=&travelmode=driving',
     );
 
     if (await canLaunchUrl(mapsUri)) {
       await launchUrl(mapsUri, mode: LaunchMode.externalApplication);
+    } else {
+      // Si falla con la dirección, intentar con coordenadas
+      final Uri fallbackUri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving',
+      );
+      if (await canLaunchUrl(fallbackUri)) {
+        await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+      }
     }
   }
 
