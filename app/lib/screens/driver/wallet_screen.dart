@@ -33,9 +33,10 @@ class _WalletScreenState extends State<WalletScreen>
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final PaymentService _paymentService = PaymentService();
   final bool _isLoading = true;
-  
-  // Balance desde Firebase
+
+  // Balance desde Firebase (colección wallets)
   double _currentBalance = 0.0;
+  bool _isBalanceLoaded = false;
   final double _weeklyEarnings = 0.0;
   final double _monthlyEarnings = 0.0;
 
@@ -140,22 +141,28 @@ class _WalletScreenState extends State<WalletScreen>
       );
     }
 
-    // ✅ FIX: Escuchar cambios de balance sin reconstruir todo el widget
-    _firestore.collection('users').doc(user.uid).snapshots().listen((snapshot) {
-      if (snapshot.exists && mounted) {
-        final userData = snapshot.data();
-        if (userData != null) {
-          final newBalance = (userData['balance'] as num?)?.toDouble() ??
-                            (userData['wallet']?['balance'] as num?)?.toDouble() ??
-                            0.0;
+    // ✅ FIX: Escuchar cambios de créditos desde la colección wallets (no users)
+    _firestore.collection('wallets').doc(user.uid).snapshots().listen((snapshot) {
+      if (mounted) {
+        if (snapshot.exists) {
+          final walletData = snapshot.data();
+          if (walletData != null) {
+            final newBalance = (walletData['serviceCredits'] as num?)?.toDouble() ?? 0.0;
 
-          // Solo actualizar si el balance cambió
-          if (_currentBalance != newBalance) {
-            if (mounted) {
+            // Solo actualizar si el balance cambió
+            if (_currentBalance != newBalance) {
               setState(() {
                 _currentBalance = newBalance;
+                _isBalanceLoaded = true;
               });
+            } else if (!_isBalanceLoaded) {
+              setState(() => _isBalanceLoaded = true);
             }
+          }
+        } else {
+          // Wallet no existe aún, mostrar 0
+          if (!_isBalanceLoaded) {
+            setState(() => _isBalanceLoaded = true);
           }
         }
       }
@@ -775,16 +782,22 @@ class _WalletScreenState extends State<WalletScreen>
                         fontSize: 16,
                       ),
                     ),
-                    Text(
-                      CurrencyFormatter.formatCurrency(
-                        _currentBalance + (double.tryParse(_rechargeAmountController.text) ?? 0.0),
-                      ),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                        color: ModernTheme.oasisGreen,
-                      ),
-                    ),
+                    _isBalanceLoaded
+                        ? Text(
+                            CurrencyFormatter.formatCurrency(
+                              _currentBalance + (double.tryParse(_rechargeAmountController.text) ?? 0.0),
+                            ),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              color: ModernTheme.oasisGreen,
+                            ),
+                          )
+                        : SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
                   ],
                 ),
               ],
@@ -1781,9 +1794,21 @@ class _WalletScreenState extends State<WalletScreen>
       Navigator.pop(context); // Cerrar diálogo de carga si todavía está abierto
 
       if (!mounted) return;
+
+      // Limpiar mensaje de error para mostrar algo amigable al usuario
+      String errorMessage = 'No se pudo procesar el retiro. Intenta nuevamente.';
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('network') || errorStr.contains('conexión')) {
+        errorMessage = 'Error de conexión. Verifica tu internet e intenta nuevamente.';
+      } else if (errorStr.contains('saldo') || errorStr.contains('fondos')) {
+        errorMessage = 'Saldo insuficiente para realizar el retiro.';
+      } else if (errorStr.contains('cuenta') || errorStr.contains('bank')) {
+        errorMessage = 'Datos de cuenta bancaria inválidos. Verifica la información.';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al procesar retiro: $e'),
+          content: Text('⚠️ $errorMessage'),
           backgroundColor: ModernTheme.error,
           duration: Duration(seconds: 5),
         ),
@@ -2660,13 +2685,22 @@ class _WalletScreenState extends State<WalletScreen>
 
                 // Esperar un momento (el saldo se actualizará automáticamente vía webhook de MercadoPago)
                 await Future.delayed(Duration(seconds: 2));
-              } else {
-                // Pago rechazado o pendiente
+              } else if (status == 'pending') {
+                // Pago pendiente - puede aprobarse después
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('⚠️ Pago $status. Verifica el estado en tu historial.'),
-                    backgroundColor: status == 'pending' ? ModernTheme.warning : ModernTheme.error,
+                    content: Text('⏳ Pago en proceso. Tu saldo se actualizará cuando sea confirmado.'),
+                    backgroundColor: ModernTheme.warning,
                     duration: Duration(seconds: 5),
+                  ),
+                );
+              } else {
+                // Pago rechazado - dar información útil al usuario
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Pago rechazado. Verifica que tu tarjeta esté habilitada para compras online y tenga fondos suficientes.'),
+                    backgroundColor: ModernTheme.error,
+                    duration: Duration(seconds: 7),
                   ),
                 );
               }
@@ -2699,9 +2733,17 @@ class _WalletScreenState extends State<WalletScreen>
       Navigator.pop(context); // Cerrar diálogo de carga si todavía está abierto
 
       if (!mounted) return;
+
+      // Mensaje amigable para el usuario
+      String errorMessage = 'No se pudo iniciar la recarga. Intenta nuevamente.';
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('network') || errorStr.contains('conexión')) {
+        errorMessage = 'Error de conexión. Verifica tu internet e intenta nuevamente.';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error al procesar recarga: $e'),
+          content: Text('⚠️ $errorMessage'),
           backgroundColor: ModernTheme.error,
           duration: Duration(seconds: 5),
         ),

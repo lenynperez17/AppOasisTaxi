@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 // ignore_for_file: library_private_types_in_public_api
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'dart:ui' as ui;
 import '../utils/logger.dart';
 
 class RealMapWidget extends StatefulWidget {
@@ -38,10 +40,41 @@ class _RealMapWidgetState extends State<RealMapWidget> {
   bool _isLoading = true;
   LatLng _currentCenter = const LatLng(-12.0464, -77.0428); // Lima, Perú por defecto
 
+  // ✅ Iconos 3D personalizados
+  BitmapDescriptor? _passengerIcon;
+  BitmapDescriptor? _destinationIcon;
+
   @override
   void initState() {
     super.initState();
+    _loadCustomIcons();
     _initializeMap();
+  }
+
+  // ✅ Cargar iconos 3D desde assets
+  Future<void> _loadCustomIcons() async {
+    try {
+      _passengerIcon = await _getBitmapFromAsset('assets/images/markers/passenger_3d.png', 60);
+      _destinationIcon = await _getBitmapFromAsset('assets/images/markers/destination_3d.png', 60);
+      if (mounted) {
+        _updateMarkers();
+        setState(() {});
+      }
+    } catch (e) {
+      AppLogger.warning('Error cargando iconos 3D: $e');
+    }
+  }
+
+  // ✅ Convertir asset PNG a BitmapDescriptor
+  Future<BitmapDescriptor> _getBitmapFromAsset(String path, int width) async {
+    final ByteData data = await rootBundle.load(path);
+    final ui.Codec codec = await ui.instantiateImageCodec(
+      data.buffer.asUint8List(),
+      targetWidth: width,
+    );
+    final ui.FrameInfo fi = await codec.getNextFrame();
+    final ByteData? byteData = await fi.image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
   }
 
   Future<void> _initializeMap() async {
@@ -95,32 +128,34 @@ class _RealMapWidgetState extends State<RealMapWidget> {
   void _updateMarkers() {
     _markers.clear();
 
-    // Marcador de recogida
+    // ✅ Marcador de recogida (pasajero) - Icono 3D
     if (widget.pickupLocation != null) {
       _markers.add(
         Marker(
           markerId: const MarkerId('pickup'),
           position: widget.pickupLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          icon: _passengerIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           infoWindow: const InfoWindow(
             title: 'Punto de recogida',
             snippet: 'Aquí te recogeremos',
           ),
+          zIndexInt: 2,
         ),
       );
     }
 
-    // Marcador de destino
+    // ✅ Marcador de destino - Icono 3D
     if (widget.dropoffLocation != null) {
       _markers.add(
         Marker(
           markerId: const MarkerId('dropoff'),
           position: widget.dropoffLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          icon: _destinationIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
           infoWindow: const InfoWindow(
             title: 'Destino',
             snippet: 'Tu destino',
           ),
+          zIndexInt: 1,
         ),
       );
     }

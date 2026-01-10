@@ -83,19 +83,29 @@ class TripModel {
     this.isVerificationCodeUsed = false,
   });
 
+  /// Crear desde Map con ID separado (para Firestore donde el ID está en el documento)
+  factory TripModel.fromMap(Map<String, dynamic> map, String id) {
+    final mapWithId = {...map, 'id': id};
+    return TripModel.fromJson(mapWithId);
+  }
+
   /// Crear desde JSON
   factory TripModel.fromJson(Map<String, dynamic> json) {
+    // ✅ CORREGIDO: Soportar ambos formatos de ubicación (lat/lng y latitude/longitude)
+    final pickupLoc = json['pickupLocation'] ?? {};
+    final destLoc = json['destinationLocation'] ?? {};
+
     return TripModel(
       id: json['id'] ?? '',
       userId: json['userId'] ?? '',
       driverId: json['driverId'],
       pickupLocation: LatLng(
-        (json['pickupLocation']['lat'] ?? 0.0).toDouble(),
-        (json['pickupLocation']['lng'] ?? 0.0).toDouble(),
+        (pickupLoc['lat'] ?? pickupLoc['latitude'] ?? 0.0).toDouble(),
+        (pickupLoc['lng'] ?? pickupLoc['longitude'] ?? 0.0).toDouble(),
       ),
       destinationLocation: LatLng(
-        (json['destinationLocation']['lat'] ?? 0.0).toDouble(),
-        (json['destinationLocation']['lng'] ?? 0.0).toDouble(),
+        (destLoc['lat'] ?? destLoc['latitude'] ?? 0.0).toDouble(),
+        (destLoc['lng'] ?? destLoc['longitude'] ?? 0.0).toDouble(),
       ),
       pickupAddress: json['pickupAddress'] ?? '',
       destinationAddress: json['destinationAddress'] ?? '',

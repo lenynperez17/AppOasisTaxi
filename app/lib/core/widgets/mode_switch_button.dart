@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/price_negotiation_provider.dart';
 import '../theme/modern_theme.dart';
 
 /// Botón para cambiar entre modos (pasajero, conductor, admin)
@@ -37,7 +38,10 @@ class ModeSwitchButton extends StatelessWidget {
           return SizedBox.shrink();
         }
 
-        final currentMode = user.activeMode;
+        // ✅ FIX: Usar modo EFECTIVO considerando documentVerified
+        // Si está en modo driver pero no tiene documentos verificados,
+        // mostrar como pasajero para consistencia visual
+        final currentMode = _getEffectiveMode(user);
         final buttonColor = backgroundColor ?? _getModeColor(currentMode);
 
         return Material(
@@ -109,6 +113,18 @@ class ModeSwitchButton extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// ✅ NUEVO: Obtener modo efectivo considerando el estado de documentos
+  /// Si está en modo driver pero no tiene documentos verificados,
+  /// retorna 'passenger' para consistencia con la navegación
+  String _getEffectiveMode(dynamic user) {
+    final activeMode = user.activeMode as String;
+    // Si es driver pero no tiene documentos verificados, mostrar como pasajero
+    if (activeMode == 'driver' && user.documentVerified != true) {
+      return 'passenger';
+    }
+    return activeMode;
   }
 
   /// Obtener color según el modo
@@ -341,6 +357,18 @@ class ModeSwitchButton extends StatelessWidget {
     Navigator.pop(dialogContext);
 
     try {
+      // ✅ CLEANUP CRÍTICO: Detener listeners del rol anterior ANTES de cambiar
+      final currentMode = authProvider.currentUser?.currentMode;
+      final priceNegProvider = Provider.of<PriceNegotiationProvider>(parentContext, listen: false);
+
+      if (currentMode == 'passenger') {
+        priceNegProvider.stopPassengerListeners();
+        debugPrint('🧹 Limpiados listeners de pasajero antes de cambiar a $targetMode');
+      } else if (currentMode == 'driver') {
+        priceNegProvider.stopDriverListeners();
+        debugPrint('🧹 Limpiados listeners de conductor antes de cambiar a $targetMode');
+      }
+
       // Cambiar modo
       final success = await authProvider.switchMode(targetMode);
 

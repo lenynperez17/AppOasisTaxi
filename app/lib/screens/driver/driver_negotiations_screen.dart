@@ -67,7 +67,17 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
           .map((doc) {
             try {
               final data = doc.data();
-              final expiresAt = DateTime.parse(data['expiresAt'] ?? now.toIso8601String());
+
+              // Parsear expiresAt que puede ser String o Timestamp
+              DateTime expiresAt;
+              final expiresAtRaw = data['expiresAt'];
+              if (expiresAtRaw is Timestamp) {
+                expiresAt = expiresAtRaw.toDate();
+              } else if (expiresAtRaw is String) {
+                expiresAt = DateTime.parse(expiresAtRaw);
+              } else {
+                expiresAt = now; // Default a ahora si no es válido
+              }
 
               // Filtrar expiradas
               if (now.isAfter(expiresAt)) return null;
@@ -94,7 +104,7 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
                 offeredPrice: (data['offeredPrice'] ?? 0.0).toDouble(),
                 distance: (data['distance'] ?? 0.0).toDouble(),
                 estimatedTime: data['estimatedTime'] ?? 0,
-                createdAt: DateTime.parse(data['createdAt'] ?? now.toIso8601String()),
+                createdAt: _parseDateTime(data['createdAt'], now),
                 expiresAt: expiresAt,
                 status: _parseStatus(data['status']),
                 driverOffers: [],
@@ -117,6 +127,16 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
       debugPrint('Error listening to negotiations: $e');
       setState(() => _isLoading = false);
     });
+  }
+
+  // Helper para parsear DateTime que puede ser String o Timestamp
+  DateTime _parseDateTime(dynamic value, DateTime defaultValue) {
+    if (value is Timestamp) {
+      return value.toDate();
+    } else if (value is String) {
+      return DateTime.tryParse(value) ?? defaultValue;
+    }
+    return defaultValue;
   }
 
   NegotiationStatus _parseStatus(String? status) {
@@ -430,6 +450,32 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
 
   Widget _buildTimer(PriceNegotiation negotiation) {
     final remaining = negotiation.timeRemaining;
+
+    // Validar tiempo negativo o expirado
+    if (remaining.isNegative || remaining.inSeconds <= 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: ModernTheme.error,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.timer_off, size: 16, color: Colors.white),
+            const SizedBox(width: 4),
+            const Text(
+              'Expirado',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final minutes = remaining.inMinutes;
     final seconds = remaining.inSeconds % 60;
 
@@ -604,18 +650,38 @@ class _DriverNegotiationsScreenState extends State<DriverNegotiationsScreen> {
               final scaffoldMessenger = ScaffoldMessenger.of(context);
 
               try {
-                await provider.makeDriverOffer(
+                // ✅ MODIFICADO: makeDriverOffer ahora retorna String? con mensaje de error
+                final error = await provider.makeDriverOffer(
                   negotiation.id,
                   price,
                 );
 
                 if (mounted) {
-                  scaffoldMessenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Oferta enviada exitosamente'),
-                      backgroundColor: ModernTheme.success,
-                    ),
-                  );
+                  if (error != null) {
+                    // ✅ Mostrar error (ej: saldo insuficiente)
+                    scaffoldMessenger.showSnackBar(
+                      SnackBar(
+                        content: Text(error),
+                        backgroundColor: ModernTheme.error,
+                        duration: const Duration(seconds: 5),
+                        action: error.contains('Saldo') ? SnackBarAction(
+                          label: 'Recargar',
+                          textColor: Colors.white,
+                          onPressed: () {
+                            // Navegar a pantalla de billetera
+                            Navigator.pushNamed(context, '/driver-wallet');
+                          },
+                        ) : null,
+                      ),
+                    );
+                  } else {
+                    scaffoldMessenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Oferta enviada exitosamente'),
+                        backgroundColor: ModernTheme.success,
+                      ),
+                    );
+                  }
                 }
               } catch (e) {
                 if (mounted) {

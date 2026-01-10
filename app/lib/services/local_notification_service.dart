@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'dart:ui';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
@@ -13,8 +15,9 @@ class LocalNotificationService {
 
   // Inicializar notificaciones
   Future<void> initialize() async {
-    // Inicializar timezone data
+    // Inicializar timezone data y configurar Lima, Perú como zona horaria
     tz_data.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('America/Lima')); // ✅ Zona horaria de Lima, Perú
     // Configuración para Android
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     
@@ -77,13 +80,14 @@ class LocalNotificationService {
     }
   }
 
-  // Mostrar notificación simple
+  // Mostrar notificación simple con sonido personalizado
   Future<void> showNotification({
     required String title,
     required String body,
     String? payload,
+    String? customSound, // ✅ Sonido personalizado opcional
   }) async {
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'oasis_taxi_channel',
       'Oasis Taxi',
       channelDescription: 'Notificaciones de Oasis Taxi',
@@ -92,15 +96,19 @@ class LocalNotificationService {
       showWhen: true,
       enableVibration: true,
       playSound: true,
+      sound: customSound != null
+          ? RawResourceAndroidNotificationSound(customSound)
+          : const RawResourceAndroidNotificationSound('notification'), // ✅ Sonido por defecto
     );
 
-    const iosDetails = DarwinNotificationDetails(
+    final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      sound: customSound != null ? '$customSound.mp3' : 'notification.mp3', // ✅ Sonido iOS
     );
 
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
@@ -115,14 +123,55 @@ class LocalNotificationService {
   }
 
   // Notificación de nueva solicitud de viaje (para conductores)
+  // ✅ MEJORADO: Usa canal con máxima prioridad, sonido largo y vibración fuerte
   Future<void> showRideRequestNotification({
     required String passengerName,
     required String pickupAddress,
     required String price,
   }) async {
-    await showNotification(
-      title: '🚗 Nueva solicitud de viaje',
-      body: '$passengerName necesita un viaje desde $pickupAddress - S/. price',
+    // ✅ Canal especial para solicitudes de viaje con sonido largo y repetitivo
+    // ✅ CORREGIDO: No usar const porque Int64List.fromList no es const
+    final androidDetails = AndroidNotificationDetails(
+      'oasis_taxi_ride_request',
+      'Solicitudes de Viaje',
+      channelDescription: 'Notificaciones de nuevas solicitudes de viaje',
+      importance: Importance.max, // ✅ Máxima importancia
+      priority: Priority.max, // ✅ Máxima prioridad
+      showWhen: true,
+      enableVibration: true,
+      playSound: true,
+      sound: const RawResourceAndroidNotificationSound('ride_request'), // ✅ Sonido personalizado
+      enableLights: true,
+      ledColor: const Color.fromARGB(255, 0, 255, 0),
+      ledOnMs: 1000,
+      ledOffMs: 500,
+      fullScreenIntent: true, // ✅ Mostrar en pantalla completa si está bloqueado
+      category: AndroidNotificationCategory.alarm, // ✅ Categoría de alarma
+      visibility: NotificationVisibility.public,
+      ticker: 'Nueva solicitud de viaje',
+      // ✅ Vibración larga y repetitiva para llamar la atención
+      vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500, 200, 500]),
+      audioAttributesUsage: AudioAttributesUsage.alarm, // ✅ Usar altavoz de alarma
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      sound: 'ride_request.mp3', // ✅ Sonido personalizado iOS
+      interruptionLevel: InterruptionLevel.timeSensitive, // ✅ Alta prioridad
+    );
+
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      '🚗 ¡NUEVA SOLICITUD!',
+      '$passengerName necesita viaje - $pickupAddress - S/. $price',
+      details,
       payload: 'ride_request',
     );
   }
@@ -137,6 +186,7 @@ class LocalNotificationService {
       title: '✅ ¡Conductor encontrado!',
       body: '$driverName está en camino - $vehicleInfo - Llegará en $estimatedTime',
       payload: 'driver_found',
+      customSound: 'success', // ✅ Sonido de éxito
     );
   }
 
@@ -146,6 +196,7 @@ class LocalNotificationService {
       title: '🚗 Tu conductor ha llegado',
       body: 'Tu conductor está esperándote en el punto de recogida',
       payload: 'driver_arrived',
+      customSound: 'notification', // ✅ Sonido de alerta
     );
   }
 
@@ -155,8 +206,9 @@ class LocalNotificationService {
   }) async {
     await showNotification(
       title: '✅ Viaje completado',
-      body: 'El viaje ha finalizado. Total: S/. price',
+      body: 'El viaje ha finalizado. Total: S/. $price',
       payload: 'trip_completed',
+      customSound: 'success', // ✅ Sonido de éxito
     );
   }
 
@@ -166,8 +218,36 @@ class LocalNotificationService {
   }) async {
     await showNotification(
       title: '💰 Pago recibido',
-      body: 'Has recibido S/. amount por el viaje completado',
+      body: 'Has recibido S/. $amount por el viaje completado',
       payload: 'payment_received',
+      customSound: 'success', // ✅ Sonido de éxito (dinero)
+    );
+  }
+
+  // ✅ NUEVO: Notificación de mensaje de chat
+  Future<void> showMessageNotification({
+    required String senderName,
+    required String message,
+    String? tripId,
+  }) async {
+    await showNotification(
+      title: '💬 Mensaje de $senderName',
+      body: message,
+      payload: 'message_$tripId',
+      customSound: 'message', // ✅ Sonido de mensaje
+    );
+  }
+
+  // ✅ NUEVO: Notificación de oferta de conductor (para pasajeros)
+  Future<void> showDriverOfferNotification({
+    required String driverName,
+    required String price,
+  }) async {
+    await showNotification(
+      title: '🚕 Nueva oferta de $driverName',
+      body: 'Te ofrece el viaje por S/. $price',
+      payload: 'driver_offer',
+      customSound: 'notification', // ✅ Sonido de alerta
     );
   }
 

@@ -19,14 +19,26 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
   // Timer para actualizar el cronómetro cada segundo
   Timer? _countdownTimer;
 
+  // ✅ CORREGIDO: Guardar referencia al provider para usar en dispose()
+  // No se puede usar Provider.of(context) en dispose() porque el context ya no es válido
+  PriceNegotiationProvider? _negotiationProvider;
+
   @override
   void initState() {
     super.initState();
 
     // ✅ NUEVO: Iniciar listener en tiempo real para recibir ofertas y cambios de status
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
-      provider.startListeningToMyNegotiations();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // ✅ CORREGIDO: Guardar referencia al provider para usar en dispose()
+      _negotiationProvider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+
+      // ✅ IMPORTANTE: Limpiar negociaciones cuyo viaje fue cancelado ANTES de escuchar
+      await _negotiationProvider!.cleanupCancelledNegotiations();
+
+      // ✅ NUEVO: Expirar negociaciones vencidas automáticamente
+      await _negotiationProvider!.expireOldNegotiations();
+
+      _negotiationProvider!.startListeningToMyNegotiations();
     });
 
     // Iniciar timer para actualizar el cronómetro cada segundo
@@ -35,8 +47,71 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
         setState(() {
           // Forzar rebuild para actualizar el cronómetro
         });
+
+        // ✅ NUEVO: Verificar y expirar negociaciones automáticamente cada segundo
+        _checkAndExpireNegotiations();
       }
     });
+  }
+
+  // ✅ NUEVO: Verificar negociaciones expiradas en cada tick del timer
+  void _checkAndExpireNegotiations() {
+    final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final currentUserId = authProvider.currentUser?.id ?? '';
+    final now = DateTime.now();
+
+    // Obtener las negociaciones activas del usuario
+    final myActiveNegotiations = provider.activeNegotiations
+        .where((n) => n.passengerId == currentUserId)
+        .where((n) =>
+            n.status == NegotiationStatus.waiting ||
+            n.status == NegotiationStatus.negotiating)
+        .toList();
+
+    // Verificar si hay negociaciones que acaban de expirar
+    bool anyExpired = false;
+    for (final negotiation in myActiveNegotiations) {
+      if (negotiation.expiresAt.isBefore(now)) {
+        // Expirar esta negociación
+        debugPrint('⏰ Auto-expirando negociación: ${negotiation.id}');
+        provider.expireOldNegotiations();
+        anyExpired = true;
+        break; // Solo procesar una a la vez
+      }
+    }
+
+    // ✅ NUEVO: Si TODAS las negociaciones expiraron, navegar al home automáticamente
+    if (anyExpired) {
+      // Verificar si quedan negociaciones válidas después de expirar
+      final remainingValid = provider.activeNegotiations
+          .where((n) => n.passengerId == currentUserId)
+          .where((n) =>
+              n.status == NegotiationStatus.waiting ||
+              n.status == NegotiationStatus.negotiating)
+          .where((n) => n.expiresAt.isAfter(now))
+          .toList();
+
+      if (remainingValid.isEmpty && mounted) {
+        debugPrint('🏠 Todas las negociaciones expiraron, volviendo al home');
+
+        // Mostrar mensaje y navegar
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tu solicitud ha expirado. Puedes crear una nueva.'),
+            backgroundColor: ModernTheme.warning,
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        // Navegar al home después de un breve delay para que se vea el mensaje
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        });
+      }
+    }
   }
 
   @override
@@ -44,9 +119,9 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
     _countdownTimer?.cancel();
     _countdownTimer = null;
 
-    // ✅ Detener listener al salir
-    final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
-    provider.stopListeningToNegotiations();
+    // ✅ CORREGIDO: Usar la referencia guardada en lugar de Provider.of(context)
+    // Provider.of(context) no funciona en dispose() porque el context ya no es válido
+    _negotiationProvider?.stopListeningToNegotiations();
 
     super.dispose();
   }
@@ -69,7 +144,7 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
               .where((n) => n.status == NegotiationStatus.accepted)
               .toList();
 
-          // Si hay una negociación aceptada, navegar al tracking
+          // Si hay una negociación aceptada, verificar estado del viaje antes de navegar
           if (acceptedNegotiations.isNotEmpty) {
             final acceptedNeg = acceptedNegotiations.first;
             debugPrint('🎉 Negociación aceptada detectada: ${acceptedNeg.id}');
@@ -81,6 +156,14 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
             // Usar addPostFrameCallback para navegar después del build
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               if (!mounted) return;
+
+              // ✅ IMPORTANTE: Verificar si el viaje está cancelado ANTES de navegar
+              final wasCancelled = await provider.checkAndHandleCancelledRide(acceptedNeg.id);
+              if (wasCancelled) {
+                debugPrint('⚠️ Viaje cancelado detectado, no se navega al tracking');
+                // El método ya actualizó la negociación a cancelled, el UI se actualizará solo
+                return;
+              }
 
               // Obtener el rideId desde Firestore
               final rideId = await provider.getRideIdForNegotiation(acceptedNeg.id);
@@ -104,11 +187,14 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
             });
           }
 
+          // ✅ CORREGIDO: Filtrar también por tiempo de expiración
+          final now = DateTime.now();
           final myNegotiations = provider.activeNegotiations
               .where((n) => n.passengerId == currentUserId)
               .where((n) =>
                   n.status == NegotiationStatus.waiting ||
                   n.status == NegotiationStatus.negotiating)
+              .where((n) => n.expiresAt.isAfter(now)) // ✅ Solo las no expiradas
               .toList();
 
           if (myNegotiations.isEmpty) {
@@ -318,12 +404,87 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
                     ),
                   ),
                 ],
+
+                // ✅ NUEVO: Botón de cancelar siempre visible
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _cancelNegotiation(negotiation.id),
+                    icon: const Icon(Icons.close, color: ModernTheme.error),
+                    label: const Text(
+                      'Cancelar solicitud',
+                      style: TextStyle(color: ModernTheme.error),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: ModernTheme.error),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  // ✅ NUEVO: Método para cancelar negociación
+  Future<void> _cancelNegotiation(String negotiationId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancelar solicitud'),
+        content: const Text(
+          '¿Estás seguro de que quieres cancelar esta solicitud de viaje?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.error,
+            ),
+            child: const Text('Sí, cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final provider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+
+      try {
+        await provider.cancelNegotiation(negotiationId);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Solicitud cancelada'),
+              backgroundColor: ModernTheme.warning,
+            ),
+          );
+
+          // Volver al home si no quedan negociaciones
+          if (provider.activeNegotiations.isEmpty) {
+            Navigator.pop(context);
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al cancelar: $e'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+      }
+    }
   }
 
   Widget _buildOfferCard(DriverOffer offer, String negotiationId) {
@@ -418,6 +579,32 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
 
   Widget _buildTimer(PriceNegotiation negotiation) {
     final remaining = negotiation.timeRemaining;
+
+    // ✅ CORREGIDO: Si el tiempo es negativo o cero, mostrar "Expirado"
+    if (remaining.isNegative || remaining.inSeconds <= 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: ModernTheme.error,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.timer_off, size: 16, color: Colors.white),
+            const SizedBox(width: 4),
+            const Text(
+              'Expirado',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final minutes = remaining.inMinutes;
     final seconds = remaining.inSeconds % 60;
 
@@ -430,12 +617,12 @@ class _PassengerNegotiationsScreenState extends State<PassengerNegotiationsScree
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.timer, size: 16, color: Theme.of(context).colorScheme.onPrimary),
+          Icon(Icons.timer, size: 16, color: Colors.white),
           const SizedBox(width: 4),
           Text(
             '$minutes:${seconds.toString().padLeft(2, '0')}',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.surface,
+            style: const TextStyle(
+              color: Colors.white,
               fontWeight: FontWeight.bold,
             ),
           ),

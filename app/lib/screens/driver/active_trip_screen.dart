@@ -875,8 +875,28 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   // ==================== UTILIDADES ====================
 
   Future<void> _callPassenger() async {
-    final phone = _currentTrip?.vehicleInfo?['passengerPhone'];
-    if (phone == null) {
+    // ✅ CORREGIDO: Buscar teléfono en vehicleInfo o passengerInfo
+    String? phone = _currentTrip?.vehicleInfo?['passengerPhone'];
+    phone ??= _currentTrip?.vehicleInfo?['phone'];
+
+    // ✅ FALLBACK: Si no está en vehicleInfo, buscar en Firestore
+    if (phone == null || phone.isEmpty) {
+      final passengerId = _currentTrip?.userId;
+      if (passengerId != null) {
+        try {
+          final passengerDoc = await _firestore.collection('users').doc(passengerId).get();
+          if (passengerDoc.exists) {
+            final data = passengerDoc.data();
+            phone = data?['phone'] ?? data?['phoneNumber'];
+          }
+        } catch (e) {
+          debugPrint('Error obteniendo teléfono del pasajero: $e');
+        }
+      }
+    }
+
+    if (phone == null || phone.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Número de teléfono no disponible'),
@@ -1360,41 +1380,106 @@ class _ActiveTripScreenState extends State<ActiveTripScreen>
   }
 
   Widget _buildSecondaryButtons() {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _openNavigation,
-            icon: const Icon(Icons.navigation),
-            label: const Text('Navegar'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _openNavigation,
+                icon: const Icon(Icons.navigation),
+                label: const Text('Navegar'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  // Mostrar diálogo de emergencia o cancelación
+                  _showEmergencyOptions();
+                },
+                icon: const Icon(Icons.warning, color: ModernTheme.error),
+                label: const Text('Emergencia', style: TextStyle(color: ModernTheme.error)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: const BorderSide(color: ModernTheme.error),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        // Botón para completar viaje manualmente (cuando está en progreso)
+        if (_tripState == DriverTripState.inProgress) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _forceCompleteTrip,
+              icon: const Icon(Icons.check_circle_outline, color: ModernTheme.success),
+              label: const Text(
+                'Completar viaje manualmente',
+                style: TextStyle(color: ModernTheme.success),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                side: const BorderSide(color: ModernTheme.success),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () {
-              // Mostrar diálogo de emergencia o cancelación
-              _showEmergencyOptions();
-            },
-            icon: const Icon(Icons.warning, color: ModernTheme.error),
-            label: const Text('Emergencia', style: TextStyle(color: ModernTheme.error)),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              side: const BorderSide(color: ModernTheme.error),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
+        ],
       ],
     );
+  }
+
+  /// Forzar completar viaje manualmente (sin depender del GPS)
+  Future<void> _forceCompleteTrip() async {
+    // Confirmar con más énfasis que es manual
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber, color: ModernTheme.warning),
+            SizedBox(width: 8),
+            Text('Completar manualmente'),
+          ],
+        ),
+        content: const Text(
+          '¿Estás seguro de que el pasajero ya llegó a su destino?\n\n'
+          'Usa esta opción solo si el GPS no detectó la llegada correctamente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.success,
+            ),
+            child: const Text('Sí, completar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _completeTrip();
+    }
   }
 
   void _showEmergencyOptions() {

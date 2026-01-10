@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -142,16 +143,24 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
         debugPrint('=== CONDUCTOR DEBUG END ===');
 
         // CORREGIDO: Agregar cada documento con su URL y log para debug
+        // ✅ FIX 2026-01-05: Si conductor está verificado, documentos también están verificados
+        final bool isDriverVerified = data['isVerified'] == true;
+
         void addDoc(String type, String key) {
           final url = docsData[key]?.toString();
           final hasUrl = url != null && url.isNotEmpty;
-          debugPrint('DOC $type: hasUrl=$hasUrl, key=$key');
+          // Si el conductor está verificado, los documentos están verificados
+          // Usar 'verified' para consistencia con el switch case
+          final docStatus = hasUrl
+              ? (isDriverVerified ? 'verified' : 'pending')
+              : 'missing';
+          debugPrint('DOC $type: hasUrl=$hasUrl, key=$key, status=$docStatus');
           if (hasUrl) {
             debugPrint('  URL FOUND: ${url.substring(0, url.length > 80 ? 80 : url.length)}...');
           }
           documents.add(Document(
             type: type,
-            status: hasUrl ? 'pending' : 'missing',
+            status: docStatus,
             url: url,
           ));
         }
@@ -218,15 +227,22 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
           }
         
         // Determinar estado del conductor
+        // ✅ FIX 2026-01-05: Considerar isVerified == null como pendiente
+        debugPrint('🔍 ESTADO CONDUCTOR ${data['fullName']}: isSuspended=${data['isSuspended']}, isActive=${data['isActive']}, isVerified=${data['isVerified']}');
         DriverStatus status;
         if (data['isSuspended'] == true) {
           status = DriverStatus.suspended;
+          debugPrint('   → STATUS: suspended');
         } else if (data['isActive'] == false) {
           status = DriverStatus.inactive;
-        } else if (data['isVerified'] == false) {
+          debugPrint('   → STATUS: inactive');
+        } else if (data['isVerified'] != true) {
+          // ✅ FIX: Si isVerified es false O null, el conductor está pendiente
           status = DriverStatus.pending;
+          debugPrint('   → STATUS: pending (isVerified != true)');
         } else {
           status = DriverStatus.active;
+          debugPrint('   → STATUS: active');
         }
         
           loadedDrivers.add(Driver(
@@ -365,6 +381,12 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          // Botón para agregar conductor (movido del FloatingActionButton)
+          IconButton(
+            icon: Icon(Icons.person_add, color: Theme.of(context).colorScheme.onPrimary),
+            tooltip: 'Agregar Conductor',
+            onPressed: _addNewDriver,
+          ),
           IconButton(
             icon: Icon(Icons.filter_list, color: Theme.of(context).colorScheme.onPrimary),
             onPressed: _showFilterDialog,
@@ -557,12 +579,6 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
         ],
       ),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addNewDriver,
-        backgroundColor: ModernTheme.oasisGreen,
-        icon: Icon(Icons.person_add, color: Theme.of(context).colorScheme.onPrimary),
-        label: Text('Agregar Conductor', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
-      ),
     );
   }
   
@@ -882,6 +898,7 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
               
               switch (doc.status) {
                 case 'verified':
+                case 'approved':  // ✅ FIX: También reconocer 'approved'
                   color = ModernTheme.success;
                   icon = Icons.check_circle;
                   break;
@@ -896,6 +913,10 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
                 case 'rejected':
                   color = ModernTheme.error;
                   icon = Icons.cancel;
+                  break;
+                case 'missing':
+                  color = ModernTheme.textSecondary;
+                  icon = Icons.cloud_off;
                   break;
                 default:
                   color = ModernTheme.textSecondary;
@@ -988,6 +1009,16 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
                 _sendMessage(driver);
               },
             ),
+            // ✅ OPCIÓN PARA PRUEBAS: Resetear a pendiente
+            ListTile(
+              leading: Icon(Icons.restart_alt, color: ModernTheme.warning),
+              title: Text('Resetear a pendiente'),
+              subtitle: Text('Para pruebas de aprobación'),
+              onTap: () {
+                Navigator.pop(context);
+                _resetToPending(driver);
+              },
+            ),
             ListTile(
               leading: Icon(Icons.delete, color: ModernTheme.error),
               title: Text('Eliminar conductor', style: TextStyle(color: ModernTheme.error)),
@@ -1001,11 +1032,100 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
       ),
     );
   }
+
+  // ✅ NUEVO: Resetear conductor a estado pendiente (para pruebas)
+  Future<void> _resetToPending(Driver driver) async {
+    try {
+      // Actualizar colección 'users'
+      await _firestore.collection('users').doc(driver.id).update({
+        'isVerified': false,
+        'driverStatus': 'pending_approval',
+        'documentVerified': false,
+        'approvedAt': FieldValue.delete(),
+        'approvedBy': FieldValue.delete(),
+      });
+
+      // Actualizar colección 'drivers' si existe
+      await _firestore.collection('drivers').doc(driver.id).set({
+        'isVerified': false,
+        'verificationStatus': 'pending',
+        'isActive': false,
+      }, SetOptions(merge: true));
+
+      debugPrint('✅ Conductor ${driver.name} reseteado a pendiente');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Conductor reseteado a pendiente'),
+          backgroundColor: ModernTheme.success,
+        ),
+      );
+
+      // Recargar lista
+      _loadDriversFromFirebase();
+    } catch (e) {
+      debugPrint('❌ Error reseteando: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: ModernTheme.error),
+      );
+    }
+  }
+
+  // ✅ ANTERIOR: Sincronizar estado entre colecciones users y drivers
+  Future<void> _syncDriverStatus(Driver driver) async {
+    try {
+      // Leer estado actual de users
+      final userDoc = await _firestore.collection('users').doc(driver.id).get();
+      final userData = userDoc.data();
+
+      if (userData == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se encontró el usuario'), backgroundColor: ModernTheme.error),
+        );
+        return;
+      }
+
+      final isVerified = userData['isVerified'] == true;
+      final driverStatus = userData['driverStatus'] ?? 'pending_approval';
+
+      // Sincronizar a colección drivers
+      await _firestore.collection('drivers').doc(driver.id).set({
+        'isVerified': isVerified,
+        'verificationStatus': isVerified ? 'approved' : (driverStatus == 'pending_approval' ? 'pending' : driverStatus),
+        'verificationDate': isVerified ? FieldValue.serverTimestamp() : null,
+        'isActive': userData['isActive'] ?? true,
+        'syncedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      debugPrint('✅ Estado sincronizado para ${driver.name}: isVerified=$isVerified');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Estado sincronizado correctamente'),
+          backgroundColor: ModernTheme.success,
+        ),
+      );
+
+      // Recargar lista
+      _loadDriversFromFirebase();
+    } catch (e) {
+      debugPrint('❌ Error sincronizando: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: ModernTheme.error),
+      );
+    }
+  }
   
   // ✅ CORREGIDO: Aprobar conductor con todos los campos necesarios
+  // ✅ FIX 2026-01-05: Actualizar AMBAS colecciones (users Y drivers)
   Future<void> _approveDriver(Driver driver) async {
     try {
-      // Actualizar en Firebase - todos los campos necesarios para que funcione
+      // 1. Actualizar colección 'users' - datos principales del usuario
       await _firestore.collection('users').doc(driver.id).update({
         'status': 'active',
         'isActive': true,
@@ -1017,6 +1137,19 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
         'approvedBy': 'admin',
         'updatedAt': FieldValue.serverTimestamp(),
       });
+
+      // 2. ✅ FIX: Actualizar colección 'drivers' - DocumentProvider lee de aquí
+      await _firestore.collection('drivers').doc(driver.id).set({
+        'isVerified': true,
+        'verificationStatus': 'approved',
+        'verificationDate': FieldValue.serverTimestamp(),
+        'isActive': true,
+        'approvedAt': FieldValue.serverTimestamp(),
+        'approvedBy': 'admin',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      debugPrint('✅ Conductor ${driver.name} aprobado en users Y drivers');
 
       // Actualizar localmente
       if (!mounted) return;
@@ -1776,12 +1909,19 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
               navigator.pop();
 
               try {
-                // Crear usuario en Firebase (esto requiere Cloud Functions en producción)
-                // Por ahora lo agregamos directamente a Firestore
-                final newDriverRef = _firestore.collection('users').doc();
+                // 1. Crear usuario en Firebase Auth
+                // NOTA: Esto cerrará la sesión del admin actual (limitación de Firebase Auth)
+                // En producción, esto debería hacerse mediante Cloud Functions
+                final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+                  email: email,
+                  password: password,
+                );
 
-                await newDriverRef.set({
-                  'id': newDriverRef.id,
+                final newUserId = userCredential.user!.uid;
+
+                // 2. Crear documento en Firestore con el UID de Auth
+                await _firestore.collection('users').doc(newUserId).set({
+                  'id': newUserId,
                   'fullName': name,
                   'email': email,
                   'phone': phone,
@@ -1798,21 +1938,57 @@ class _DriversManagementScreenState extends State<DriversManagementScreen>
                   'updatedAt': FieldValue.serverTimestamp(),
                   'rating': 5.0,
                   'totalTrips': 0,
+                  'totalEarnings': 0.0,
                   'balance': 0.0,
-                  // Nota: La contraseña se debe manejar con Firebase Auth en producción
+                  'currentMode': 'driver',
                 });
+
+                // 3. Crear documento en colección drivers también
+                await _firestore.collection('drivers').doc(newUserId).set({
+                  'userId': newUserId,
+                  'email': email,
+                  'fullName': name,
+                  'phone': phone,
+                  'license': license,
+                  'isVerified': false,
+                  'verificationStatus': 'pending',
+                  'isActive': true,
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+
+                // 4. Cerrar sesión del nuevo usuario y restaurar el admin
+                await FirebaseAuth.instance.signOut();
+
+                // 5. Re-autenticar como admin (el admin deberá volver a iniciar sesión)
+                // Nota: En producción usar Cloud Functions para evitar esto
 
                 if (!mounted) return;
 
                 messenger.showSnackBar(
                   SnackBar(
-                    content: Text('Conductor agregado exitosamente. Debe completar su registro.'),
+                    content: Text('✅ Conductor creado: $email\nNota: Debes volver a iniciar sesión como admin'),
                     backgroundColor: ModernTheme.success,
+                    duration: Duration(seconds: 5),
                   ),
                 );
 
                 // Recargar lista
                 _loadDriversFromFirebase();
+              } on FirebaseAuthException catch (e) {
+                if (!mounted) return;
+
+                String errorMsg = 'Error al crear conductor';
+                if (e.code == 'email-already-in-use') {
+                  errorMsg = 'El email ya está registrado';
+                } else if (e.code == 'invalid-email') {
+                  errorMsg = 'Email inválido';
+                } else if (e.code == 'weak-password') {
+                  errorMsg = 'La contraseña es muy débil';
+                }
+
+                messenger.showSnackBar(
+                  SnackBar(content: Text(errorMsg), backgroundColor: ModernTheme.error),
+                );
               } catch (e) {
                 if (!mounted) return;
 
@@ -2209,8 +2385,9 @@ class _DriverDetailsModalState extends State<DriverDetailsModal> {
 
     switch (doc.status) {
       case 'verified':
+      case 'approved':  // ✅ FIX: También aceptar 'approved'
         statusColor = ModernTheme.success;
-        statusText = 'Verificado';
+        statusText = 'Aprobado';
         statusIcon = Icons.check_circle;
         break;
       case 'pending':

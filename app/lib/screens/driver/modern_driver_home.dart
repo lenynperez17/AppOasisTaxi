@@ -12,8 +12,14 @@ import '../../widgets/animated/modern_animated_widgets.dart';
 import '../../widgets/common/oasis_app_bar.dart';
 import '../../models/price_negotiation_model.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/wallet_provider.dart';
+import '../../providers/document_provider.dart';
 
 import '../../utils/logger.dart';
+import '../../services/local_notification_service.dart';
+import '../../models/trip_model.dart';
+import '../../core/constants/credit_constants.dart';
+import 'active_trip_screen.dart';
 class ModernDriverHomeScreen extends StatefulWidget {
   const ModernDriverHomeScreen({super.key});
 
@@ -49,13 +55,26 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
   LatLng? _currentLocation;
   StreamSubscription<Position>? _positionStreamSubscription;
 
+  // ✅ NUEVO: Control para seguir la ubicación del conductor en el mapa
+  bool _followDriverLocation = true;
+
   // ✅ LISTENER EN TIEMPO REAL PARA RIDES
   StreamSubscription<QuerySnapshot>? _ridesStreamSubscription;
+
+  // ✅ NUEVO: Listener para viajes activos del conductor (cuando ya tiene un viaje asignado)
+  StreamSubscription<QuerySnapshot>? _activeRideSubscription;
 
   // Estadísticas del día
   double _todayEarnings = 0.0;
   int _todayTrips = 0;
   double _acceptanceRate = 0.0; // ✅ FIX: Calcular dinámicamente desde Firebase
+
+  // ✅ SISTEMA DE CRÉDITOS
+  double _serviceCredits = 0.0;
+  double _serviceFee = 1.0;
+  double _minServiceCredits = CreditConstants.minServiceCredits; // ✅ Usa constante centralizada
+  bool _hasEnoughCredits = false;
+  bool _isCheckingCredits = true;
 
   @override
   void initState() {
@@ -91,8 +110,9 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
   
   Future<void> _initializeDriver() async {
     try {
-      // ✅ CORREGIDO: Obtener ID del usuario autenticado desde AuthProvider
+      // ✅ OBTENER TODOS LOS PROVIDERS ANTES DE CUALQUIER AWAIT
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final docProvider = Provider.of<DocumentProvider>(context, listen: false);
       final currentUser = authProvider.currentUser;
 
       if (currentUser == null) {
@@ -103,10 +123,136 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       // ✅ CORREGIDO: Usar ID real del usuario (NO mock/placeholder)
       _driverId = currentUser.id;
       AppLogger.info('✅ Conductor inicializado: ${currentUser.fullName} (${currentUser.id})');
+
+      // ✅ NUEVO: Limpiar rides "zombie" ANTES de iniciar el listener
+      // Esto evita que aparezca "Yendo al punto de recogida" por rides antiguos no completados
+      await _cleanupZombieRides();
+      if (!mounted) return;
+
+      // ✅ NUEVO: Iniciar listener de viajes activos INMEDIATAMENTE
+      // Esto detectará si el conductor ya tiene un viaje asignado
+      _startActiveRideListener();
+
+      // ✅ VERIFICAR CRÉDITOS DEL CONDUCTOR
+      await _checkDriverCredits();
+      if (!mounted) return;
+
+      // ✅ CARGAR ESTADO DE VERIFICACIÓN DE DOCUMENTOS
+      await docProvider.loadVerificationStatus(_driverId!);
+      if (!mounted) return;
+
       // Cargar estadísticas iniciales
       await _loadTodayStats();
     } catch (e) {
       AppLogger.error('Error inicializando conductor: $e');
+    }
+  }
+
+  // ✅ MEJORADO: Limpiar rides "zombie" (viajes aceptados que nunca se completaron)
+  // ✅ FIX 2026-01-05: Reducido a 30 minutos y agregado logging detallado
+  Future<void> _cleanupZombieRides() async {
+    if (_driverId == null) return;
+
+    try {
+      final now = DateTime.now();
+      // ✅ REDUCIDO: De 2 horas a 30 minutos para ser más agresivo con los zombies
+      final thirtyMinutesAgo = now.subtract(const Duration(minutes: 30));
+
+      AppLogger.info('🧹 Buscando rides zombie para conductor: $_driverId');
+
+      // Buscar TODOS los rides activos del conductor
+      final activeRides = await _firestore
+          .collection('rides')
+          .where('driverId', isEqualTo: _driverId)
+          .where('status', whereIn: ['accepted', 'arriving', 'arrived'])
+          .get();
+
+      AppLogger.info('🧹 Encontrados ${activeRides.docs.length} rides activos del conductor');
+
+      int cleanedCount = 0;
+      for (var doc in activeRides.docs) {
+        final data = doc.data();
+        final acceptedAt = (data['acceptedAt'] as Timestamp?)?.toDate();
+        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+        final status = data['status'] as String?;
+        final passengerId = data['passengerId'] as String?;
+
+        // Usar acceptedAt o createdAt, el que esté disponible
+        final rideStartTime = acceptedAt ?? createdAt;
+
+        AppLogger.info('🔍 Ride ${doc.id}: status=$status, acceptedAt=$acceptedAt, createdAt=$createdAt, passengerId=$passengerId');
+
+        // Si el ride fue creado/aceptado hace más de 30 minutos, limpiarlo
+        if (rideStartTime != null && rideStartTime.isBefore(thirtyMinutesAgo)) {
+          await doc.reference.update({
+            'status': 'cancelled',
+            'cancelReason': 'auto_cleanup_stale_ride',
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancelledBy': 'system',
+          });
+          cleanedCount++;
+          final minutesAgo = now.difference(rideStartTime).inMinutes;
+          AppLogger.info('🧹 Ride zombie limpiado: ${doc.id} (creado hace $minutesAgo minutos)');
+        } else if (rideStartTime == null) {
+          // Si no tiene fecha, también limpiarlo (datos corruptos)
+          await doc.reference.update({
+            'status': 'cancelled',
+            'cancelReason': 'auto_cleanup_corrupt_ride',
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancelledBy': 'system',
+          });
+          cleanedCount++;
+          AppLogger.info('🧹 Ride corrupto limpiado (sin fecha): ${doc.id}');
+        } else {
+          // Ride reciente, NO limpiar pero logear para debug
+          final minutesAgo = now.difference(rideStartTime).inMinutes;
+          AppLogger.warning('⚠️ Ride reciente NO limpiado: ${doc.id} (hace $minutesAgo min) - Se mostrará ActiveTripScreen');
+        }
+      }
+
+      if (cleanedCount > 0) {
+        AppLogger.info('🧹 Total de rides zombie limpiados: $cleanedCount');
+      } else if (activeRides.docs.isEmpty) {
+        AppLogger.info('✅ No hay rides activos para este conductor');
+      }
+    } catch (e) {
+      AppLogger.warning('Error limpiando rides zombie: $e');
+      // No lanzar excepción, continuar con el flujo normal
+    }
+  }
+
+  // ✅ VERIFICAR CRÉDITOS DEL CONDUCTOR
+  Future<void> _checkDriverCredits() async {
+    if (_isDisposed) return;
+
+    setState(() => _isCheckingCredits = true);
+
+    try {
+      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final creditStatus = await walletProvider.checkCreditStatus();
+
+      if (_isDisposed) return;
+
+      setState(() {
+        _serviceCredits = (creditStatus['currentCredits'] ?? 0.0).toDouble();
+        _serviceFee = (creditStatus['serviceFee'] ?? 1.0).toDouble();
+        _minServiceCredits = (creditStatus['minCredits'] ?? 5.0).toDouble();
+        _hasEnoughCredits = creditStatus['hasEnoughCredits'] ?? false;
+        _isCheckingCredits = false;
+      });
+
+      AppLogger.info('💳 Créditos del conductor: S/. $_serviceCredits (Mínimo: S/. $_minServiceCredits, Costo/servicio: S/. $_serviceFee)');
+
+      if (!_hasEnoughCredits) {
+        AppLogger.warning('⚠️ Conductor sin créditos suficientes para aceptar servicios');
+      }
+    } catch (e) {
+      AppLogger.error('Error verificando créditos: $e');
+      if (_isDisposed) return;
+      setState(() {
+        _hasEnoughCredits = false;
+        _isCheckingCredits = false;
+      });
     }
   }
   
@@ -150,11 +296,42 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
               title: const Text('Cerrar Sesión'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                _showLogoutConfirmation();
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Confirmación de logout
+  void _showLogoutConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cerrar Sesión'),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                '/login',
+                (route) => false,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.error,
+            ),
+            child: const Text('Cerrar Sesión'),
+          ),
+        ],
       ),
     );
   }
@@ -169,6 +346,9 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
     // ✅ DETENER LISTENER DE RIDES
     _stopRidesListener();
+
+    // ✅ DETENER LISTENER DE VIAJES ACTIVOS
+    _stopActiveRideListener();
 
     // ✅ Liberar MapController para evitar ImageReader buffer warnings
     _mapController?.dispose();
@@ -240,6 +420,13 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
           _updateMapMarkers(); // ✅ Actualizar marcador del conductor en el mapa
         });
 
+        // ✅ NUEVO: Mover cámara para seguir al conductor automáticamente
+        if (_followDriverLocation && _mapController != null) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLng(newLocation),
+          );
+        }
+
         // ✅ ACTUALIZAR ubicación en Firebase cada 10 segundos
         if (_driverId != null && _isOnline) {
           await _updateLocationInFirebase(newLocation);
@@ -293,9 +480,11 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       }
 
       // ✅ Escuchar rides con status 'requested' o 'searching_driver' en tiempo real
+      // ✅ IMPORTANTE: limit(100) requerido por las reglas de Firestore
       _ridesStreamSubscription = _firestore
           .collection('rides')
           .where('status', whereIn: ['requested', 'searching_driver'])
+          .limit(100)
           .snapshots()
           .listen(
         (snapshot) async {
@@ -372,18 +561,26 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
           // ✅ Actualizar lista de solicitudes disponibles
           if (!_isDisposed && mounted) {
-            setState(() {
-              // ✅ Combinar rides de la colección 'rides' con los existentes de 'negotiations'
-              // Evitar duplicados usando un Set de IDs
-              final existingIds = _availableRequests.map((r) => r.id).toSet();
-              final newRides = nearbyRides.where((r) => !existingIds.contains(r.id)).toList();
+            // ✅ Detectar nuevos rides para enviar notificación
+            final existingIds = _availableRequests.map((r) => r.id).toSet();
+            final newRides = nearbyRides.where((r) => !existingIds.contains(r.id)).toList();
 
+            setState(() {
               _availableRequests.addAll(newRides);
               _updateMapMarkers();
             });
 
-            if (nearbyRides.isNotEmpty) {
-              AppLogger.info('✅ ${nearbyRides.length} rides cercanos detectados en tiempo real');
+            // ✅ NUEVO: Enviar notificación con sonido para cada nuevo ride
+            if (newRides.isNotEmpty) {
+              AppLogger.info('✅ ${newRides.length} rides cercanos detectados en tiempo real');
+
+              // Enviar notificación para el primer nuevo ride
+              final firstNewRide = newRides.first;
+              LocalNotificationService().showRideRequestNotification(
+                passengerName: firstNewRide.passengerName,
+                pickupAddress: firstNewRide.pickup.address,
+                price: firstNewRide.offeredPrice.toStringAsFixed(2),
+              );
             }
           }
         },
@@ -403,6 +600,294 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
     _ridesStreamSubscription?.cancel();
     _ridesStreamSubscription = null;
     AppLogger.debug('🛑 Listener de rides detenido');
+  }
+
+  // ✅ NUEVO: Iniciar listener para viajes activos del conductor
+  void _startActiveRideListener() {
+    if (_driverId == null) {
+      AppLogger.warning('⚠️ No hay driverId para listener de viajes activos');
+      return;
+    }
+
+    // ✅ FIX: Validar que el usuario está en modo conductor y no hay cambio de rol en progreso
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.isRoleSwitchInProgress) {
+      AppLogger.warning('⚠️ Cambio de rol en progreso, no iniciar listener');
+      return;
+    }
+    if (authProvider.currentUser?.currentMode != 'driver') {
+      AppLogger.warning('⚠️ Usuario no está en modo conductor, no iniciar listener');
+      return;
+    }
+
+    // Cancelar cualquier listener anterior
+    _activeRideSubscription?.cancel();
+
+    AppLogger.info('🔄 Iniciando listener de viajes activos para conductor: $_driverId');
+
+    // Escuchar viajes donde el conductor está asignado y el status es activo
+    _activeRideSubscription = _firestore
+        .collection('rides')
+        .where('driverId', isEqualTo: _driverId)
+        .where('status', whereIn: ['accepted', 'arriving', 'arrived', 'in_progress'])
+        .limit(1)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (_isDisposed || !mounted) return;
+
+        if (snapshot.docs.isNotEmpty) {
+          final rideDoc = snapshot.docs.first;
+          final rideData = rideDoc.data();
+          final rideId = rideDoc.id;
+          final status = rideData['status'] as String?;
+
+          AppLogger.info('🚗 Viaje activo detectado: $rideId (status: $status)');
+
+          // Navegar a la pantalla de viaje activo
+          _navigateToActiveTrip(rideId, rideData);
+        }
+      },
+      onError: (e) {
+        AppLogger.error('❌ Error en listener de viajes activos: $e');
+      },
+    );
+  }
+
+  // ✅ MEJORADO: Verificar si el viaje es reciente o zombie antes de navegar
+  // FIX 2026-01-05: Preguntar al usuario si quiere continuar con viajes antiguos
+  void _navigateToActiveTrip(String tripId, Map<String, dynamic> tripData) {
+    if (!mounted) return;
+
+    // Detener listener para evitar navegaciones múltiples
+    _activeRideSubscription?.cancel();
+
+    // Verificar la antigüedad del viaje
+    final acceptedAt = (tripData['acceptedAt'] as Timestamp?)?.toDate();
+    final createdAt = (tripData['createdAt'] as Timestamp?)?.toDate();
+    final rideStartTime = acceptedAt ?? createdAt;
+    final now = DateTime.now();
+
+    // Si el viaje tiene más de 30 minutos, preguntar al usuario
+    if (rideStartTime != null && now.difference(rideStartTime).inMinutes > 30) {
+      final minutesAgo = now.difference(rideStartTime).inMinutes;
+      AppLogger.warning('⚠️ Viaje antiguo detectado: $tripId (hace $minutesAgo minutos)');
+
+      // Mostrar diálogo preguntando qué hacer
+      _showOldTripDialog(tripId, tripData, minutesAgo);
+    } else {
+      // Viaje reciente, navegar directamente
+      AppLogger.info('🚗 Navegando a viaje activo: $tripId');
+      _doNavigateToActiveTrip(tripId, tripData);
+    }
+  }
+
+  // ✅ NUEVO: Mostrar diálogo para viajes antiguos
+  void _showOldTripDialog(String tripId, Map<String, dynamic> tripData, int minutesAgo) {
+    if (!mounted) return;
+
+    final passengerName = tripData['passengerName'] ?? 'Pasajero desconocido';
+    final origin = tripData['originAddress'] ?? tripData['origin']?['address'] ?? 'Origen no disponible';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Viaje pendiente',
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Se encontró un viaje iniciado hace $minutesAgo minutos que no fue completado.',
+              style: TextStyle(fontSize: 15),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.person, size: 18, color: Colors.grey.shade700),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          passengerName,
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.location_on, size: 18, color: Colors.green),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          origin,
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              '¿Qué deseas hacer?',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              await _cancelOldTrip(tripId);
+            },
+            child: Text(
+              'Cancelar viaje',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _doNavigateToActiveTrip(tripId, tripData);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: Text('Continuar viaje', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ NUEVO: Cancelar viaje antiguo
+  Future<void> _cancelOldTrip(String tripId) async {
+    if (!mounted) return;
+
+    try {
+      // Mostrar loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Cancelar el viaje en Firestore
+      await _firestore.collection('rides').doc(tripId).update({
+        'status': 'cancelled',
+        'cancelReason': 'driver_cancelled_stale_ride',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancelledBy': _driverId,
+      });
+
+      if (!mounted) return;
+
+      // Cerrar loading
+      Navigator.pop(context);
+
+      AppLogger.info('🧹 Viaje antiguo cancelado exitosamente: $tripId');
+
+      // Mostrar mensaje de éxito
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Viaje cancelado correctamente')),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+
+      // Reiniciar el listener para detectar nuevos viajes
+      _startActiveRideListener();
+
+    } catch (e) {
+      if (!mounted) return;
+
+      // Cerrar loading si está abierto
+      Navigator.pop(context);
+
+      AppLogger.error('❌ Error cancelando viaje antiguo: $e');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.error, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Error al cancelar: ${e.toString()}')),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
+  // ✅ SEPARADO: Navegación real a la pantalla de viaje activo
+  void _doNavigateToActiveTrip(String tripId, Map<String, dynamic> tripData) {
+    if (!mounted) return;
+
+    AppLogger.info('🚗 Navegando a viaje activo: $tripId');
+
+    // Crear TripModel desde los datos del documento
+    final initialTrip = TripModel.fromMap(tripData, tripId);
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ActiveTripScreen(
+          tripId: tripId,
+          initialTrip: initialTrip,
+        ),
+      ),
+    );
+  }
+
+  // ✅ NUEVO: Detener listener de viajes activos
+  void _stopActiveRideListener() {
+    _activeRideSubscription?.cancel();
+    _activeRideSubscription = null;
+    AppLogger.debug('🛑 Listener de viajes activos detenido');
   }
   
   void _loadRealRequests() {
@@ -529,11 +1014,61 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
     });
     _slideController.forward();
   }
-  
+
+  // Rechazar solicitud de viaje
+  void _rejectRequest(PriceNegotiation request) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      // Actualizar estado en Firestore
+      await _firestore.collection('negotiations').doc(request.id).update({
+        'status': 'rejected_by_driver',
+        'rejectedBy': _driverId,
+        'rejectedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Cerrar el panel de detalles
+      setState(() {
+        _showRequestDetails = false;
+        _selectedRequest = null;
+      });
+      _slideController.reverse();
+
+      // Mostrar confirmación
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Solicitud rechazada'),
+          backgroundColor: ModernTheme.warning,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      AppLogger.info('Solicitud ${request.id} rechazada por conductor $_driverId');
+    } catch (e) {
+      AppLogger.error('Error al rechazar solicitud: $e');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Error al rechazar: $e'),
+          backgroundColor: ModernTheme.error,
+        ),
+      );
+    }
+  }
+
   void _acceptRequest(PriceNegotiation request) async {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
+      // ✅ VERIFICAR CRÉDITOS ANTES DE ACEPTAR
+      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final hasCredits = await walletProvider.hasEnoughCreditsForService();
+
+      if (!hasCredits) {
+        // Mostrar diálogo para recargar créditos
+        _showNeedCreditsDialog();
+        return;
+      }
+
       // Generar código de verificación del pasajero
       String generateVerificationCode() {
         final random = DateTime.now().millisecondsSinceEpoch;
@@ -542,6 +1077,18 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
       final passengerCode = generateVerificationCode();
       final driverCode = generateVerificationCode();
+
+      // ✅ NUEVO: Obtener teléfono del pasajero desde Firestore
+      String? passengerPhone;
+      try {
+        final passengerDoc = await _firestore.collection('users').doc(request.passengerId).get();
+        if (passengerDoc.exists) {
+          final passengerData = passengerDoc.data();
+          passengerPhone = passengerData?['phone'] ?? passengerData?['phoneNumber'];
+        }
+      } catch (e) {
+        AppLogger.warning('No se pudo obtener el teléfono del pasajero: $e');
+      }
 
       // ✅ CORRECCIÓN RACE CONDITION: Usar transaction para evitar que múltiples conductores acepten
       final rideId = await _firestore.runTransaction<String?>((transaction) async {
@@ -594,17 +1141,19 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
           'driverVerificationCode': driverCode,
           'isPassengerVerified': false,
           'isDriverVerified': false,
-          // ✅ CORREGIDO: Info del pasajero con nombre de campo correcto
+          // ✅ CORREGIDO: Info del pasajero con nombre de campo correcto + teléfono
           'vehicleInfo': {
             'passengerName': request.passengerName,
             'passengerPhoto': request.passengerPhoto,
             'passengerRating': request.passengerRating,
+            'passengerPhone': passengerPhone, // ✅ NUEVO: Teléfono del pasajero
           },
           // ✅ NUEVO: Info del pasajero separada
           'passengerInfo': {
             'name': request.passengerName,
             'photo': request.passengerPhoto,
             'rating': request.passengerRating,
+            'phone': passengerPhone, // ✅ NUEVO: Teléfono del pasajero
           },
           // ✅ NUEVO: Info del conductor (se cargará después)
           'driverInfo': {
@@ -624,15 +1173,54 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       });
 
       if (rideId != null) {
-        setState(() {
-          _availableRequests.remove(request);
-          _showRequestDetails = false;
-        });
+        // ✅ CONSUMIR CRÉDITOS DESPUÉS DE ACEPTAR EXITOSAMENTE
+        final creditConsumed = await walletProvider.consumeCreditsForService(
+          tripId: rideId,
+          negotiationId: request.id,
+        );
 
-        // Recargar estadísticas
-        await _loadTodayStats();
+        if (creditConsumed) {
+          AppLogger.info('✅ Créditos consumidos por servicio aceptado');
+          // Actualizar créditos locales
+          await _checkDriverCredits();
 
-        _showAcceptedDialog(request, rideId);
+          setState(() {
+            _availableRequests.remove(request);
+            _showRequestDetails = false;
+          });
+
+          // Recargar estadísticas
+          await _loadTodayStats();
+
+          _showAcceptedDialog(request, rideId);
+        } else {
+          // ✅ COMPENSACIÓN: Si falla el consumo de créditos, cancelar el viaje asignado
+          AppLogger.warning('⚠️ Fallo el consumo de créditos, revirtiendo viaje asignado');
+
+          await _firestore.runTransaction((transaction) async {
+            // Revertir el ride
+            transaction.update(_firestore.collection('rides').doc(rideId), {
+              'status': 'cancelled',
+              'cancelledAt': FieldValue.serverTimestamp(),
+              'cancelReason': 'credit_consumption_failed',
+            });
+
+            // Revertir la negociación
+            transaction.update(_firestore.collection('negotiations').doc(request.id), {
+              'status': 'waiting',
+              'driverId': FieldValue.delete(),
+              'rideId': FieldValue.delete(),
+              'acceptedAt': FieldValue.delete(),
+            });
+          });
+
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Error al procesar créditos. Intenta de nuevo.'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
       }
     } on FirebaseException catch (e) {
       AppLogger.error('Error Firebase aceptando solicitud: ${e.code} - ${e.message}');
@@ -667,6 +1255,122 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
         ),
       );
     }
+  }
+
+  // ✅ DIÁLOGO CUANDO NO TIENE CRÉDITOS SUFICIENTES
+  void _showNeedCreditsDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: ModernTheme.warning.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.account_balance_wallet, color: ModernTheme.warning, size: 28),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Créditos insuficientes',
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: ModernTheme.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: ModernTheme.warning.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: ModernTheme.warning, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tu saldo actual: S/. ${_serviceCredits.toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Para aceptar servicios necesitas:',
+              style: TextStyle(color: context.secondaryText),
+            ),
+            const SizedBox(height: 8),
+            _buildCreditRequirement('Mínimo requerido', 'S/. ${_minServiceCredits.toStringAsFixed(2)}'),
+            _buildCreditRequirement('Costo por servicio', 'S/. ${_serviceFee.toStringAsFixed(2)}'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lightbulb_outline, color: ModernTheme.oasisGreen, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Recarga créditos para seguir aceptando viajes y ganando dinero',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Cerrar', style: TextStyle(color: context.secondaryText)),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.add_card, size: 18),
+            label: const Text('Recargar créditos'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.oasisGreen,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              // Navegar a pantalla de recarga de créditos y refrescar al volver
+              Navigator.pushNamed(context, '/driver/recharge-credits').then((_) => _checkDriverCredits());
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCreditRequirement(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: context.secondaryText, fontSize: 13)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   // ✅ NUEVO: Diálogo para negociar precio con el pasajero
@@ -889,7 +1593,43 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
             indoorViewEnabled: false, // Deshabilitar vista interior
             trafficEnabled: false,   // Tráfico deshabilitado por defecto
             minMaxZoomPreference: const MinMaxZoomPreference(10, 20), // Limitar zoom
+            // ✅ NUEVO: Detectar cuando el usuario mueve el mapa manualmente
+            onCameraMoveStarted: () {
+              // Si el usuario mueve el mapa, desactivar seguimiento automático
+              if (_followDriverLocation) {
+                setState(() {
+                  _followDriverLocation = false;
+                });
+              }
+            },
           ),
+
+          // ✅ NUEVO: Botón para volver a centrar en la ubicación del conductor
+          if (_isOnline && !_followDriverLocation && _currentLocation != null)
+            Positioned(
+              right: 16,
+              bottom: _availableRequests.isNotEmpty ? 300 : 100,
+              child: FloatingActionButton.small(
+                heroTag: 'centerLocation',
+                backgroundColor: ModernTheme.oasisGreen,
+                onPressed: () {
+                  setState(() {
+                    _followDriverLocation = true;
+                  });
+                  if (_currentLocation != null && _mapController != null) {
+                    _mapController!.animateCamera(
+                      CameraUpdate.newCameraPosition(
+                        CameraPosition(
+                          target: _currentLocation!,
+                          zoom: 16,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: const Icon(Icons.my_location, color: Colors.white),
+              ),
+            ),
           
           // Panel superior con estadísticas
           SafeArea(
@@ -928,6 +1668,8 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
                               _startRidesListener();
                               _availableRequests = [];
                               _updateMapMarkers();
+                              // ✅ VERIFICAR CRÉDITOS al ponerse online
+                              _checkDriverCredits();
                             } else {
                               // ✅ DETENER GPS TRACKING cuando va offline
                               _stopLocationTracking();
@@ -941,6 +1683,163 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
                         thumbColor: const WidgetStatePropertyAll(ModernTheme.success),
                       ),
                     ],
+                  ),
+
+                  // ✅ BANNER DE CRÉDITOS INSUFICIENTES
+                  if (!_isCheckingCredits && !_hasEnoughCredits)
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: ModernTheme.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: ModernTheme.warning.withValues(alpha: 0.5)),
+                      ),
+                      child: InkWell(
+                        onTap: () => Navigator.pushNamed(context, '/driver/recharge-credits').then((_) => _checkDriverCredits()),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: ModernTheme.warning.withValues(alpha: 0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.account_balance_wallet, color: ModernTheme.warning, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Créditos de servicio insuficientes',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  Text(
+                                    'Créditos: S/. ${_serviceCredits.toStringAsFixed(2)} (mín: S/. ${_minServiceCredits.toStringAsFixed(2)}) • Toca para recargar',
+                                    style: TextStyle(fontSize: 11, color: context.secondaryText),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right, color: ModernTheme.warning),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // ✅ MOSTRAR SALDO DE CRÉDITOS (cuando tiene saldo)
+                  if (!_isCheckingCredits && _hasEnoughCredits)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.account_balance_wallet, color: ModernTheme.oasisGreen, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Créditos: S/. ${_serviceCredits.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: ModernTheme.oasisGreen,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // ✅ BANNER DE DOCUMENTOS PENDIENTES DE VERIFICACIÓN
+                  Consumer<DocumentProvider>(
+                    builder: (context, docProvider, _) {
+                      final status = docProvider.verificationStatus;
+
+                      // ✅ FIX: No renderizar nada si status aún no está cargado
+                      if (status == null || status.isEmpty) return const SizedBox.shrink();
+
+                      final isVerified = status['isVerified'] == true;
+                      final verificationStatus = status['verificationStatus']?.toString() ?? 'pending';
+
+                      // No mostrar si ya está verificado o aprobado
+                      if (isVerified || verificationStatus == 'approved') return const SizedBox.shrink();
+
+                      Color bannerColor;
+                      String title;
+                      String subtitle;
+                      IconData icon;
+
+                      switch (verificationStatus) {
+                        case 'under_review':
+                          bannerColor = ModernTheme.info;
+                          title = 'Documentos en revisión';
+                          subtitle = 'Te notificaremos cuando sean aprobados';
+                          icon = Icons.hourglass_empty;
+                          break;
+                        case 'rejected':
+                          bannerColor = ModernTheme.error;
+                          title = 'Documentos rechazados';
+                          subtitle = 'Revisa y vuelve a subir los documentos';
+                          icon = Icons.error_outline;
+                          break;
+                        default: // pending
+                          bannerColor = ModernTheme.warning;
+                          title = 'Documentos pendientes';
+                          subtitle = 'Completa tu documentación para trabajar';
+                          icon = Icons.description_outlined;
+                      }
+
+                      return Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        child: InkWell(
+                          onTap: () => Navigator.pushNamed(context, '/driver/documents'),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: bannerColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: bannerColor.withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: bannerColor.withValues(alpha: 0.2),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(icon, color: bannerColor, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                      Text(
+                                        subtitle,
+                                        style: TextStyle(fontSize: 11, color: context.secondaryText),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(Icons.chevron_right, color: bannerColor),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
 
                   if (_isOnline) ...[
@@ -1032,7 +1931,7 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
                     // Lista horizontal de solicitudes
                     SizedBox(
-                      height: 180,
+                      height: 210, // ✅ Aumentado para mostrar tarjetas completas
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1049,7 +1948,28 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
             ),
           
           // Detalle de solicitud seleccionada
-          if (_showRequestDetails && _selectedRequest != null)
+          if (_showRequestDetails && _selectedRequest != null) ...[
+            // ✅ Fondo oscuro para cerrar al tocar fuera
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _showRequestDetails = false;
+                    _selectedRequest = null;
+                  });
+                  _slideController.reverse();
+                },
+                child: AnimatedBuilder(
+                  animation: _slideAnimation,
+                  builder: (context, child) {
+                    return Container(
+                      color: Colors.black.withValues(alpha: 0.3 * _slideAnimation.value),
+                    );
+                  },
+                ),
+              ),
+            ),
+            // Panel de detalle
             Positioned(
               left: 0,
               right: 0,
@@ -1059,11 +1979,24 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
                 builder: (context, child) {
                   return Transform.translate(
                     offset: Offset(0, 500 * (1 - _slideAnimation.value)),
-                    child: _buildRequestDetailSheet(_selectedRequest!),
+                    child: GestureDetector(
+                      onVerticalDragEnd: (details) {
+                        // ✅ Cerrar al arrastrar hacia abajo
+                        if (details.primaryVelocity != null && details.primaryVelocity! > 200) {
+                          setState(() {
+                            _showRequestDetails = false;
+                            _selectedRequest = null;
+                          });
+                          _slideController.reverse();
+                        }
+                      },
+                      child: _buildRequestDetailSheet(_selectedRequest!),
+                    ),
                   );
                 },
               ),
             ),
+          ],
         ],
       ),
     );
@@ -1095,7 +2028,8 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
   
   Widget _buildRequestCard(PriceNegotiation request) {
     final timeRemaining = request.timeRemaining;
-    final isUrgent = timeRemaining.inMinutes < 2;
+    final isExpired = timeRemaining.isNegative || timeRemaining.inSeconds <= 0;
+    final isUrgent = !isExpired && timeRemaining.inMinutes < 2;
     
     return AnimatedElevatedCard(
       onTap: () => _selectRequest(request),
@@ -1234,11 +2168,13 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isUrgent ? ModernTheme.warning : ModernTheme.info,
+                    color: isExpired ? ModernTheme.error : (isUrgent ? ModernTheme.warning : ModernTheme.info),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '${timeRemaining.inMinutes}:${(timeRemaining.inSeconds % 60).toString().padLeft(2, '0')}',
+                    isExpired
+                        ? 'Expirado'
+                        : '${timeRemaining.inMinutes}:${(timeRemaining.inSeconds % 60).toString().padLeft(2, '0')}',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onPrimary,
                       fontSize: 12,
@@ -1265,16 +2201,47 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(bottom: 20),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(2),
-            ),
+          // ✅ Handle con botón de cerrar
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              // Handle central
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Botón X a la derecha
+              Positioned(
+                right: 0,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showRequestDetails = false;
+                      _selectedRequest = null;
+                    });
+                    _slideController.reverse();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: context.secondaryText,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 16),
 
           // Información del pasajero
           Row(
@@ -1441,7 +2408,12 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
             children: [
               _buildInfoChip(Icons.route, '${request.distance.toStringAsFixed(1)} km'),
               _buildInfoChip(Icons.access_time, '${request.estimatedTime} min'),
-              _buildInfoChip(Icons.timer, '${request.timeRemaining.inMinutes}:${(request.timeRemaining.inSeconds % 60).toString().padLeft(2, '0')}'),
+              _buildInfoChip(
+                Icons.timer,
+                request.timeRemaining.isNegative || request.timeRemaining.inSeconds <= 0
+                    ? 'Expirado'
+                    : '${request.timeRemaining.inMinutes}:${(request.timeRemaining.inSeconds % 60).toString().padLeft(2, '0')}',
+              ),
             ],
           ),
           
@@ -1477,28 +2449,17 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        setState(() {
-                          _showRequestDetails = false;
-                          _selectedRequest = null;
-                        });
-                        _slideController.reverse();
-                      },
+                    child: OutlinedButton.icon(
+                      onPressed: () => _rejectRequest(request),
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Rechazar'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        side: BorderSide(color: context.secondaryText),
-                      ),
-                      child: Text(
-                        'Rechazar',
-                        style: TextStyle(
-                          color: context.secondaryText,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        side: const BorderSide(color: ModernTheme.error),
+                        foregroundColor: ModernTheme.error,
                       ),
                     ),
                   ),

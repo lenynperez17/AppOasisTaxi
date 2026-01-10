@@ -197,10 +197,12 @@ class _MetricsScreenState extends State<MetricsScreen>
 
       // Consultar viajes completados en Firebase (sin índice requerido)
       // NOTA: Esta query NO requiere índice compuesto porque solo filtra por driverId y status
+      // ✅ IMPORTANTE: limit(100) requerido por reglas de Firestore
       final ridesSnapshot = await FirebaseFirestore.instance
           .collection('rides')
           .where('driverId', isEqualTo: driverId)
           .where('status', isEqualTo: 'completed')
+          .limit(100)
           .get();
 
       // Filtrar por fecha en memoria (para evitar crear más índices)

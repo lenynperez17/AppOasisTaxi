@@ -112,22 +112,51 @@ class DocumentProvider extends ChangeNotifier {
   }
 
   // Cargar estado de verificación
+  // ✅ FIX 2026-01-05: Leer de 'users' (fuente de verdad) en lugar de 'drivers'
   Future<void> loadVerificationStatus(String driverId) async {
     try {
+      debugPrint('📄 DocumentProvider: Cargando estado de verificación para: $driverId');
+
+      // Leer de 'users' que es la fuente de verdad (admin panel también lee de aquí)
       final doc = await _firestore
-          .collection('drivers')
+          .collection('users')
           .doc(driverId)
           .get();
 
       if (doc.exists) {
+        final data = doc.data();
+        debugPrint('📄 DocumentProvider: Documento encontrado en users/$driverId');
+        debugPrint('📄 DocumentProvider: isVerified=${data?['isVerified']}, driverStatus=${data?['driverStatus']}');
+
+        // Mapear campos de 'users' al formato esperado
+        final isVerified = data?['isVerified'] == true;
+        final driverStatus = data?['driverStatus'] ?? 'pending_approval';
+
+        // Determinar verificationStatus basado en driverStatus
+        String verificationStatus;
+        if (isVerified || driverStatus == 'approved') {
+          verificationStatus = 'approved';
+        } else if (driverStatus == 'rejected') {
+          verificationStatus = 'rejected';
+        } else {
+          verificationStatus = 'pending';
+        }
+
         _verificationStatus = {
-          'isVerified': doc.data()?['isVerified'] ?? false,
-          'verificationStatus': doc.data()?['verificationStatus'] ?? 'pending',
-          'verificationDate': doc.data()?['verificationDate'],
-          'rejectionReason': doc.data()?['rejectionReason'],
+          'isVerified': isVerified,
+          'verificationStatus': verificationStatus,
+          'verificationDate': data?['approvedAt'],
+          'rejectionReason': data?['rejectionReason'],
         };
+
+        debugPrint('📄 DocumentProvider: Estado final: $_verificationStatus');
+      } else {
+        debugPrint('📄 DocumentProvider: ⚠️ Documento NO existe en users/$driverId');
+        // Si no existe documento de usuario, no mostrar banner
+        _verificationStatus = null;
       }
     } catch (e) {
+      debugPrint('📄 DocumentProvider: ❌ Error: $e');
       _error = 'Error al cargar estado de verificación: $e';
     }
     notifyListeners();
@@ -220,7 +249,7 @@ class DocumentProvider extends ChangeNotifier {
     try {
       // Obtener información del documento
       final docInfo = _driverDocuments?[documentType];
-      if ( docInfo['fileName'] != null) {
+      if (docInfo != null && docInfo['fileName'] != null) {
         // Eliminar de Storage
         final ref = _storage
             .ref()

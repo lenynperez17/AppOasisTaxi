@@ -1,8 +1,10 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, library_private_types_in_public_api
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import '../../core/theme/modern_theme.dart';
 import '../../core/extensions/theme_extensions.dart'; // ✅ Extensión para colores que se adaptan al tema
 
@@ -45,6 +47,11 @@ class _NavigationScreenState extends State<NavigationScreen>
   // ✅ Flag para prevenir operaciones después de dispose
   bool _isDisposed = false;
 
+  // ✅ Iconos 3D personalizados para markers
+  BitmapDescriptor? _carIcon;
+  BitmapDescriptor? _passengerIcon;
+  BitmapDescriptor? _destinationIcon;
+
   // Route instructions
   List<RouteInstruction> _instructions = [];
   int _currentInstructionIndex = 0;
@@ -77,7 +84,37 @@ class _NavigationScreenState extends State<NavigationScreen>
     );
     
     _slideController.forward();
+    _loadCustomIcons();
     _initializeRoute();
+  }
+
+  // ✅ Cargar iconos 3D desde assets
+  Future<void> _loadCustomIcons() async {
+    try {
+      _carIcon = await _getBitmapFromAsset('assets/images/markers/car_3d.png', 80);
+      _passengerIcon = await _getBitmapFromAsset('assets/images/markers/passenger_3d.png', 70);
+      _destinationIcon = await _getBitmapFromAsset('assets/images/markers/destination_3d.png', 70);
+
+      if (mounted && !_isDisposed) {
+        setState(() {});
+        _drawRoute(); // Redibujar con iconos nuevos
+      }
+    } catch (e) {
+      print('Error cargando iconos 3D: $e');
+    }
+  }
+
+  // ✅ Convertir asset PNG a BitmapDescriptor con tamaño personalizado
+  Future<BitmapDescriptor> _getBitmapFromAsset(String path, int width) async {
+    final ByteData data = await rootBundle.load(path);
+    final ui.Codec codec = await ui.instantiateImageCodec(
+      data.buffer.asUint8List(),
+      targetWidth: width,
+    );
+    final ui.FrameInfo fi = await codec.getNextFrame();
+    final ByteData? byteData = await fi.image.toByteData(format: ui.ImageByteFormat.png);
+
+    return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
   }
   
   @override
@@ -166,36 +203,56 @@ class _NavigationScreenState extends State<NavigationScreen>
     // Create route polyline
     List<LatLng> routePoints = _instructions.map((inst) => inst.position).toList();
     routePoints.add(_destination);
-    
+
+    _polylines.clear();
     _polylines.add(
       Polyline(
         polylineId: PolylineId('route'),
         points: routePoints,
-        color: ModernTheme.primaryBlue,
-        width: 5,
+        color: ModernTheme.oasisGreen,
+        width: 6,
         patterns: [],
       ),
     );
-    
-    // Add markers
+
+    _markers.clear();
+
+    // ✅ Marker del carro (conductor) - Icono 3D
     _markers.add(
       Marker(
-        markerId: MarkerId('origin'),
+        markerId: MarkerId('car'),
         position: _currentLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(title: 'Inicio'),
+        icon: _carIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        infoWindow: InfoWindow(title: 'Tu ubicación'),
+        anchor: Offset(0.5, 0.5),
+        zIndex: 3,
       ),
     );
-    
+
+    // ✅ Marker del pasajero - Icono 3D
+    if (_instructions.isNotEmpty) {
+      _markers.add(
+        Marker(
+          markerId: MarkerId('passenger'),
+          position: _instructions.first.position,
+          icon: _passengerIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(title: 'Pasajero'),
+          zIndex: 2,
+        ),
+      );
+    }
+
+    // ✅ Marker del destino - Icono 3D
     _markers.add(
       Marker(
         markerId: MarkerId('destination'),
         position: _destination,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        icon: _destinationIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: 'Destino'),
+        zIndex: 1,
       ),
     );
-    
+
     setState(() {});
   }
   
@@ -247,13 +304,14 @@ class _NavigationScreenState extends State<NavigationScreen>
   }
   
   void _updateLocationMarker() {
-    _markers.removeWhere((marker) => marker.markerId.value == 'current');
+    _markers.removeWhere((marker) => marker.markerId.value == 'car');
     _markers.add(
       Marker(
-        markerId: MarkerId('current'),
+        markerId: MarkerId('car'),
         position: _currentLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+        icon: _carIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         anchor: Offset(0.5, 0.5),
+        zIndex: 3,
       ),
     );
   }

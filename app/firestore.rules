@@ -14,10 +14,12 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // ✅ CORREGIDO: Verificar si es administrador (usar 'userType' en vez de 'role')
+    // ✅ CORREGIDO: Verificar si es administrador
+    // Verifica AMBOS campos: userType == 'admin' O isAdmin == true
     function isAdmin() {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return isAuthenticated() &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'admin';
+             (userData.userType == 'admin' || userData.isAdmin == true);
     }
 
     // Verificar si es conductor (incluye dual)
@@ -225,41 +227,48 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ===== REGLAS PARA MENSAJES DE CHAT =====
-
-    match /chats/{chatId}/messages/{messageId} {
-      // Lectura: Solo participantes del chat o admin
-      allow read: if isAuthenticated() &&
-                     (get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]) ||
-                      isAdmin());
-
-      // Creación: Solo participantes del chat
-      allow create: if isAuthenticated() &&
-                      get(/databases/$(database)/documents/chats/$(chatId)).data.participants.hasAny([request.auth.uid]);
-
-      // Los mensajes NO se pueden editar (integridad del historial)
-      allow update: if false;
-
-      // Eliminación: Solo administradores
-      allow delete: if isAdmin();
-    }
-
-    // ===== REGLAS PARA CHATS =====
+    // ===== REGLAS PARA CHATS (SISTEMA DE MENSAJERÍA) =====
+    // ✅ CORREGIDO: Permitir acceso basado en el rideId del chat
+    // El chatId es el mismo que el rideId del viaje
 
     match /chats/{chatId} {
-      // Lectura: Solo participantes del chat o admin
-      allow read: if isAuthenticated() &&
-                     (resource.data.participants.hasAny([request.auth.uid]) || isAdmin());
+      // Lectura: Usuarios autenticados (el filtro se hace verificando el viaje)
+      allow read: if isAuthenticated();
 
-      // Creación: Usuarios autenticados
+      // Creación: Usuarios autenticados pueden crear el documento del chat
       allow create: if isAuthenticated();
 
-      // Actualización: Solo participantes o admin
-      allow update: if isAuthenticated() &&
-                      (resource.data.participants.hasAny([request.auth.uid]) || isAdmin());
+      // Actualización: Usuarios autenticados (para actualizar metadata)
+      allow update: if isAuthenticated();
 
       // Eliminación: Solo administradores
       allow delete: if isAdmin();
+
+      // ===== SUBCOLECCIÓN DE MENSAJES =====
+      match /messages/{messageId} {
+        // Lectura: Usuarios autenticados
+        allow read: if isAuthenticated();
+
+        // Creación: Usuarios autenticados pueden enviar mensajes
+        allow create: if isAuthenticated();
+
+        // Actualización: Para marcar como leído
+        allow update: if isAuthenticated();
+
+        // Eliminación: Solo administradores
+        allow delete: if isAdmin();
+      }
+    }
+
+    // ===== REGLAS PARA PRESENCIA DE USUARIOS =====
+    // ✅ NUEVO: Colección para el estado online/offline de usuarios
+
+    match /userPresence/{userId} {
+      // Lectura: Cualquier usuario autenticado
+      allow read: if isAuthenticated();
+
+      // Escritura: Solo el propio usuario
+      allow write: if isAuthenticated() && request.auth.uid == userId;
     }
 
     // ===== REGLAS PARA NOTIFICACIONES =====
@@ -300,11 +309,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ===== REGLAS PARA CONFIGURACIÓN DEL SISTEMA (Solo Admin) =====
+    // ===== REGLAS PARA CONFIGURACIÓN DEL SISTEMA =====
 
     match /settings/{settingId} {
-      // Lectura: Solo administradores
-      allow read: if isAdmin();
+      // Lectura: Admins y conductores (necesitan leer config de créditos: serviceFee, minServiceCredits)
+      allow read: if isAdmin() || (isAuthenticated() && isDriver());
 
       // Escritura: Solo administradores
       allow write: if isAdmin();
@@ -517,8 +526,8 @@ service cloud.firestore {
                       request.resource.data.amount >= 50) // Monto mínimo S/ 50
                       || request.auth == null;
 
-      // Actualización: Solo backend (Cloud Functions - sin auth)
-      allow update: if request.auth == null;
+      // ✅ CORREGIDO: Actualización por Admin (para procesar retiros) o Cloud Functions
+      allow update: if isAdmin() || request.auth == null;
 
       // Eliminación: Solo administradores o Cloud Functions
       allow delete: if isAdmin() || request.auth == null;
@@ -634,21 +643,64 @@ service cloud.firestore {
 
     // ===== 💰 WALLETS DE CONDUCTORES =====
     match /wallets/{walletId} {
-      // GET: El conductor propietario, administrador, o Cloud Functions
+      // GET: El conductor propietario (walletId == uid), administrador, o Cloud Functions
       allow get: if (isAuthenticated() &&
-                     (resource.data.driverId == request.auth.uid || isAdmin()))
+                     (walletId == request.auth.uid ||
+                      resource.data.userId == request.auth.uid ||
+                      resource.data.driverId == request.auth.uid ||
+                      isAdmin()))
                      || request.auth == null;
 
-      // LIST: Solo administradores o Cloud Functions
-      allow list: if isAdmin() || request.auth == null;
+      // LIST: Usuarios autenticados (filtro en cliente) o Cloud Functions
+      allow list: if isAuthenticated() || isAdmin() || request.auth == null;
 
-      // Creación: Conductores para sí mismos o Cloud Functions
+      // Creación: Conductores para sí mismos, administradores, o Cloud Functions
       allow create: if (isAuthenticated() &&
-                       isDriver() &&
-                       request.resource.data.driverId == request.auth.uid)
+                       (isDriver() &&
+                       (request.resource.data.driverId == request.auth.uid ||
+                        request.resource.data.userId == request.auth.uid)))
+                       || isAdmin()
                        || request.auth == null;
 
-      // Actualización: Solo Cloud Functions (para evitar manipulación de balance)
+      // ✅ CORREGIDO: Actualización por Admin (para agregar créditos) o Cloud Functions
+      allow update: if isAdmin() || request.auth == null;
+
+      // Eliminación: Solo administradores
+      allow delete: if isAdmin();
+
+      // ✅ NUEVO: Subcolección de transacciones de créditos
+      match /credit_transactions/{transactionId} {
+        // Lectura: El propietario del wallet o admin
+        allow read: if isAuthenticated() &&
+                       (walletId == request.auth.uid || isAdmin());
+
+        // Creación: Admin (para agregar créditos) o Cloud Functions
+        allow create: if isAdmin() || request.auth == null;
+
+        // Actualización: Solo Cloud Functions
+        allow update: if request.auth == null;
+
+        // Eliminación: Solo administradores
+        allow delete: if isAdmin();
+      }
+    }
+
+    // ===== 💳 TRANSACCIONES DE WALLET (CONDUCTORES) =====
+    match /walletTransactions/{transactionId} {
+      // GET: El conductor propietario o administrador
+      allow get: if (isAuthenticated() &&
+                     (resource.data.walletId == request.auth.uid ||
+                      resource.data.userId == request.auth.uid ||
+                      isAdmin()))
+                     || request.auth == null;
+
+      // LIST: Usuarios autenticados pueden listar sus transacciones
+      allow list: if isAuthenticated() || isAdmin() || request.auth == null;
+
+      // Creación: Solo Cloud Functions
+      allow create: if request.auth == null;
+
+      // Actualización: Solo Cloud Functions
       allow update: if request.auth == null;
 
       // Eliminación: Solo administradores

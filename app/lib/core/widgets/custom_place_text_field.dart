@@ -41,18 +41,12 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
   @override
   void initState() {
     super.initState();
-    AppLogger.critical('🏗️🏗️🏗️ CustomPlaceTextField INIT - API Key: ${widget.googleApiKey.substring(0, 10)}...${widget.googleApiKey.substring(widget.googleApiKey.length - 5)}');
-    AppLogger.critical('🏗️🏗️🏗️ Hint: ${widget.hintText}');
-    AppLogger.critical('🏗️🏗️🏗️ VERSIÓN: 2025-10-21-04:12 - CON onChanged LOG');
   }
 
   /// ✅ Búsqueda de lugares con debounce para evitar llamadas excesivas al API
   Future<List<PlacePrediction>> _searchPlaces(String query) async {
-    AppLogger.critical('🔍 _searchPlaces LLAMADO con query: "$query" (longitud: ${query.length})');
-
     // Si el query está vacío, no hacer búsqueda
     if (query.isEmpty) {
-      AppLogger.critical('⚠️ Query vacío, retornando lista vacía');
       return [];
     }
 
@@ -66,42 +60,30 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         '&components=country:pe', // Limitado a Perú
       );
 
-      AppLogger.critical('🌐 Llamando API: ${url.toString().replaceAll(widget.googleApiKey, "***API_KEY***")}');
-
       final response = await http.get(url);
-
-      AppLogger.critical('📡 Respuesta recibida con statusCode: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
-        AppLogger.critical('📦 Datos decodificados, status: ${data['status']}');
 
         if (data['status'] == 'OK') {
           final predictions = (data['predictions'] as List)
               .map((p) => PlacePrediction.fromJson(p))
               .toList();
 
-          AppLogger.critical('✅ Google Places: ${predictions.length} resultados para "$query"');
-          for (var i = 0; i < predictions.length && i < 3; i++) {
-            AppLogger.critical('  ${i + 1}. ${predictions[i].description}');
-          }
+          AppLogger.debug('Google Places: ${predictions.length} resultados para "$query"');
           return predictions;
         } else {
-          AppLogger.critical('⚠️ Google Places API status: ${data['status']}');
           if (data['error_message'] != null) {
-            AppLogger.critical('❌ Error message: ${data['error_message']}');
+            AppLogger.warning('Google Places API: ${data['status']} - ${data['error_message']}');
           }
           return [];
         }
       } else {
-        AppLogger.critical('❌ Google Places API error: ${response.statusCode}');
-        AppLogger.critical('❌ Response body: ${response.body}');
+        AppLogger.error('Google Places API error: ${response.statusCode}');
         return [];
       }
-    } catch (e, stackTrace) {
-      AppLogger.critical('❌ Error buscando lugares: $e');
-      AppLogger.critical('❌ StackTrace: $stackTrace');
+    } catch (e) {
+      AppLogger.error('Error buscando lugares: $e');
       return [];
     }
   }
@@ -124,7 +106,7 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
         if (data['status'] == 'OK') {
           return PlaceDetails.fromJson(data['result']);
         } else {
-          AppLogger.critical('Place Details API status: ${data['status']}');
+          AppLogger.warning('Place Details API status: ${data['status']}');
           return null;
         }
       } else {
@@ -155,10 +137,7 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
       /// ✅ suggestionsCallback: se llama para obtener sugerencias
       /// NO recrea el TextField, solo actualiza el Overlay
       suggestionsCallback: (search) async {
-        AppLogger.critical('🔔 suggestionsCallback LLAMADO con search: "$search"');
-        final results = await _searchPlaces(search);
-        AppLogger.critical('🔔 suggestionsCallback RETORNA ${results.length} resultados');
-        return results;
+        return await _searchPlaces(search);
       },
 
       /// ✅ itemBuilder: cómo mostrar cada sugerencia
@@ -217,9 +196,6 @@ class _CustomPlaceTextFieldState extends State<CustomPlaceTextField> {
           controller: controller,
           focusNode: focusNode,
           onTap: widget.onTap,
-          onChanged: (value) {
-            AppLogger.critical('⌨️ TextField onChanged: "$value" (longitud: ${value.length})');
-          },
           decoration: InputDecoration(
             hintText: widget.hintText,
             border: InputBorder.none,

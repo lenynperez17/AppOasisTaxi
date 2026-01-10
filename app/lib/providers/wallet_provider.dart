@@ -3,6 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/logger.dart';
 import '../services/firebase_service.dart';
+import '../services/payment_service.dart';
+import '../widgets/mercadopago_checkout_widget.dart';
+import '../core/constants/credit_constants.dart';
 
 // Modelo para billetera
 class Wallet {
@@ -16,6 +19,11 @@ class Wallet {
   final bool isActive;
   final DateTime lastActivityDate;
   final Map<String, dynamic>? bankAccount;
+  // Créditos de servicio para conductores
+  final double serviceCredits;
+  final double totalCreditsRecharged;
+  final double totalCreditsUsed;
+  final bool isFirstRecharge;
 
   Wallet({
     required this.id,
@@ -28,6 +36,10 @@ class Wallet {
     required this.isActive,
     required this.lastActivityDate,
     this.bankAccount,
+    this.serviceCredits = 0,
+    this.totalCreditsRecharged = 0,
+    this.totalCreditsUsed = 0,
+    this.isFirstRecharge = true,
   });
 
   factory Wallet.fromMap(Map<String, dynamic> map, String id) {
@@ -42,6 +54,10 @@ class Wallet {
       isActive: map['isActive'] ?? true,
       lastActivityDate: (map['lastActivityDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       bankAccount: map['bankAccount'],
+      serviceCredits: (map['serviceCredits'] ?? 0).toDouble(),
+      totalCreditsRecharged: (map['totalCreditsRecharged'] ?? 0).toDouble(),
+      totalCreditsUsed: (map['totalCreditsUsed'] ?? 0).toDouble(),
+      isFirstRecharge: map['isFirstRecharge'] ?? true,
     );
   }
 
@@ -56,8 +72,17 @@ class Wallet {
       'isActive': isActive,
       'lastActivityDate': Timestamp.fromDate(lastActivityDate),
       'bankAccount': bankAccount,
+      'serviceCredits': serviceCredits,
+      'totalCreditsRecharged': totalCreditsRecharged,
+      'totalCreditsUsed': totalCreditsUsed,
+      'isFirstRecharge': isFirstRecharge,
       'updatedAt': FieldValue.serverTimestamp(),
     };
+  }
+
+  // Verificar si tiene créditos suficientes para aceptar un servicio
+  bool hasEnoughCredits(double serviceFee, double minRequired) {
+    return serviceCredits >= serviceFee && serviceCredits >= minRequired;
   }
 }
 
@@ -202,6 +227,12 @@ class WalletProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   double get availableBalance => (_wallet?.balance ?? 0.0) - (_wallet?.pendingBalance ?? 0.0);
+
+  // Getters de créditos de servicio
+  double get serviceCredits => _wallet?.serviceCredits ?? 0.0;
+  double get totalCreditsRecharged => _wallet?.totalCreditsRecharged ?? 0.0;
+  double get totalCreditsUsed => _wallet?.totalCreditsUsed ?? 0.0;
+  bool get isFirstRecharge => _wallet?.isFirstRecharge ?? true;
 
   WalletProvider() {
     _initializeWallet();
@@ -718,4 +749,355 @@ class WalletProvider extends ChangeNotifier {
   double get totalWithdrawn => _totalWithdrawn;
   double get pendingWithdrawals => _pendingWithdrawals;
 
+  // ============ SISTEMA DE CRÉDITOS PARA CONDUCTORES ============
+
+  /// Verificar si el conductor tiene créditos suficientes para aceptar un servicio
+  Future<bool> hasEnoughCreditsForService() async {
+    try {
+      // Obtener configuración actual desde Firestore
+      final settingsDoc = await _firestore
+          .collection('settings')
+          .doc('admin')
+          .get();
+
+      final serviceFee = (settingsDoc.data()?['serviceFee'] ?? 1.0).toDouble();
+      final minCredits = (settingsDoc.data()?['minServiceCredits'] ?? 10.0).toDouble();
+
+      return serviceCredits >= serviceFee && serviceCredits >= minCredits;
+    } catch (e) {
+      AppLogger.error('Error verificando créditos', e);
+      return false;
+    }
+  }
+
+  /// Obtener configuración de créditos desde Firestore
+  Future<Map<String, dynamic>> getCreditConfig() async {
+    try {
+      final settingsDoc = await _firestore
+          .collection('settings')
+          .doc('admin')
+          .get();
+
+      return {
+        'serviceFee': (settingsDoc.data()?['serviceFee'] ?? 1.0).toDouble(),
+        'minServiceCredits': (settingsDoc.data()?['minServiceCredits'] ?? 10.0).toDouble(),
+        'bonusCreditsOnFirstRecharge': (settingsDoc.data()?['bonusCreditsOnFirstRecharge'] ?? 5.0).toDouble(),
+        'creditPackages': settingsDoc.data()?['creditPackages'] ?? [],
+      };
+    } catch (e) {
+      AppLogger.error('Error obteniendo config de créditos', e);
+      return {
+        'serviceFee': 1.0,
+        'minServiceCredits': 10.0, // ✅ Unificado con mínimo de MercadoPago
+        'bonusCreditsOnFirstRecharge': 5.0,
+        'creditPackages': [],
+      };
+    }
+  }
+
+  /// Consumir créditos al aceptar un servicio
+  /// ✅ CORREGIDO: Ahora usa Firestore Transaction para operación ATÓMICA
+  /// Si falla cualquier parte, la operación completa se revierte automáticamente
+  Future<bool> consumeCreditsForService({
+    required String tripId,
+    String? negotiationId,
+  }) async {
+    _setLoading(true);
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception('Usuario no autenticado');
+
+      // Obtener costo del servicio
+      final config = await getCreditConfig();
+      final serviceFee = config['serviceFee'] as double;
+      // ignore: unused_local_variable - se usa en código comentado para validación opcional
+      final minCredits = CreditConstants.minServiceCredits;
+
+      // ✅ TRANSACTION ATÓMICA: Verificar, descontar y registrar en una sola operación
+      await _firestore.runTransaction((transaction) async {
+        // 1. Leer wallet actual DENTRO de la transacción
+        final walletRef = _firestore.collection('wallets').doc(user.uid);
+        final walletDoc = await transaction.get(walletRef);
+
+        if (!walletDoc.exists) {
+          throw Exception('Billetera no encontrada');
+        }
+
+        final currentCredits = (walletDoc.data()?['serviceCredits'] ?? 0.0).toDouble();
+
+        // 2. Verificar saldo suficiente (dentro de transacción para evitar race condition)
+        if (currentCredits < serviceFee) {
+          throw Exception('Créditos insuficientes. Tienes S/. ${currentCredits.toStringAsFixed(2)}, necesitas S/. ${serviceFee.toStringAsFixed(2)}');
+        }
+
+        // 3. Verificar que después de descontar no quede bajo el mínimo requerido
+        // (opcional - comentar si se permite operar con saldo bajo)
+        // final newBalance = currentCredits - serviceFee;
+        // if (newBalance < minCredits) {
+        //   AppLogger.warning('⚠️ Después de este servicio, saldo será menor al mínimo');
+        // }
+
+        // 4. Actualizar wallet (ATÓMICO)
+        transaction.update(walletRef, {
+          'serviceCredits': FieldValue.increment(-serviceFee),
+          'totalCreditsUsed': FieldValue.increment(serviceFee),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // 5. Crear registro de transacción (ATÓMICO)
+        final txRef = _firestore.collection('creditTransactions').doc();
+        transaction.set(txRef, {
+          'userId': user.uid,
+          'amount': -serviceFee,
+          'type': 'service_fee',
+          'tripId': tripId,
+          'negotiationId': negotiationId,
+          'balanceBefore': currentCredits,
+          'balanceAfter': currentCredits - serviceFee,
+          'description': 'Cobro por servicio aceptado',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      });
+
+      AppLogger.info('✅ Créditos consumidos atómicamente: S/. $serviceFee para viaje $tripId');
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _setError('Error al consumir créditos: $e');
+      AppLogger.error('❌ Error en consumo atómico de créditos', e);
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Recargar créditos de servicio
+  Future<bool> rechargeServiceCredits({
+    required double amount,
+    required String paymentMethod,
+    String? paymentId,
+    double bonus = 0,
+  }) async {
+    _setLoading(true);
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception('Usuario no autenticado');
+
+      // Verificar si es primera recarga para bonificación
+      double actualBonus = bonus;
+      if (isFirstRecharge) {
+        final config = await getCreditConfig();
+        actualBonus += config['bonusCreditsOnFirstRecharge'] as double;
+      }
+
+      final totalCredits = amount + actualBonus;
+
+      // Actualizar wallet
+      final Map<String, Object> updateData = {
+        'serviceCredits': FieldValue.increment(totalCredits),
+        'totalCreditsRecharged': FieldValue.increment(amount),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Si es primera recarga, marcar como ya no primera
+      if (isFirstRecharge) {
+        updateData['isFirstRecharge'] = false;
+      }
+
+      await _firestore
+          .collection('wallets')
+          .doc(user.uid)
+          .update(updateData);
+
+      // Registrar transacción de crédito
+      await _firestore.collection('creditTransactions').add({
+        'userId': user.uid,
+        'amount': totalCredits,
+        'paidAmount': amount,
+        'bonus': actualBonus,
+        'type': 'recharge',
+        'paymentMethod': paymentMethod,
+        'paymentId': paymentId,
+        'balanceBefore': serviceCredits,
+        'balanceAfter': serviceCredits + totalCredits,
+        'isFirstRecharge': isFirstRecharge,
+        'description': isFirstRecharge
+            ? 'Primera recarga de créditos (+ S/. ${actualBonus.toStringAsFixed(2)} de bonificación)'
+            : 'Recarga de créditos',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      AppLogger.info('✅ Créditos recargados: S/. $amount + S/. $actualBonus bonificación');
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _setError('Error al recargar créditos: $e');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Procesar recarga con MercadoPago Checkout Bricks (in-app)
+  Future<Map<String, dynamic>> processRechargeWithMercadoPago({
+    required double amount,
+    required double bonus,
+    required BuildContext context,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {'success': false, 'message': 'Usuario no autenticado'};
+      }
+
+      debugPrint('💳 WalletProvider: Iniciando recarga con MercadoPago - S/. ${amount.toStringAsFixed(2)}');
+
+      // Obtener datos del usuario para MercadoPago
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final userData = userDoc.data() ?? {};
+      final userName = userData['name'] ?? userData['displayName'] ?? userData['fullName'] ?? 'Usuario';
+      final userEmail = user.email ?? userData['email'] ?? 'usuario@oasistaxis.com';
+
+      debugPrint('💳 Usuario: $userName, Email: $userEmail');
+
+      // Obtener public key directamente de Cloud Functions
+      String publicKey;
+      try {
+        final paymentService = PaymentService();
+        await paymentService.initialize(isProduction: true);
+        publicKey = paymentService.mercadoPagoPublicKey;
+        debugPrint('💳 Public key obtenida: ${publicKey.substring(0, 20)}...');
+      } catch (e) {
+        debugPrint('❌ Error obteniendo public key: $e');
+        return {'success': false, 'message': 'Error conectando con MercadoPago. Verifica tu conexión a internet.'};
+      }
+
+      // Mostrar checkout de MercadoPago Bricks
+      if (!context.mounted) return {'success': false, 'message': 'Contexto no disponible'};
+
+      String? paymentId;
+      String? paymentStatus;
+      final rideId = 'recharge_${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+
+      debugPrint('💳 Abriendo MercadoPago Checkout Bricks...');
+
+      final completed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (ctx) => MercadoPagoCheckoutWidget(
+            publicKey: publicKey,
+            rideId: rideId,
+            amount: amount,
+            description: 'Recarga de créditos Oasis Taxi - S/. ${amount.toStringAsFixed(2)}',
+            payerEmail: userEmail,
+            payerName: userName,
+            onPaymentComplete: (id, status) {
+              debugPrint('💳 Pago completado: id=$id, status=$status');
+              paymentId = id;
+              paymentStatus = status;
+              Navigator.pop(ctx, status == 'approved');
+            },
+            onCancel: () {
+              debugPrint('💳 Pago cancelado por el usuario');
+              Navigator.pop(ctx, false);
+            },
+          ),
+        ),
+      );
+
+      debugPrint('💳 Resultado del checkout: completed=$completed, status=$paymentStatus');
+
+      if (completed != true || paymentStatus != 'approved') {
+        return {'success': false, 'message': 'Pago cancelado o no completado'};
+      }
+
+      // Pago exitoso - agregar créditos
+      debugPrint('💳 Pago exitoso, agregando créditos...');
+      final credited = await rechargeServiceCredits(
+        amount: amount,
+        paymentMethod: 'mercadopago',
+        paymentId: paymentId,
+        bonus: bonus,
+      );
+
+      if (credited) {
+        debugPrint('✅ Créditos agregados exitosamente');
+        return {'success': true, 'message': 'Créditos agregados exitosamente'};
+      } else {
+        debugPrint('❌ Error agregando créditos después del pago');
+        return {'success': false, 'message': 'Error agregando créditos después del pago'};
+      }
+    } catch (e) {
+      AppLogger.error('Error en processRechargeWithMercadoPago', e);
+      debugPrint('❌ Error procesando pago: $e');
+      return {'success': false, 'message': 'Error procesando pago: $e'};
+    }
+  }
+
+  /// Obtener historial de transacciones de créditos
+  Future<List<Map<String, dynamic>>> getCreditTransactionsHistory({int limit = 50}) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      final snapshot = await _firestore
+          .collection('creditTransactions')
+          .where('userId', isEqualTo: user.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
+          .get();
+
+      return snapshot.docs.map((doc) => {
+        'id': doc.id,
+        ...doc.data(),
+      }).toList();
+    } catch (e) {
+      AppLogger.error('Error cargando historial de créditos', e);
+      return [];
+    }
+  }
+
+  /// Verificar estado de créditos y devolver información detallada
+  /// ✅ CORREGIDO: Lee directamente de Firestore para garantizar data fresca
+  Future<Map<String, dynamic>> checkCreditStatus() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {
+          'currentCredits': 0.0,
+          'hasEnoughCredits': false,
+          'needsRecharge': true,
+        };
+      }
+
+      // ✅ LEER DIRECTAMENTE DE FIRESTORE (no del Stream/getter que puede no estar listo)
+      final walletDoc = await _firestore.collection('wallets').doc(user.uid).get();
+      double currentCredits = 0;
+      if (walletDoc.exists) {
+        currentCredits = (walletDoc.data()?['serviceCredits'] ?? 0).toDouble();
+      }
+
+      final config = await getCreditConfig();
+      final serviceFee = config['serviceFee'] as double;
+      final minCredits = config['minServiceCredits'] as double;
+
+      final hasEnough = currentCredits >= serviceFee && currentCredits >= minCredits;
+      final servicesAvailable = hasEnough ? (currentCredits / serviceFee).floor() : 0;
+
+      return {
+        'currentCredits': currentCredits,
+        'serviceFee': serviceFee,
+        'minCredits': minCredits,
+        'hasEnoughCredits': hasEnough,
+        'servicesAvailable': servicesAvailable,
+        'needsRecharge': !hasEnough,
+        'amountNeeded': hasEnough ? 0 : (minCredits - currentCredits).clamp(0, double.infinity),
+      };
+    } catch (e) {
+      AppLogger.error('Error verificando estado de créditos', e);
+      return {
+        'currentCredits': 0.0,
+        'hasEnoughCredits': false,
+        'needsRecharge': true,
+      };
+    }
+  }
 }

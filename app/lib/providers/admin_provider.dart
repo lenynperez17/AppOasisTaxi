@@ -27,6 +27,13 @@ class AdminProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get transactions => _transactions;
   Map<String, dynamic>? get settings => _settings;
 
+  // Getters de configuración de créditos para conductores
+  double get serviceFee => (_settings?['serviceFee'] ?? 1.0).toDouble();
+  double get minServiceCredits => (_settings?['minServiceCredits'] ?? 10.0).toDouble(); // ✅ Unificado con mínimo de MercadoPago
+  double get bonusCreditsOnFirstRecharge => (_settings?['bonusCreditsOnFirstRecharge'] ?? 5.0).toDouble();
+  List<Map<String, dynamic>> get creditPackages =>
+      (_settings?['creditPackages'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+
   // Cargar usuarios
   Future<void> loadUsers() async {
     _isLoading = true;
@@ -80,13 +87,13 @@ class AdminProvider extends ChangeNotifier {
     try {
       // Cargar estadísticas generales
       final usersSnapshot = await _firestore.collection('users').get();
-      final tripsSnapshot = await _firestore.collection('trips').get();
+      final tripsSnapshot = await _firestore.collection('rides').get();
       
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
       
       final monthlyTrips = await _firestore
-          .collection('trips')
+          .collection('rides')
           .where('createdAt', isGreaterThanOrEqualTo: startOfMonth)
           .get();
 
@@ -119,7 +126,7 @@ class AdminProvider extends ChangeNotifier {
 
     try {
       final tripsSnapshot = await _firestore
-          .collection('trips')
+          .collection('rides')
           .where('status', isEqualTo: 'completed')
           .get();
 
@@ -320,6 +327,25 @@ class AdminProvider extends ChangeNotifier {
       
       if (doc.exists) {
         _settings = doc.data();
+        // Asegurar que los campos de créditos existan
+        _settings = {
+          'commissionRate': 0.20,
+          'minFare': 5.0,
+          'maxRadius': 10000,
+          'surgeMultiplier': 1.0,
+          'maintenanceMode': false,
+          // Configuración de créditos para conductores
+          'serviceFee': 1.0, // Costo por servicio aceptado (S/.)
+          'minServiceCredits': 10.0, // ✅ Créditos mínimos para operar (S/.) - Unificado con MercadoPago
+          'bonusCreditsOnFirstRecharge': 5.0, // Bonificación primera recarga
+          'creditPackages': [
+            {'amount': 10.0, 'bonus': 0.0, 'label': 'Básico'},
+            {'amount': 20.0, 'bonus': 2.0, 'label': 'Popular'},
+            {'amount': 50.0, 'bonus': 10.0, 'label': 'Pro'},
+            {'amount': 100.0, 'bonus': 25.0, 'label': 'Premium'},
+          ],
+          ..._settings!,
+        };
       } else {
         // Configuración por defecto
         _settings = {
@@ -328,7 +354,22 @@ class AdminProvider extends ChangeNotifier {
           'maxRadius': 10000,
           'surgeMultiplier': 1.0,
           'maintenanceMode': false,
+          // Configuración de créditos para conductores
+          'serviceFee': 1.0, // Costo por servicio aceptado (S/.)
+          'minServiceCredits': 10.0, // ✅ Créditos mínimos para operar (S/.) - Unificado con MercadoPago
+          'bonusCreditsOnFirstRecharge': 5.0, // Bonificación primera recarga
+          'creditPackages': [
+            {'amount': 10.0, 'bonus': 0.0, 'label': 'Básico'},
+            {'amount': 20.0, 'bonus': 2.0, 'label': 'Popular'},
+            {'amount': 50.0, 'bonus': 10.0, 'label': 'Pro'},
+            {'amount': 100.0, 'bonus': 25.0, 'label': 'Premium'},
+          ],
         };
+        // Guardar configuración por defecto en Firestore
+        await _firestore
+            .collection('settings')
+            .doc('admin')
+            .set(_settings!);
       }
       notifyListeners();
     } catch (e) {
@@ -385,5 +426,206 @@ class AdminProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  // ============ CONFIGURACIÓN DE CRÉDITOS PARA CONDUCTORES ============
+
+  // Actualizar costo por servicio
+  Future<bool> updateServiceFee(double fee) async {
+    try {
+      await _firestore
+          .collection('settings')
+          .doc('admin')
+          .update({'serviceFee': fee});
+
+      _settings?['serviceFee'] = fee;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Error al actualizar costo por servicio: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Actualizar créditos mínimos requeridos
+  Future<bool> updateMinServiceCredits(double minCredits) async {
+    try {
+      await _firestore
+          .collection('settings')
+          .doc('admin')
+          .update({'minServiceCredits': minCredits});
+
+      _settings?['minServiceCredits'] = minCredits;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Error al actualizar créditos mínimos: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Actualizar bonificación primera recarga
+  Future<bool> updateBonusCreditsOnFirstRecharge(double bonus) async {
+    try {
+      await _firestore
+          .collection('settings')
+          .doc('admin')
+          .update({'bonusCreditsOnFirstRecharge': bonus});
+
+      _settings?['bonusCreditsOnFirstRecharge'] = bonus;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Error al actualizar bonificación: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Actualizar paquetes de créditos
+  Future<bool> updateCreditPackages(List<Map<String, dynamic>> packages) async {
+    try {
+      await _firestore
+          .collection('settings')
+          .doc('admin')
+          .update({'creditPackages': packages});
+
+      _settings?['creditPackages'] = packages;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Error al actualizar paquetes de créditos: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Agregar créditos a un conductor (desde admin)
+  Future<bool> addCreditsToDriver(String driverId, double amount, String reason) async {
+    try {
+      // Actualizar wallet del conductor
+      await _firestore
+          .collection('wallets')
+          .doc(driverId)
+          .update({
+        'serviceCredits': FieldValue.increment(amount),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Registrar transacción
+      await _firestore.collection('creditTransactions').add({
+        'userId': driverId,
+        'amount': amount,
+        'type': 'admin_credit',
+        'reason': reason,
+        'adminId': 'admin',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      return true;
+    } catch (e) {
+      _error = 'Error al agregar créditos: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Obtener conductores con bajo saldo
+  Future<List<Map<String, dynamic>>> getDriversWithLowCredits() async {
+    try {
+      final minCredits = minServiceCredits;
+      final snapshot = await _firestore
+          .collection('wallets')
+          .where('serviceCredits', isLessThan: minCredits)
+          .get();
+
+      List<Map<String, dynamic>> result = [];
+      for (var doc in snapshot.docs) {
+        final userData = await _firestore
+            .collection('users')
+            .doc(doc.id)
+            .get();
+
+        if (userData.exists && userData.data()?['role'] == 'driver') {
+          result.add({
+            'id': doc.id,
+            'credits': doc.data()['serviceCredits'] ?? 0,
+            ...userData.data()!,
+          });
+        }
+      }
+      return result;
+    } catch (e) {
+      _error = 'Error al obtener conductores con bajo saldo: $e';
+      return [];
+    }
+  }
+
+  // Obtener historial de recargas de créditos
+  Future<List<Map<String, dynamic>>> getCreditTransactionsHistory({int limit = 50}) async {
+    try {
+      final snapshot = await _firestore
+          .collection('creditTransactions')
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
+          .get();
+
+      return snapshot.docs.map((doc) => {
+        'id': doc.id,
+        ...doc.data(),
+      }).toList();
+    } catch (e) {
+      _error = 'Error al cargar historial de créditos: $e';
+      return [];
+    }
+  }
+
+  // Obtener estadísticas de créditos
+  Future<Map<String, dynamic>> getCreditStatistics() async {
+    try {
+      // Total de créditos en circulación
+      final walletsSnapshot = await _firestore.collection('wallets').get();
+      double totalCreditsInCirculation = 0;
+      int driversWithCredits = 0;
+      int driversWithoutCredits = 0;
+
+      for (var doc in walletsSnapshot.docs) {
+        final credits = (doc.data()['serviceCredits'] ?? 0).toDouble();
+        totalCreditsInCirculation += credits;
+        if (credits >= minServiceCredits) {
+          driversWithCredits++;
+        } else {
+          driversWithoutCredits++;
+        }
+      }
+
+      // Total recaudado por créditos (últimos 30 días)
+      final thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
+      final rechargesSnapshot = await _firestore
+          .collection('creditTransactions')
+          .where('type', isEqualTo: 'recharge')
+          .where('createdAt', isGreaterThan: Timestamp.fromDate(thirtyDaysAgo))
+          .get();
+
+      double totalRechargesLast30Days = 0;
+      for (var doc in rechargesSnapshot.docs) {
+        totalRechargesLast30Days += (doc.data()['amount'] ?? 0).toDouble();
+      }
+
+      return {
+        'totalCreditsInCirculation': totalCreditsInCirculation,
+        'driversWithCredits': driversWithCredits,
+        'driversWithoutCredits': driversWithoutCredits,
+        'totalRechargesLast30Days': totalRechargesLast30Days,
+        'averageCreditsPerDriver': walletsSnapshot.docs.isNotEmpty
+            ? totalCreditsInCirculation / walletsSnapshot.docs.length
+            : 0,
+      };
+    } catch (e) {
+      _error = 'Error al obtener estadísticas de créditos: $e';
+      return {};
+    }
   }
 }

@@ -1,6 +1,6 @@
 name: oasis_taxi
 description: Oasis Taxi - Aplicación de transporte
-version: 1.2.7+30
+version: 1.3.0+47
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -13,11 +13,11 @@ dependencies:
   cupertino_icons: ^1.0.6
   
   # State Management
-  provider: ^6.1.1
+  provider: ^6.1.5+1
   
   # Maps & Location
-  google_maps_flutter: ^2.9.0
-  google_maps_flutter_web: ^0.5.9
+  google_maps_flutter: ^2.14.0
+  google_maps_flutter_web: ^0.5.14+3
   geolocator: ^14.0.2
   geocoding: ^4.0.0
   flutter_typeahead: ^5.2.0  # ✅ NUEVO: Autocomplete sin recrear TextField (resuelve problema de borrado del teclado)
@@ -33,17 +33,17 @@ dependencies:
   # Storage
   shared_preferences: ^2.3.4
   
-  # Firebase
-  firebase_core: ^4.1.0
-  firebase_auth: ^6.0.2
-  cloud_firestore: ^6.0.1
-  firebase_storage: ^13.0.1
-  firebase_messaging: ^16.0.1
-  firebase_analytics: ^12.0.1
-  firebase_app_check: ^0.4.1  # ✅ NUEVO: App Check para seguridad adicional
-  firebase_crashlytics: ^5.0.1
-  firebase_database: ^12.0.1
-  cloud_functions: ^6.0.3  # ✅ NUEVO: Para llamar Cloud Functions (notificaciones seguras)
+  # Firebase (actualizadas 2025-12-30)
+  firebase_core: ^4.3.0
+  firebase_auth: ^6.1.3
+  cloud_firestore: ^6.1.1
+  firebase_storage: ^13.0.5
+  firebase_messaging: ^16.1.0
+  firebase_analytics: ^12.1.0
+  firebase_app_check: ^0.4.1+3
+  firebase_crashlytics: ^5.0.6
+  firebase_database: ^12.1.1
+  cloud_functions: ^6.0.5
   
   # OAuth y Autenticación Social
   google_sign_in: ^7.2.0
@@ -52,7 +52,7 @@ dependencies:
   crypto: ^3.0.6
   
   # Notifications
-  flutter_local_notifications: ^19.4.1
+  flutter_local_notifications: ^19.5.0
   timezone: ^0.10.1
   
   # QR Code
@@ -62,17 +62,17 @@ dependencies:
   flutter_phone_direct_caller: ^2.1.1
   # telephony: ^0.2.0  # DESHABILITADO TEMPORALMENTE PARA BUILD (namespace issue, discontinued)
   # sms_advanced: ^1.0.4  # TAMBIÉN CON NAMESPACE ISSUE - SMS se maneja por backend
-  flutter_sound: ^9.2.13
-  audio_session: ^0.2.2
+  # flutter_sound: ^9.2.13  # REMOVIDO: No implementado y genera warnings de APIs deprecadas
+  # audio_session: ^0.2.2    # REMOVIDO: Dependencia de flutter_sound, no usado
   # contacts_service: ^0.6.3  # DESHABILITADO TEMPORALMENTE PARA BUILD (namespace issue)
   audioplayers: ^6.1.0
   
   # Utilities
   intl: ^0.20.1
   url_launcher: ^6.3.1
-  uuid: ^4.5.1
+  uuid: ^4.5.2
   logger: ^2.5.0
-  http: ^1.2.2
+  http: ^1.6.0
   webview_flutter: ^4.10.0  # ✅ NUEVO: WebView para MercadoPago Checkout Bricks in-app
   flutter_dotenv: ^5.2.1  # ✅ NUEVO: Gestión segura de variables de entorno desde .env
   
@@ -119,6 +119,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/images/markers/
     - assets/icons/
     - assets/animations/
     # ❌ REMOVIDO POR SEGURIDAD: service-account.json NO debe estar en el APK

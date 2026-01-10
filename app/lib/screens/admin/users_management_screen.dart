@@ -83,7 +83,7 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
           if (tripCount == 0) {
             try {
               final tripsSnapshot = await _firestore
-                  .collection('trips')
+                  .collection('rides')
                   .where(isDriver ? 'driverId' : 'passengerId', isEqualTo: doc.id)
                   .where('status', isEqualTo: 'completed')
                   .limit(1)

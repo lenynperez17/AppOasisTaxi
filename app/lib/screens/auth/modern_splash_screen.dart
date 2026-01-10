@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider; // ✅ Para verificar proveedores
+import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ NUEVO: Para sincronizar currentMode
 import 'dart:math' as math;
 import '../../generated/l10n/app_localizations.dart';
 import '../../core/theme/modern_theme.dart';
@@ -157,7 +158,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
   /// - Usuario driver (puro) → /driver/home
   /// - Usuario admin → /admin/dashboard
   /// - Sin autenticación → /login
-  void _navigateToHome() {
+  Future<void> _navigateToHome() async {
     if (!mounted) return;
 
     final authProvider = context.read<AuthProvider>();
@@ -228,6 +229,25 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
             // Conductor sin documentos aprobados
             // Verificar si ya envió documentos (pending_approval) o es nuevo
             final driverStatus = user.driverStatus ?? 'pending_documents';
+
+            // ✅ FIX BUG ROL: Sincronizar currentMode con la pantalla real
+            // Si el usuario está en modo 'driver' pero NO tiene documentos verificados,
+            // actualizar currentMode a 'passenger' para evitar inconsistencia visual
+            if (user.currentMode == 'driver') {
+              AppLogger.info('🔄 Sincronizando currentMode a passenger (documentos no verificados)');
+              try {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.id)
+                    .update({'currentMode': 'passenger'});
+                // Refrescar datos del usuario en memoria
+                await authProvider.refreshUserData();
+              } catch (e) {
+                AppLogger.warning('Error sincronizando currentMode: $e');
+              }
+              // ✅ FIX: Verificar mounted después de operaciones async
+              if (!mounted) return;
+            }
 
             if (driverStatus == 'pending_approval') {
               // Ya envió documentos, puede usar como pasajero mientras espera

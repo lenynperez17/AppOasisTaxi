@@ -175,10 +175,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen>
       int totalTripsCount = 0;
 
       try {
+        // ✅ IMPORTANTE: limit(100) requerido por reglas de Firestore
         final ridesSnapshot = await FirebaseFirestore.instance
             .collection('rides')
             .where('driverId', isEqualTo: userId)
             .where('status', isEqualTo: 'completed')
+            .limit(100)
             .get();
 
         totalTripsCount = ridesSnapshot.docs.length;

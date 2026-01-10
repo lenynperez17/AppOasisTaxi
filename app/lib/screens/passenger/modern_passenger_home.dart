@@ -109,6 +109,9 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   // ✅ Flag para prevenir uso de controllers después de dispose
   bool _isDisposed = false;
 
+  // ✅ Referencia al RideProvider para poder remover listener en dispose sin usar context
+  RideProvider? _rideProviderRef;
+
   // Animation controllers
   late AnimationController _bottomSheetController;
   late AnimationController _searchBarController;
@@ -142,6 +145,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   // Negociación actual
   models.PriceNegotiation? _currentNegotiation;
   Timer? _negotiationTimer;
+  Timer? _countdownTimer; // Timer para actualizar cronómetro cada segundo
 
   // ==================== CONSTANTES UI - PRINCIPIO DRY ====================
   // Border Radius
@@ -243,20 +247,117 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupRideProviderListener();
       _requestLocationPermission(); // Solicitar permisos de ubicación al iniciar
+      _checkForActiveNegotiations(); // ✅ Verificar si hay negociaciones activas al iniciar
     });
   }
-  
+
   void _setupRideProviderListener() {
     if (!mounted) return;
-    
+
     AppLogger.debug('Configurando listener del RideProvider');
     try {
       final rideProvider = Provider.of<RideProvider>(context, listen: false);
+      // ✅ Guardar referencia para poder remover listener en dispose sin usar context
+      _rideProviderRef = rideProvider;
       // Escuchar cambios en el viaje actual
       rideProvider.addListener(_onRideProviderChanged);
       AppLogger.debug('Listener del RideProvider configurado exitosamente');
     } catch (e) {
       AppLogger.error('Error configurando listener del RideProvider', e);
+    }
+  }
+
+  /// ✅ Verificar si el pasajero tiene negociaciones activas (al cambiar de rol)
+  Future<void> _checkForActiveNegotiations() async {
+    if (!mounted) return;
+
+    try {
+      AppLogger.info('🔍 Verificando negociaciones activas del pasajero...');
+
+      final negotiationProvider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+
+      // Iniciar listener en tiempo real para recibir ofertas
+      negotiationProvider.startListeningToMyNegotiations();
+
+      // Esperar un momento para que carguen las negociaciones
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted) return;
+
+      // Verificar si hay negociaciones activas
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final currentUserId = authProvider.currentUser?.id ?? '';
+
+      final myActiveNegotiations = negotiationProvider.activeNegotiations
+          .where((n) => n.passengerId == currentUserId)
+          .where((n) => n.status == models.NegotiationStatus.waiting || n.status == models.NegotiationStatus.negotiating)
+          .toList();
+
+      if (myActiveNegotiations.isNotEmpty) {
+        AppLogger.info('✅ Encontradas ${myActiveNegotiations.length} negociaciones activas');
+
+        // Mostrar el sheet de ofertas de conductores
+        setState(() {
+          _currentNegotiation = myActiveNegotiations.first;
+          _showDriverOffers = true;
+          _showPriceNegotiation = false;
+        });
+
+        // ✅ Iniciar el cronómetro para actualizar el tiempo restante
+        _startCountdownTimer();
+
+        // Mostrar mensaje informativo
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: const [
+                  Icon(Icons.info, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Tienes una solicitud de viaje activa')),
+                ],
+              ),
+              backgroundColor: ModernTheme.info,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        AppLogger.info('📭 No hay negociaciones activas');
+
+        // ✅ FIX: Si la UI estaba mostrando ofertas o negociación de precio (UI de servicio activo)
+        // y ya no hay negociaciones activas, limpiar completamente
+        // Esto previene que se muestre la ruta y el botón "Continuar" sin contexto
+        if (_showDriverOffers || _currentNegotiation != null) {
+          AppLogger.info('🧹 Limpiando estado de negociación anterior (servicio ya no activo)');
+          setState(() {
+            _currentNegotiation = null;
+            _showDriverOffers = false;
+            _showPriceNegotiation = false;
+
+            // Limpiar la ruta del mapa
+            _polylines.clear();
+            _markers.clear();
+
+            // Limpiar campos de texto
+            _pickupController.clear();
+            _destinationController.clear();
+            _priceController.clear();
+
+            // Limpiar coordenadas
+            _pickupCoordinates = null;
+            _destinationCoordinates = null;
+
+            // Limpiar cálculos de ruta
+            _calculatedDistance = null;
+            _estimatedTime = null;
+            _suggestedPrice = null;
+          });
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Error verificando negociaciones activas', e);
     }
   }
   
@@ -329,17 +430,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     _negotiationTimer = null;
     _buttonDelayTimer?.cancel();
     _buttonDelayTimer = null;
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
 
-    // Remover listener antes de dispose para evitar "widget deactivated" error
-    try {
-      if (mounted) {
-        final rideProvider = Provider.of<RideProvider>(context, listen: false);
-        rideProvider.removeListener(_onRideProviderChanged);
-      }
-    } catch (e) {
-      // Ignorar errores si el context ya no está disponible
-      AppLogger.debug('Error removiendo listener en dispose: $e');
-    }
+    // ✅ Remover listener usando la referencia guardada (NO usar context en dispose)
+    _rideProviderRef?.removeListener(_onRideProviderChanged);
+    _rideProviderRef = null;
 
     _bottomSheetController.dispose();
     _searchBarController.dispose();
@@ -354,6 +450,44 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   void _hideKeyboard() {
     FocusScope.of(context).unfocus(); // Quita el foco
     SystemChannels.textInput.invokeMethod('TextInput.hide'); // Fuerza el ocultamiento en Android
+  }
+
+  // ✅ Iniciar Timer para actualizar cronómetro de ofertas cada segundo
+  void _startCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _currentNegotiation == null) {
+        timer.cancel();
+        return;
+      }
+
+      // Verificar si la negociación expiró
+      if (_currentNegotiation!.isExpired) {
+        timer.cancel();
+        setState(() {
+          _showDriverOffers = false;
+          _currentNegotiation = null;
+        });
+        // Mostrar mensaje de expiración
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tu solicitud ha expirado. Puedes crear una nueva.'),
+            backgroundColor: ModernTheme.warning,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+
+      // Actualizar UI para refrescar el cronómetro
+      setState(() {});
+    });
+  }
+
+  // ✅ Detener Timer del cronómetro
+  void _stopCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
   }
 
   /// ✅ Agregar marcador para ubicación seleccionada y hacer zoom
@@ -536,6 +670,62 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = authProvider.currentUser;
 
+      // ✅ IMPORTANTE: Limpiar negociaciones cuyo viaje fue cancelado antes de crear nueva
+      await negotiationProvider.cleanupCancelledNegotiations();
+
+      // ✅ NUEVO: Verificar si ya existe una negociación activa (solo 1 servicio a la vez)
+      if (user != null) {
+        final myActiveNegotiations = negotiationProvider.activeNegotiations
+            .where((n) => n.passengerId == user.id)
+            .where((n) => n.status == models.NegotiationStatus.waiting ||
+                          n.status == models.NegotiationStatus.negotiating)
+            .where((n) => n.expiresAt.isAfter(DateTime.now()))
+            .toList();
+
+        if (myActiveNegotiations.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _isCreatingNegotiation = false;
+          });
+
+          // Mostrar mensaje y preguntar si quiere ir a ver la negociación activa
+          final goToNegotiations = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Ya tienes una solicitud activa'),
+              content: const Text(
+                'Solo puedes tener una solicitud de viaje activa a la vez. '
+                '¿Deseas ver tu solicitud actual?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+                  child: const Text('Ver solicitud'),
+                ),
+              ],
+            ),
+          );
+
+          if (goToNegotiations == true && mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => PassengerNegotiationsScreen()),
+            ).then((_) {
+              // ✅ Cuando regrese, verificar estado
+              if (mounted) {
+                _checkForActiveNegotiations();
+              }
+            });
+          }
+          return;
+        }
+      }
+
       if (user == null) {
         if (!mounted) return;
         setState(() {
@@ -638,12 +828,19 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       );
 
       // ✅ NUEVO: Navegar a la pantalla de negociaciones para ver ofertas
+      // ✅ FIX: Usar .then() para verificar estado cuando el usuario regrese
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => PassengerNegotiationsScreen(),
         ),
-      );
+      ).then((_) {
+        // ✅ Cuando el usuario regrese de la pantalla de negociaciones,
+        // verificar si todavía tiene negociaciones activas
+        if (mounted) {
+          _checkForActiveNegotiations();
+        }
+      });
 
     } catch (e) {
       if (!mounted) return;
@@ -951,10 +1148,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     required Color markerColor,
     required bool isPickup,
   }) {
-    // ✅ LOG CRÍTICO: Confirmar que este método se ejecuta
-    AppLogger.critical('🎯🎯🎯 _buildAddressField LLAMADO - isPickup: $isPickup, hint: $hintText');
     final apiKey = AppConfig.googleMapsApiKey;
-    AppLogger.critical('🎯🎯🎯 API Key: ${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 5)}');
 
     return CustomPlaceTextField(
       controller: controller,
@@ -1017,9 +1211,6 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   }
 
   Widget _buildSearchBar() {
-    // ✅ LOG CRÍTICO: Confirmar que _buildSearchBar se ejecuta
-    AppLogger.critical('📍📍📍 _buildSearchBar EJECUTÁNDOSE - animation value: ${_searchBarAnimation.value}');
-
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -1654,17 +1845,48 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
-          Container(
-            margin: EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(2),
-            ),
+          // ✅ Handle con botón de cerrar
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                margin: EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // ✅ Botón X para cancelar
+              Positioned(
+                right: 16,
+                top: 8,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showDriverOffers = false;
+                      _currentNegotiation = null;
+                    });
+                    _cancelPriceNegotiation();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: context.secondaryText,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          
+
           // Título con contador
           Padding(
             padding: EdgeInsets.all(20),
@@ -1693,25 +1915,40 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                   ],
                 ),
                 // Timer countdown
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: ModernTheme.warning.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.timer, size: 16, color: ModernTheme.warning),
-                      SizedBox(width: 4),
-                      Text(
-                        '${_currentNegotiation?.timeRemaining.inMinutes ?? 0}:${(_currentNegotiation?.timeRemaining.inSeconds ?? 0) % 60}',
-                        style: TextStyle(
-                          color: ModernTheme.warning,
-                          fontWeight: FontWeight.w600,
-                        ),
+                Builder(
+                  builder: (context) {
+                    final remaining = _currentNegotiation?.timeRemaining;
+                    final isExpired = remaining == null || remaining.isNegative || remaining.inSeconds <= 0;
+                    final timerText = isExpired
+                        ? 'Expirado'
+                        : '${remaining.inMinutes}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}';
+                    return Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isExpired
+                            ? ModernTheme.error.withValues(alpha: 0.1)
+                            : ModernTheme.warning.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
                       ),
-                    ],
-                  ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isExpired ? Icons.timer_off : Icons.timer,
+                            size: 16,
+                            color: isExpired ? ModernTheme.error : ModernTheme.warning,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            timerText,
+                            style: TextStyle(
+                              color: isExpired ? ModernTheme.error : ModernTheme.warning,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -1736,9 +1973,12 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
   
   Widget _buildDriverOfferCard(models.DriverOffer offer) {
     return AnimatedElevatedCard(
-      onTap: () {
-        // Aceptar oferta
-        _showDriverAcceptedDialog(offer);
+      onTap: () async {
+        // ✅ Mostrar diálogo de confirmación antes de aceptar
+        final confirmed = await _showAcceptOfferConfirmation(offer);
+        if (confirmed == true) {
+          await _acceptDriverOffer(offer);
+        }
       },
       borderRadius: 16,
       child: Container(
@@ -2193,21 +2433,221 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
     );
   }
   
-  void _showDriverAcceptedDialog(models.DriverOffer offer) {
+  // ✅ Mostrar diálogo de confirmación antes de aceptar oferta
+  Future<bool?> _showAcceptOfferConfirmation(models.DriverOffer offer) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.check_circle_outline, color: ModernTheme.oasisGreen, size: 28),
+            SizedBox(width: 12),
+            Text('Confirmar viaje'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Info del conductor
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 25,
+                  backgroundImage: offer.driverPhoto.isNotEmpty
+                      ? NetworkImage(offer.driverPhoto)
+                      : null,
+                  child: offer.driverPhoto.isEmpty
+                      ? Icon(Icons.person, size: 25)
+                      : null,
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        offer.driverName,
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                      ),
+                      Row(
+                        children: [
+                          Icon(Icons.star, size: 14, color: ModernTheme.accentYellow),
+                          SizedBox(width: 4),
+                          Text(
+                            offer.driverRating.toStringAsFixed(1),
+                            style: TextStyle(fontSize: 14, color: context.secondaryText),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            // Vehículo
+            Text(
+              offer.vehicleModel,
+              style: TextStyle(fontSize: 14, color: context.secondaryText),
+            ),
+            Text(
+              '${offer.vehiclePlate} • ${offer.vehicleColor}',
+              style: TextStyle(fontSize: 14, color: context.secondaryText),
+            ),
+            SizedBox(height: 16),
+            // Precio
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Precio acordado:', style: TextStyle(fontSize: 16)),
+                  Text(
+                    'S/. ${offer.acceptedPrice.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: ModernTheme.oasisGreen,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 8),
+            // Tiempo de llegada
+            Row(
+              children: [
+                Icon(Icons.access_time, size: 16, color: ModernTheme.info),
+                SizedBox(width: 4),
+                Text(
+                  'Llega en ~${offer.estimatedArrival} min',
+                  style: TextStyle(color: ModernTheme.info),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.oasisGreen,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text('Aceptar viaje'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Aceptar oferta de conductor - Crea el viaje y muestra confirmación
+  Future<void> _acceptDriverOffer(models.DriverOffer offer) async {
+    if (_currentNegotiation == null) return;
+
+    // Mostrar loading mientras se procesa
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ModernLoadingIndicator(color: ModernTheme.success),
+            ModernLoadingIndicator(color: ModernTheme.oasisGreen),
             SizedBox(height: 20),
             Text(
-              '¡Conductor encontrado!',
+              'Aceptando oferta...',
+              style: TextStyle(fontSize: 16),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Usar el provider para crear el viaje
+      final negotiationProvider = Provider.of<PriceNegotiationProvider>(context, listen: false);
+      final rideId = await negotiationProvider.acceptDriverOffer(
+        _currentNegotiation!.id,
+        offer.driverId,
+      );
+
+      // Cerrar el loading
+      if (mounted) Navigator.of(context).pop();
+
+      if (rideId != null) {
+        // Detener el cronómetro
+        _stopCountdownTimer();
+
+        // Resetear estados de la pantalla
+        setState(() {
+          _showDriverOffers = false;
+          _currentNegotiation = null;
+        });
+
+        // Mostrar diálogo de éxito y navegar al tracking
+        _showDriverAcceptedDialog(offer, rideId);
+      } else {
+        // Error al crear el viaje
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error al aceptar la oferta. Intenta de nuevo.'),
+              backgroundColor: ModernTheme.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // Cerrar el loading
+      if (mounted) Navigator.of(context).pop();
+
+      AppLogger.error('Error aceptando oferta', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: ModernTheme.error,
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ Mostrar diálogo de confirmación con opción de ver detalles
+  void _showDriverAcceptedDialog(models.DriverOffer offer, String rideId) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_kBorderRadiusLarge),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle, color: ModernTheme.success, size: 64),
+            SizedBox(height: 20),
+            Text(
+              '¡Conductor confirmado!',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -2216,14 +2656,29 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
             SizedBox(height: 8),
             Text(
               '${offer.driverName} está en camino',
-              style: TextStyle(color: context.secondaryText),
+              style: TextStyle(color: dialogContext.secondaryText),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Llegará en aproximadamente ${offer.estimatedArrival} minutos',
+              style: TextStyle(
+                color: ModernTheme.info,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
             ),
             SizedBox(height: 20),
             AnimatedPulseButton(
-              text: 'Ver detalles',
+              text: 'Ver seguimiento',
               onPressed: () {
-                Navigator.of(context).pop();
-                // Navegar a pantalla de seguimiento
+                Navigator.of(dialogContext).pop();
+                // Navegar a pantalla de seguimiento del viaje
+                Navigator.pushNamed(
+                  context,
+                  '/trip-tracking',
+                  arguments: {'rideId': rideId},
+                );
               },
             ),
           ],
@@ -2330,11 +2785,7 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
                     title: AppLocalizations.of(context)!.logout,
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.pushNamedAndRemoveUntil(
-                        context,
-                        '/login',
-                        (route) => false,
-                      );
+                      _showLogoutConfirmation();
                     },
                     color: ModernTheme.error,
                   ),
@@ -2346,7 +2797,38 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       ),
     );
   }
-  
+
+  // Confirmación de logout
+  void _showLogoutConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cerrar Sesión'),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                '/login',
+                (route) => false,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.error,
+            ),
+            child: const Text('Cerrar Sesión'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDrawerItem({
     required IconData icon,
     required String title,
@@ -2472,12 +2954,19 @@ class _ModernPassengerHomeScreenState extends State<ModernPassengerHomeScreen>
       }
 
       // Si no hay coordenadas (usuario escribió pero no seleccionó de la lista)
+      // NO usar fallback - mostrar error al usuario
       AppLogger.warning('Usuario escribió dirección pero no seleccionó de autocomplete. Coordenadas no disponibles.');
 
-      // Fallback: usar coordenadas del centro de Lima
-      final fallbackCoordinates = LatLng(-12.0464, -77.0428);
-      AppLogger.warning('Usando coordenadas fallback (centro de Lima): ${fallbackCoordinates.latitude}, ${fallbackCoordinates.longitude}');
-      return fallbackCoordinates;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Por favor selecciona una dirección de la lista de sugerencias'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return null;
 
     } catch (e, stackTrace) {
       AppLogger.error('Error obteniendo ubicación de destino', e, stackTrace);

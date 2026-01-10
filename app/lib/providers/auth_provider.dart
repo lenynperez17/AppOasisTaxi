@@ -37,6 +37,9 @@ class AuthProvider with ChangeNotifier {
   int _loginAttempts = 0;
   bool _isAccountLocked = false;
   DateTime? _lockedUntil;
+
+  // ✅ Control de cambio de rol para evitar listeners prematuros
+  bool _isRoleSwitchInProgress = false;
   
   // Verificación de email, teléfono y documento
   bool _emailVerified = false;
@@ -60,6 +63,7 @@ class AuthProvider with ChangeNotifier {
   bool get isInitializing => _isInitializing; // ✅ NUEVO
   String? get errorMessage => _errorMessage;
   bool get isAccountLocked => _isAccountLocked;
+  bool get isRoleSwitchInProgress => _isRoleSwitchInProgress; // ✅ Flag para cambio de rol
   bool get emailVerified => _emailVerified;
   bool get phoneVerified => _phoneVerified;
   bool get documentVerified => _documentVerified;
@@ -584,8 +588,21 @@ class AuthProvider with ChangeNotifier {
       await FirebaseAuth.instance.signOut();
       _currentUser = null;
       _isAuthenticated = false;
-      
+
+      // ✅ CLEANUP: Resetear todos los flags de estado al cerrar sesión
+      _isRoleSwitchInProgress = false;
+      _emailVerified = false;
+      _phoneVerified = false;
+      _documentVerified = false;
+      _loginAttempts = 0;
+      _isAccountLocked = false;
+      _lockedUntil = null;
+      _verificationId = null;
+      _pendingPhoneNumber = null;
+      _errorMessage = null;
+
       await _firebaseService.logEvent('logout', null);
+      AppLogger.info('Sesión cerrada y estados limpiados correctamente');
     } catch (e) {
       debugPrint('Error al cerrar sesión: $e');
       await _firebaseService.recordError(e, null);
@@ -839,7 +856,19 @@ class AuthProvider with ChangeNotifier {
       print('❌ AuthProvider - ERROR CAPTURADO:');
       print('   Tipo: ${e.runtimeType}');
       print('   Mensaje: $e');
-      _errorMessage = 'Error al iniciar sesión con Google: $e';
+
+      // Manejar errores específicos de Google Sign-In
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('12501') || errorStr.contains('sign_in_canceled') || errorStr.contains('cancelled')) {
+        _errorMessage = 'Inicio de sesión cancelado. Intenta nuevamente.';
+      } else if (errorStr.contains('12500') || errorStr.contains('sign_in_failed')) {
+        _errorMessage = 'Error de configuración de Google. Contacta soporte.';
+      } else if (errorStr.contains('network') || errorStr.contains('connection')) {
+        _errorMessage = 'Sin conexión a internet. Verifica tu red.';
+      } else {
+        _errorMessage = 'Error al iniciar sesión con Google. Intenta nuevamente.';
+      }
+
       await _firebaseService.recordError(e, null);
     }
 
@@ -1385,6 +1414,7 @@ class AuthProvider with ChangeNotifier {
     }
 
     _isLoading = true;
+    _isRoleSwitchInProgress = true; // ✅ Marcar inicio de cambio de rol
     notifyListeners();
 
     try {
@@ -1395,6 +1425,9 @@ class AuthProvider with ChangeNotifier {
         'from': oldMode,
         'to': newMode,
       });
+
+      // ✅ Pequeño delay para permitir que listeners del rol anterior se detengan
+      await Future.delayed(const Duration(milliseconds: 100));
 
       // ✅ FIX: Actualizar estado local PRIMERO para UI instantánea (optimistic update)
       _currentUser = _currentUser!.copyWith(currentMode: newMode);
@@ -1489,6 +1522,7 @@ class AuthProvider with ChangeNotifier {
       });
 
       _isLoading = false;
+      _isRoleSwitchInProgress = false; // ✅ Marcar fin de cambio de rol
       _errorMessage = null;
       notifyListeners();
       return true;
@@ -1498,6 +1532,7 @@ class AuthProvider with ChangeNotifier {
       _errorMessage = 'Error al cambiar modo: $e';
       await _firebaseService.recordError(e, stackTrace);
       _isLoading = false;
+      _isRoleSwitchInProgress = false; // ✅ También resetear en error
       notifyListeners();
       return false;
     }

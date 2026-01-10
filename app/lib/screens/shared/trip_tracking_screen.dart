@@ -59,6 +59,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   Position? _currentPosition;
   Position? _driverPosition;
   LatLng? _driverLatLng;
+  LatLng? _lastUpdatedDriverLatLng; // ✅ Para throttle de actualizaciones del mapa
   
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
@@ -179,7 +180,9 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
           return;
         }
 
-        // Verificar si el viaje fue cancelado
+        // ✅ CORREGIDO: NO hacer Navigator.pop() automáticamente en cancelación
+        // En su lugar, actualizar el estado y mostrar la pantalla de cancelado
+        // El usuario puede navegar manualmente con el botón "Volver al Inicio"
         if (ride.status == 'cancelled' && _currentRide?.status != 'cancelled') {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -188,8 +191,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
               duration: Duration(seconds: 3),
             ),
           );
-          Navigator.pop(context);
-          return;
+          // NO hacer Navigator.pop() - dejar que la UI muestre pantalla de cancelado
         }
 
         setState(() {
@@ -315,6 +317,23 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   }
 
   void _updateDriverPosition(LatLng position) {
+    // ✅ Throttle: Solo actualizar si la posición cambió más de 10 metros
+    // Esto reduce los warnings de ImageReader y mejora el rendimiento
+    if (_lastUpdatedDriverLatLng != null) {
+      final distance = Geolocator.distanceBetween(
+        _lastUpdatedDriverLatLng!.latitude,
+        _lastUpdatedDriverLatLng!.longitude,
+        position.latitude,
+        position.longitude,
+      );
+      // Si el conductor se movió menos de 10 metros, no actualizar el mapa
+      if (distance < 10) {
+        return;
+      }
+    }
+
+    _lastUpdatedDriverLatLng = position;
+
     setState(() {
       _driverLatLng = position;
       _driverPosition = Position(
@@ -535,7 +554,22 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
   }
 
   Future<void> _callDriver() async {
-    if (_currentRide?.vehicleInfo?['driverPhone'] == null) {
+    // ✅ CORREGIDO: Intentar obtener teléfono de vehicleInfo o directamente de Firestore
+    String? driverPhone = _currentRide?.vehicleInfo?['driverPhone'];
+
+    // Si no está en vehicleInfo, intentar obtener desde Firestore
+    if ((driverPhone == null || driverPhone.isEmpty) && _currentRide?.driverId != null) {
+      try {
+        final driverData = await FirebaseService().getUserById(_currentRide!.driverId!);
+        if (driverData != null) {
+          driverPhone = driverData['phone'] as String?;
+        }
+      } catch (e) {
+        AppLogger.error('Error obteniendo teléfono del conductor', e);
+      }
+    }
+
+    if (driverPhone == null || driverPhone.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -546,7 +580,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
       return;
     }
 
-    final Uri phoneUri = Uri(scheme: 'tel', path: _currentRide!.vehicleInfo?['driverPhone'] ?? '');
+    final Uri phoneUri = Uri(scheme: 'tel', path: driverPhone);
     if (await canLaunchUrl(phoneUri)) {
       await launchUrl(phoneUri);
     }
@@ -735,7 +769,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
@@ -760,7 +794,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                             fontSize: 14,
                             color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                           ),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -905,12 +939,69 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
               ),
             ),
           ],
+          // Sección de destino visible
+          if (_currentRide?.destinationAddress != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.flag, color: Colors.red.shade300, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Destino',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          _currentRide!.destinationAddress,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildMap() {
+    // ✅ Determinar la posición inicial del mapa
+    LatLng initialTarget;
+    if (_currentRide != null) {
+      initialTarget = LatLng(
+        _currentRide!.pickupLocation.latitude,
+        _currentRide!.pickupLocation.longitude,
+      );
+    } else if (_currentPosition != null) {
+      initialTarget = LatLng(
+        _currentPosition!.latitude,
+        _currentPosition!.longitude,
+      );
+    } else {
+      initialTarget = const LatLng(-12.0464, -77.0428); // Lima por defecto
+    }
+
     return Expanded(
       child: Container(
         margin: const EdgeInsets.all(16),
@@ -926,39 +1017,82 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(20),
-          child: GoogleMap(
-            onMapCreated: (GoogleMapController controller) {
-              _mapController = controller;
-              setState(() {
-                _isMapLoaded = true;
-              });
-              
-              // Centrar mapa en la ruta después de un delay
-              Future.delayed(const Duration(seconds: 1), () {
-                _centerMapOnRoute();
-              });
-            },
-            initialCameraPosition: CameraPosition(
-              target: _currentRide != null
-                  ? LatLng(
-                      _currentRide!.pickupLocation.latitude,
-                      _currentRide!.pickupLocation.longitude,
-                    )
-                  : const LatLng(-12.0464, -77.0428), // Lima por defecto
-              zoom: 15,
-            ),
-            markers: _markers,
-            polylines: _polylines,
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            trafficEnabled: true,
-            buildingsEnabled: true,
+          child: Stack(
+            children: [
+              GoogleMap(
+                onMapCreated: (GoogleMapController controller) {
+                  _mapController = controller;
+                  setState(() {
+                    _isMapLoaded = true;
+                  });
+
+                  // Centrar mapa en la ruta después de un delay
+                  Future.delayed(const Duration(seconds: 1), () {
+                    if (_routePoints.isNotEmpty) {
+                      _centerMapOnRoute();
+                    } else if (_currentRide != null) {
+                      // Si no hay ruta, centrar en pickup y destino
+                      _fitMapToPickupAndDestination();
+                    }
+                  });
+                },
+                initialCameraPosition: CameraPosition(
+                  target: initialTarget,
+                  zoom: 15,
+                ),
+                markers: _markers,
+                polylines: _polylines,
+                myLocationEnabled: true,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+                trafficEnabled: true,
+                buildingsEnabled: true,
+              ),
+              // ✅ Indicador de carga mientras el mapa no está listo
+              if (!_isMapLoaded)
+                Container(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 8),
+                        Text('Cargando mapa...'),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
     );
+  }
+
+  // ✅ Nuevo método para centrar el mapa en pickup y destino
+  Future<void> _fitMapToPickupAndDestination() async {
+    if (_mapController == null || _currentRide == null) return;
+
+    try {
+      final bounds = LatLngBounds(
+        southwest: LatLng(
+          math.min(_currentRide!.pickupLocation.latitude, _currentRide!.destinationLocation.latitude),
+          math.min(_currentRide!.pickupLocation.longitude, _currentRide!.destinationLocation.longitude),
+        ),
+        northeast: LatLng(
+          math.max(_currentRide!.pickupLocation.latitude, _currentRide!.destinationLocation.latitude),
+          math.max(_currentRide!.pickupLocation.longitude, _currentRide!.destinationLocation.longitude),
+        ),
+      );
+
+      await _mapController!.animateCamera(
+        CameraUpdate.newLatLngBounds(bounds, 100),
+      );
+    } catch (e) {
+      AppLogger.error('Error centrando mapa', e);
+    }
   }
 
   Widget _buildActionButtons() {
@@ -1013,6 +1147,59 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
 
   @override
   Widget build(BuildContext context) {
+    // ✅ Si el viaje está cancelado, mostrar pantalla especial con botón para volver
+    if (_currentRide?.status == 'cancelled') {
+      return Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        appBar: AppBar(
+          title: const Text('Viaje Cancelado'),
+          backgroundColor: Colors.red,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.cancel, size: 80, color: Colors.red),
+              const SizedBox(height: 24),
+              const Text(
+                'Este viaje ha sido cancelado',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _currentRide?.cancelledBy == _currentRide?.driverId
+                    ? 'El conductor canceló el viaje'
+                    : 'El viaje fue cancelado',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+                icon: const Icon(Icons.home),
+                label: const Text('Volver al Inicio'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       appBar: AppBar(
@@ -1026,6 +1213,10 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
         backgroundColor: primaryColor,
         elevation: 0,
         iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
           if (_showDriverInfo)
             IconButton(
@@ -1049,14 +1240,16 @@ class _TripTrackingScreenState extends State<TripTrackingScreen>
                 ],
               ),
             )
-          : Column(
-              children: [
-                _buildStatusCard(),
-                if (_showDriverInfo && _currentRide?.driverId != null)
-                  _buildDriverInfo(),
-                _buildMap(),
-                _buildActionButtons(),
-              ],
+          : SafeArea(
+              child: Column(
+                children: [
+                  _buildStatusCard(),
+                  if (_showDriverInfo && _currentRide?.driverId != null)
+                    _buildDriverInfo(),
+                  _buildMap(),
+                  _buildActionButtons(),
+                ],
+              ),
             ),
     );
   }

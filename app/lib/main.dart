@@ -32,6 +32,8 @@ import 'providers/notification_provider.dart';
 import 'providers/price_negotiation_provider.dart';
 import 'providers/locale_provider.dart'; // ✅ NUEVO: Provider para cambio de idioma
 import 'providers/preferences_provider.dart'; // ✅ NUEVO: Provider para Dark Mode y preferencias
+import 'providers/wallet_provider.dart'; // ✅ FIX: Provider para créditos de servicio
+import 'providers/document_provider.dart'; // ✅ FIX: Provider para documentos de conductor
 import 'models/trip_model.dart';
 
 // Screens
@@ -64,6 +66,7 @@ import 'screens/driver/earnings_details_screen.dart';
 import 'screens/driver/documents_screen.dart';
 import 'screens/driver/driver_profile_screen.dart';
 import 'screens/driver/driver_negotiations_screen.dart';
+import 'screens/driver/recharge_credits_screen.dart';
 import 'screens/admin/admin_login_screen.dart';
 import 'screens/admin/admin_dashboard_screen.dart';
 import 'screens/admin/users_management_screen.dart';
@@ -191,6 +194,8 @@ class OasisTaxiApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RideProvider()),
         ChangeNotifierProvider(create: (_) => PriceNegotiationProvider()),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
+        ChangeNotifierProvider(create: (_) => WalletProvider()), // ✅ FIX: Provider para créditos de servicio
+        ChangeNotifierProvider(create: (_) => DocumentProvider()), // ✅ FIX: Provider para documentos de conductor
       ],
       // ✅ HANDLER DE NOTIFICACIONES - Procesa clicks en notificaciones
       child: NotificationHandlerWidget(
@@ -303,6 +308,7 @@ class _ThemedMaterialApp extends StatelessWidget {
         '/driver/negotiations': (context) => DriverNegotiationsScreen(),
         '/driver/documents': (context) => DocumentsScreen(),
         '/driver/profile': (context) => DriverProfileScreen(),
+        '/driver/recharge-credits': (context) => RechargeCreditsScreen(),
         '/driver/verification': (context) => DriverVerificationScreen(
           trip: ModalRoute.of(context)!.settings.arguments as TripModel,
         ),

@@ -674,19 +674,34 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             ),
             SizedBox(height: 16),
 
-            // Gráficos de viajes lado a lado
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: _buildTripsByHourChart(),
-                ),
-                SizedBox(width: 16),
-                Expanded(
-                  child: _buildZoneDistributionPieChart(),
-                ),
-              ],
+            // Gráficos de viajes - responsivo
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // En pantallas pequeñas, mostrar en columna
+                if (constraints.maxWidth < 700) {
+                  return Column(
+                    children: [
+                      _buildTripsByHourChart(),
+                      SizedBox(height: 16),
+                      _buildZoneDistributionPieChart(),
+                    ],
+                  );
+                }
+                // En pantallas grandes, mostrar en fila
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: _buildTripsByHourChart(),
+                    ),
+                    SizedBox(width: 16),
+                    Expanded(
+                      child: _buildZoneDistributionPieChart(),
+                    ),
+                  ],
+                );
+              },
             ),
 
             SizedBox(height: 32),
@@ -1220,90 +1235,106 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           ),
           SizedBox(height: 20),
           
-          // Table header
-          Container(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Theme.of(context).dividerColor),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(flex: 2, child: Text('Zona', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
-                Expanded(child: Text('Viajes', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
-                Expanded(child: Text('Ingresos', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
-                Expanded(child: Text('Precio Prom.', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
-              ],
-            ),
-          ),
-          
-          // Table rows
-          ..._zoneStatistics.map((zone) {
-            final maxTrips = _zoneStatistics.map((e) => e['trips'] as int).reduce(math.max);
-            final percentage = (zone['trips'] as int) / maxTrips;
-            
-            return Container(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.5)),
-                ),
-              ),
-              child: Row(
+          // Tabla con scroll horizontal si es necesario
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 80),
+              child: Column(
                 children: [
-                  Expanded(
-                    flex: 2,
+                  // Table header
+                  Container(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                    ),
                     child: Row(
                       children: [
-                        Container(
-                          width: 40, // ✅ CORREGIDO: Reducido de 60 a 40 para ahorrar espacio
-                          height: 6,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(3),
-                            gradient: LinearGradient(
-                              colors: [
-                                ModernTheme.oasisGreen,
-                                ModernTheme.oasisGreen.withValues(alpha: 0.3),
-                              ],
-                              stops: [percentage, percentage],
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        Flexible( // ✅ CORREGIDO: Usar Flexible para evitar overflow
-                          child: Text(
-                            zone['zone'],
-                            style: TextStyle(color: ModernTheme.textPrimary, fontSize: 13), // ✅ Reducido a 13
-                            overflow: TextOverflow.ellipsis, // ✅ Agregar ellipsis si es muy largo
-                            maxLines: 1, // ✅ Solo una línea
-                          ),
-                        ),
+                        SizedBox(width: 120, child: Text('Zona', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
+                        SizedBox(width: 60, child: Text('Viajes', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
+                        SizedBox(width: 80, child: Text('Ingresos', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
+                        SizedBox(width: 80, child: Text('Prom.', style: TextStyle(color: ModernTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold))),
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: Text(
-                      zone['trips'].toString(),
-                      style: TextStyle(color: ModernTheme.textSecondary, fontSize: 14), // ✅ CORREGIDO
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      (zone['revenue'] as double).toCurrency(decimals: 0),
-                      style: TextStyle(color: ModernTheme.textSecondary, fontSize: 14), // ✅ CORREGIDO
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      (zone['avgPrice'] as double).toCurrency(),
-                      style: TextStyle(color: ModernTheme.success, fontSize: 14),
-                    ),
-                  ),
+
+                  // Table rows
+                  ..._zoneStatistics.map((zone) {
+                    final maxTrips = _zoneStatistics.isNotEmpty
+                        ? _zoneStatistics.map((e) => e['trips'] as int).reduce(math.max)
+                        : 1;
+                    final percentage = maxTrips > 0 ? (zone['trips'] as int) / maxTrips : 0.0;
+
+                    return Container(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Theme.of(context).dividerColor.withValues(alpha: 0.5)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 120,
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 30,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(3),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        ModernTheme.oasisGreen,
+                                        ModernTheme.oasisGreen.withValues(alpha: 0.3),
+                                      ],
+                                      stops: [percentage, percentage],
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    zone['zone'],
+                                    style: TextStyle(color: ModernTheme.textPrimary, fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: Text(
+                              zone['trips'].toString(),
+                              style: TextStyle(color: ModernTheme.textSecondary, fontSize: 13),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 80,
+                            child: Text(
+                              (zone['revenue'] as double).toCurrency(decimals: 0),
+                              style: TextStyle(color: ModernTheme.textSecondary, fontSize: 13),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 80,
+                            child: Text(
+                              (zone['avgPrice'] as double).toCurrency(),
+                              style: TextStyle(color: ModernTheme.success, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
                 ],
               ),
-            );
-          }),
+            ),
+          ),
         ],
       ),
     );
@@ -1465,48 +1496,49 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           ),
           SizedBox(height: 20),
           
-          Row(
-            children: [
-              Expanded(
-                child: _buildSatisfactionCard(
-                  'Calificación Promedio',
-                  '${_analyticsData['satisfactionRate']}',
-                  Icons.star,
-                  ModernTheme.accentYellow,
-                  'de 5.0',
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _buildSatisfactionCard(
-                  'Tasa de Conversión',
-                  '${_analyticsData['conversionRate']}%',
-                  Icons.trending_up,
-                  ModernTheme.success,
-                  'solicitudes aceptadas',
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _buildSatisfactionCard(
-                  'Tasa de Cancelación',
-                  '${_analyticsData['cancelationRate']}%',
-                  Icons.cancel,
-                  ModernTheme.error,
-                  'viajes cancelados',
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _buildSatisfactionCard(
-                  'Retención',
-                  '${_analyticsData['retentionRate']}%',
-                  Icons.person_pin,
-                  ModernTheme.primaryBlue,
-                  'usuarios recurrentes',
-                ),
-              ),
-            ],
+          // Tarjetas de satisfacción - responsivo con GridView
+          LayoutBuilder(
+            builder: (context, constraints) {
+              int crossAxisCount = constraints.maxWidth < 400 ? 2 : (constraints.maxWidth < 700 ? 2 : 4);
+              return GridView.count(
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                shrinkWrap: true,
+                physics: NeverScrollableScrollPhysics(),
+                childAspectRatio: constraints.maxWidth < 400 ? 0.85 : 0.95,
+                children: [
+                  _buildSatisfactionCard(
+                    'Calificación',
+                    (_analyticsData['satisfactionRate'] as double).toStringAsFixed(1),
+                    Icons.star,
+                    ModernTheme.accentYellow,
+                    'de 5.0',
+                  ),
+                  _buildSatisfactionCard(
+                    'Conversión',
+                    '${(_analyticsData['conversionRate'] as double).toStringAsFixed(1)}%',
+                    Icons.trending_up,
+                    ModernTheme.success,
+                    'aceptadas',
+                  ),
+                  _buildSatisfactionCard(
+                    'Cancelación',
+                    '${(_analyticsData['cancelationRate'] as double).toStringAsFixed(1)}%',
+                    Icons.cancel,
+                    ModernTheme.error,
+                    'cancelados',
+                  ),
+                  _buildSatisfactionCard(
+                    'Retención',
+                    '${(_analyticsData['retentionRate'] as double).toStringAsFixed(1)}%',
+                    Icons.person_pin,
+                    ModernTheme.primaryBlue,
+                    'recurrentes',
+                  ),
+                ],
+              );
+            },
           ),
           
           SizedBox(height: 20),
@@ -1644,48 +1676,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           ),
           SizedBox(height: 20),
           
-          // ✅ Revenue breakdown REAL desde Firebase
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildRevenueRow(
-                      'Viajes Completados',
-                      (_analyticsData['revenueFromTrips'] as double? ?? 0.0),
-                      _analyticsData['totalRevenue'] as double > 0
-                        ? ((_analyticsData['revenueFromTrips'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
-                        : 0.0
-                    ),
-                    _buildRevenueRow(
-                      'Comisiones',
-                      (_analyticsData['revenueFromCommissions'] as double? ?? 0.0),
-                      _analyticsData['totalRevenue'] as double > 0
-                        ? ((_analyticsData['revenueFromCommissions'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
-                        : 0.0
-                    ),
-                    _buildRevenueRow(
-                      'Servicios Premium',
-                      (_analyticsData['revenueFromPremium'] as double? ?? 0.0),
-                      _analyticsData['totalRevenue'] as double > 0
-                        ? ((_analyticsData['revenueFromPremium'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
-                        : 0.0
-                    ),
-                    _buildRevenueRow(
-                      'Otros',
-                      (_analyticsData['revenueFromOthers'] as double? ?? 0.0),
-                      _analyticsData['totalRevenue'] as double > 0
-                        ? ((_analyticsData['revenueFromOthers'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
-                        : 0.0
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(width: 32),
-              SizedBox(
-                width: 150,
-                height: 150,
+          // ✅ Revenue breakdown REAL desde Firebase - responsivo
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final donutChart = SizedBox(
+                width: 120,
+                height: 120,
                 child: CustomPaint(
                   painter: DonutChartPainter(
                     progress: _pieChartController.value,
@@ -1703,8 +1699,62 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                     ],
                   ),
                 ),
-              ),
-            ],
+              );
+
+              final revenueRows = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildRevenueRow(
+                    'Viajes',
+                    (_analyticsData['revenueFromTrips'] as double? ?? 0.0),
+                    _analyticsData['totalRevenue'] as double > 0
+                      ? ((_analyticsData['revenueFromTrips'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
+                      : 0.0
+                  ),
+                  _buildRevenueRow(
+                    'Comisiones',
+                    (_analyticsData['revenueFromCommissions'] as double? ?? 0.0),
+                    _analyticsData['totalRevenue'] as double > 0
+                      ? ((_analyticsData['revenueFromCommissions'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
+                      : 0.0
+                  ),
+                  _buildRevenueRow(
+                    'Premium',
+                    (_analyticsData['revenueFromPremium'] as double? ?? 0.0),
+                    _analyticsData['totalRevenue'] as double > 0
+                      ? ((_analyticsData['revenueFromPremium'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
+                      : 0.0
+                  ),
+                  _buildRevenueRow(
+                    'Otros',
+                    (_analyticsData['revenueFromOthers'] as double? ?? 0.0),
+                    _analyticsData['totalRevenue'] as double > 0
+                      ? ((_analyticsData['revenueFromOthers'] as double) / (_analyticsData['totalRevenue'] as double)) * 100
+                      : 0.0
+                  ),
+                ],
+              );
+
+              // En pantallas pequeñas, mostrar en columna
+              if (constraints.maxWidth < 500) {
+                return Column(
+                  children: [
+                    Center(child: donutChart),
+                    SizedBox(height: 16),
+                    revenueRows,
+                  ],
+                );
+              }
+
+              // En pantallas grandes, mostrar en fila
+              return Row(
+                children: [
+                  Expanded(child: revenueRows),
+                  SizedBox(width: 24),
+                  donutChart,
+                ],
+              );
+            },
           ),
           
           Divider(color: Theme.of(context).dividerColor, height: 32),
@@ -1712,20 +1762,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Total Ingresos',
-                style: TextStyle(
-                  color: ModernTheme.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+              Flexible(
+                child: Text(
+                  'Total Ingresos',
+                  style: TextStyle(
+                    color: ModernTheme.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Text(
-                (_analyticsData['totalRevenue'] as double).toCurrency(),
-                style: TextStyle(
-                  color: ModernTheme.success,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  (_analyticsData['totalRevenue'] as double).toCurrency(),
+                  style: TextStyle(
+                    color: ModernTheme.success,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
                 ),
               ),
             ],

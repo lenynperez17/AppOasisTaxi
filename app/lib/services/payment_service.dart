@@ -79,7 +79,7 @@ class PaymentService {
       debugPrint('💳 PaymentService: Validando disponibilidad de Cloud Functions...');
       try {
         final healthCheck = await http.get(
-          Uri.parse('$_apiBaseUrl/health'),
+          Uri.parse('$_apiBaseUrl/healthCheck'),
         ).timeout(const Duration(seconds: 10));
 
         if (healthCheck.statusCode != 200) {

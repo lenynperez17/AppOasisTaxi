@@ -14,6 +14,7 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedIndex = 0;
   late FirebaseService _firebaseService;
+  bool _isLoading = true;
 
   Map<String, dynamic> _stats = {
     'totalUsers': 0,
@@ -225,11 +226,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       });
 
       debugPrint('✅ Dashboard cargado exitosamente');
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     } catch (e, stackTrace) {
       debugPrint('❌ Error crítico loading dashboard: $e');
       debugPrint('📍 Stack trace: $stackTrace');
 
       if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al cargar el dashboard: ${e.toString()}'),
@@ -268,11 +274,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       subtitle: 'Gestión financiera',
     ),
     AdminMenuItem(
+      icon: Icons.credit_card,
+      title: 'Créditos',
+      subtitle: 'Sistema de créditos',
+    ),
+    AdminMenuItem(
       icon: Icons.settings,
       title: 'Configuración',
       subtitle: 'Ajustes del sistema',
     ),
   ];
+
+  // Confirmación de logout
+  void _showLogoutConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cerrar Sesión'),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                '/login',
+                (route) => false,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ModernTheme.error,
+            ),
+            child: const Text('Cerrar Sesión'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -291,13 +333,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           IconButton(
             icon: Icon(Icons.logout, color: Theme.of(context).colorScheme.onPrimary),
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
-            },
+            onPressed: _showLogoutConfirmation,
           ),
         ],
       ),
@@ -403,6 +439,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Navigator.pushNamed(context, '/admin/financial');
                           break;
                         case 5:
+                          // Créditos - se muestra inline en el dashboard
+                          break;
+                        case 6:
                           Navigator.pushNamed(context, '/admin/settings');
                           break;
                       }
@@ -514,6 +553,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case 4:
         return _buildFinancesContent();
       case 5:
+        return _buildCreditsContent();
+      case 6:
         return _buildSettingsContent();
       default:
         return _buildDashboardContent();
@@ -521,6 +562,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildDashboardContent() {
+    // Mostrar indicador de carga mientras se obtienen los datos
+    if (_isLoading) {
+      return GridView.count(
+        crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: MediaQuery.of(context).size.width > 600 ? 1.8 : 1.5,
+        children: List.generate(4, (index) => _buildLoadingCard()),
+      );
+    }
+
     return GridView.count(
       crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
       crossAxisSpacing: 16,
@@ -530,8 +582,48 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _buildStatsCard('Usuarios Totales', _stats['totalUsers'].toString(), Icons.people, Colors.blue),
         _buildStatsCard('Conductores', _stats['totalDrivers'].toString(), Icons.directions_car, Colors.green),
         _buildStatsCard('Viajes Hoy', _stats['tripsToday'].toString(), Icons.route, Colors.orange),
-        _buildStatsCard('Ingresos', 'S/. ${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.account_balance_wallet, Colors.purple), // ✅ Moneda en Soles
+        _buildStatsCard('Ingresos', 'S/. ${_stats['todayEarnings'].toStringAsFixed(0)}', Icons.account_balance_wallet, Colors.purple),
       ],
+    );
+  }
+
+  Widget _buildLoadingCard() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: ModernTheme.getCardShadow(context),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              shape: BoxShape.circle,
+            ),
+          ),
+          Container(
+            width: 40,
+            height: 16,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          Container(
+            width: 60,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -780,6 +872,1173 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ✅ NUEVO: Panel de gestión de créditos para conductores
+  Widget _buildCreditsContent() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firebaseService.firestore.collection('settings').doc('admin').snapshots(),
+      builder: (context, settingsSnapshot) {
+        // Valores por defecto
+        double serviceFee = 1.0;
+        double minServiceCredits = 10.0; // ✅ Unificado con mínimo de MercadoPago
+        double bonusCreditsOnFirstRecharge = 5.0;
+        List<dynamic> creditPackages = [];
+
+        if (settingsSnapshot.hasData && settingsSnapshot.data!.exists) {
+          final data = settingsSnapshot.data!.data() as Map<String, dynamic>?;
+          if (data != null) {
+            serviceFee = (data['serviceFee'] ?? 1.0).toDouble();
+            minServiceCredits = (data['minServiceCredits'] ?? 10.0).toDouble(); // ✅ Unificado con mínimo de MercadoPago
+            bonusCreditsOnFirstRecharge = (data['bonusCreditsOnFirstRecharge'] ?? 5.0).toDouble();
+            creditPackages = data['creditPackages'] ?? [];
+          }
+        }
+
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Estadísticas de créditos en tiempo real
+              FutureBuilder<QuerySnapshot>(
+                future: _firebaseService.firestore
+                    .collection('wallets')
+                    .get(),
+                builder: (context, walletsSnapshot) {
+                  double totalCreditsInSystem = 0;
+                  double totalCreditsConsumed = 0;
+                  int driversWithLowBalance = 0;
+                  int driversWithCredits = 0;
+
+                  if (walletsSnapshot.hasData) {
+                    for (var doc in walletsSnapshot.data!.docs) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final credits = (data['serviceCredits'] ?? 0.0).toDouble();
+                      final consumed = (data['totalCreditsUsed'] ?? 0.0).toDouble();
+                      totalCreditsInSystem += credits;
+                      totalCreditsConsumed += consumed;
+                      if (credits > 0) driversWithCredits++;
+                      if (credits < minServiceCredits && credits > 0) driversWithLowBalance++;
+                    }
+                  }
+
+                  return GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: MediaQuery.of(context).size.width > 600 ? 1.8 : 1.5,
+                    children: [
+                      _buildStatsCard(
+                        'Créditos en Sistema',
+                        'S/. ${totalCreditsInSystem.toStringAsFixed(0)}',
+                        Icons.account_balance_wallet,
+                        Colors.green,
+                      ),
+                      _buildStatsCard(
+                        'Créditos Consumidos',
+                        'S/. ${totalCreditsConsumed.toStringAsFixed(0)}',
+                        Icons.trending_down,
+                        Colors.orange,
+                      ),
+                      _buildStatsCard(
+                        'Conductores con Saldo',
+                        driversWithCredits.toString(),
+                        Icons.person,
+                        Colors.blue,
+                      ),
+                      _buildStatsCard(
+                        'Saldo Bajo',
+                        driversWithLowBalance.toString(),
+                        Icons.warning,
+                        Colors.red,
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
+
+              // Configuración de créditos
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: ModernTheme.getCardShadow(context),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.settings, color: ModernTheme.oasisGreen),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Configuración de Créditos',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Costo por servicio
+                    _buildConfigItem(
+                      'Costo por Servicio',
+                      'S/. ${serviceFee.toStringAsFixed(2)}',
+                      'Créditos que se descuentan al aceptar un viaje',
+                      Icons.monetization_on,
+                      () => _showEditServiceFeeDialog(serviceFee),
+                    ),
+                    const Divider(height: 24),
+
+                    // Mínimo de créditos
+                    _buildConfigItem(
+                      'Mínimo de Créditos',
+                      'S/. ${minServiceCredits.toStringAsFixed(2)}',
+                      'Saldo mínimo para poder aceptar servicios',
+                      Icons.warning_amber,
+                      () => _showEditMinCreditsDialog(minServiceCredits),
+                    ),
+                    const Divider(height: 24),
+
+                    // Bono primera recarga
+                    _buildConfigItem(
+                      'Bono Primera Recarga',
+                      'S/. ${bonusCreditsOnFirstRecharge.toStringAsFixed(2)}',
+                      'Créditos adicionales en la primera recarga',
+                      Icons.card_giftcard,
+                      () => _showEditBonusDialog(bonusCreditsOnFirstRecharge),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Paquetes de créditos
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: ModernTheme.getCardShadow(context),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.inventory_2, color: ModernTheme.primaryBlue),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Paquetes de Créditos',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle, color: ModernTheme.oasisGreen),
+                          onPressed: _showAddPackageDialog,
+                          tooltip: 'Agregar paquete',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (creditPackages.isEmpty)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            children: [
+                              Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey[400]),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No hay paquetes configurados',
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton.icon(
+                                onPressed: _showAddPackageDialog,
+                                icon: const Icon(Icons.add),
+                                label: const Text('Crear Paquete'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: ModernTheme.oasisGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: creditPackages.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final package = creditPackages[index] as Map<String, dynamic>;
+                          final amount = (package['amount'] ?? 0).toDouble();
+                          final bonus = (package['bonus'] ?? 0).toDouble();
+                          final price = (package['price'] ?? amount).toDouble();
+                          final isPopular = package['popular'] ?? false;
+
+                          return ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: isPopular
+                                    ? ModernTheme.oasisGreen.withValues(alpha: 0.1)
+                                    : Colors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.credit_card,
+                                color: isPopular ? ModernTheme.oasisGreen : Colors.blue,
+                              ),
+                            ),
+                            title: Row(
+                              children: [
+                                Text(
+                                  'S/. ${amount.toStringAsFixed(0)}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                if (bonus > 0) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: ModernTheme.oasisGreen,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '+${bonus.toStringAsFixed(0)} bonus',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                if (isPopular) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: ModernTheme.primaryOrange,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Text(
+                                      'Popular',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            subtitle: Text('Precio: S/. ${price.toStringAsFixed(2)}'),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              onPressed: () => _deletePackage(index),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Acción rápida: Agregar créditos a conductor
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [ModernTheme.oasisGreen, ModernTheme.oasisGreen.withValues(alpha: 0.8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.person_add, color: Colors.white, size: 40),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Agregar Créditos Manualmente',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Agrega créditos a un conductor específico',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _showAddCreditsToDriverDialog,
+                          icon: const Icon(Icons.person_add),
+                          label: const Text('Individual'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: ModernTheme.oasisGreen,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: _showBulkCreditsDialog,
+                          icon: const Icon(Icons.group_add),
+                          label: const Text('Masivo'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white.withValues(alpha: 0.2),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Widget helper para items de configuración
+  Widget _buildConfigItem(String title, String value, String description, IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: ModernTheme.oasisGreen),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(description, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                ],
+              ),
+            ),
+            Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: ModernTheme.oasisGreen,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.edit, color: Colors.grey[400], size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Diálogo para editar costo por servicio
+  void _showEditServiceFeeDialog(double currentValue) {
+    final controller = TextEditingController(text: currentValue.toString());
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Costo por Servicio'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Créditos que se descontarán al conductor cada vez que acepte un viaje.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Costo (S/.)',
+                prefixText: 'S/. ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final value = double.tryParse(controller.text) ?? currentValue;
+              await _firebaseService.firestore
+                  .collection('settings')
+                  .doc('admin')
+                  .set({'serviceFee': value}, SetOptions(merge: true));
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Diálogo para editar mínimo de créditos
+  void _showEditMinCreditsDialog(double currentValue) {
+    final controller = TextEditingController(text: currentValue.toString());
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mínimo de Créditos'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Saldo mínimo que debe tener un conductor para poder aceptar servicios.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Mínimo (S/.)',
+                prefixText: 'S/. ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final value = double.tryParse(controller.text) ?? currentValue;
+              await _firebaseService.firestore
+                  .collection('settings')
+                  .doc('admin')
+                  .set({'minServiceCredits': value}, SetOptions(merge: true));
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Diálogo para editar bono de primera recarga
+  void _showEditBonusDialog(double currentValue) {
+    final controller = TextEditingController(text: currentValue.toString());
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Bono Primera Recarga'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Créditos adicionales que recibirá el conductor en su primera recarga.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Bono (S/.)',
+                prefixText: 'S/. ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final value = double.tryParse(controller.text) ?? currentValue;
+              await _firebaseService.firestore
+                  .collection('settings')
+                  .doc('admin')
+                  .set({'bonusCreditsOnFirstRecharge': value}, SetOptions(merge: true));
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Diálogo para agregar paquete de créditos
+  void _showAddPackageDialog() {
+    final amountController = TextEditingController();
+    final bonusController = TextEditingController(text: '0');
+    final priceController = TextEditingController();
+    bool isPopular = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Nuevo Paquete de Créditos'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Cantidad de Créditos',
+                    prefixText: 'S/. ',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    if (priceController.text.isEmpty) {
+                      priceController.text = value;
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: bonusController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Bonus Adicional',
+                    prefixText: 'S/. ',
+                    border: OutlineInputBorder(),
+                    helperText: 'Créditos extra gratis',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: priceController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Precio de Venta',
+                    prefixText: 'S/. ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Marcar como Popular'),
+                  subtitle: const Text('Se mostrará destacado'),
+                  value: isPopular,
+                  onChanged: (value) => setDialogState(() => isPopular = value),
+                  activeTrackColor: ModernTheme.oasisGreen.withValues(alpha: 0.5),
+                  thumbColor: WidgetStateProperty.resolveWith((states) =>
+                      states.contains(WidgetState.selected) ? ModernTheme.oasisGreen : null),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final amount = double.tryParse(amountController.text) ?? 0;
+                final bonus = double.tryParse(bonusController.text) ?? 0;
+                final price = double.tryParse(priceController.text) ?? amount;
+
+                if (amount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('La cantidad debe ser mayor a 0')),
+                  );
+                  return;
+                }
+
+                // Obtener paquetes actuales
+                final doc = await _firebaseService.firestore
+                    .collection('settings')
+                    .doc('admin')
+                    .get();
+
+                List<dynamic> currentPackages = [];
+                if (doc.exists) {
+                  currentPackages = (doc.data()?['creditPackages'] ?? []) as List<dynamic>;
+                }
+
+                // Agregar nuevo paquete
+                currentPackages.add({
+                  'amount': amount,
+                  'bonus': bonus,
+                  'price': price,
+                  'popular': isPopular,
+                });
+
+                // Ordenar por cantidad
+                currentPackages.sort((a, b) => (a['amount'] as num).compareTo(b['amount'] as num));
+
+                await _firebaseService.firestore
+                    .collection('settings')
+                    .doc('admin')
+                    .set({'creditPackages': currentPackages}, SetOptions(merge: true));
+
+                if (context.mounted) Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+              child: const Text('Crear Paquete'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Eliminar paquete
+  Future<void> _deletePackage(int index) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar Paquete'),
+        content: const Text('¿Estás seguro de eliminar este paquete de créditos?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final doc = await _firebaseService.firestore
+          .collection('settings')
+          .doc('admin')
+          .get();
+
+      if (doc.exists) {
+        List<dynamic> packages = (doc.data()?['creditPackages'] ?? []) as List<dynamic>;
+        if (index < packages.length) {
+          packages.removeAt(index);
+          await _firebaseService.firestore
+              .collection('settings')
+              .doc('admin')
+              .set({'creditPackages': packages}, SetOptions(merge: true));
+        }
+      }
+    }
+  }
+
+  // Diálogo para agregar créditos a un conductor específico
+  void _showAddCreditsToDriverDialog() {
+    final emailController = TextEditingController();
+    final amountController = TextEditingController();
+    final reasonController = TextEditingController();
+    String? selectedDriverId;
+    String? selectedDriverName;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Agregar Créditos a Conductor'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Buscar conductor por email
+                TextField(
+                  controller: emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email del Conductor',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search),
+                      onPressed: () async {
+                        final email = emailController.text.trim();
+                        if (email.isEmpty) return;
+
+                        final query = await _firebaseService.firestore
+                            .collection('users')
+                            .where('email', isEqualTo: email)
+                            .where('userType', whereIn: ['driver', 'dual'])
+                            .limit(1)
+                            .get();
+
+                        if (query.docs.isNotEmpty) {
+                          final user = query.docs.first;
+                          setDialogState(() {
+                            selectedDriverId = user.id;
+                            selectedDriverName = user.data()['displayName'] ?? user.data()['name'] ?? 'Conductor';
+                          });
+                        } else {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Conductor no encontrado')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                if (selectedDriverId != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: ModernTheme.oasisGreen),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(selectedDriverName!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text('ID: $selectedDriverId', style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Cantidad de Créditos',
+                    prefixText: 'S/. ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: reasonController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Razón (opcional)',
+                    border: OutlineInputBorder(),
+                    hintText: 'Ej: Compensación, promoción, etc.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: selectedDriverId == null
+                  ? null
+                  : () async {
+                      final amount = double.tryParse(amountController.text) ?? 0;
+                      if (amount <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('La cantidad debe ser mayor a 0')),
+                        );
+                        return;
+                      }
+
+                      try {
+                        // Actualizar wallet del conductor
+                        final walletRef = _firebaseService.firestore
+                            .collection('wallets')
+                            .doc(selectedDriverId);
+
+                        final walletDoc = await walletRef.get();
+                        double currentCredits = 0;
+                        if (walletDoc.exists) {
+                          currentCredits = (walletDoc.data()?['serviceCredits'] ?? 0.0).toDouble();
+                        }
+
+                        await walletRef.set({
+                          'serviceCredits': currentCredits + amount,
+                          'totalCreditsRecharged': FieldValue.increment(amount),
+                          'lastCreditUpdate': FieldValue.serverTimestamp(),
+                        }, SetOptions(merge: true));
+
+                        // Registrar transacción
+                        await _firebaseService.firestore
+                            .collection('wallets')
+                            .doc(selectedDriverId)
+                            .collection('credit_transactions')
+                            .add({
+                          'type': 'admin_credit',
+                          'amount': amount,
+                          'previousBalance': currentCredits,
+                          'newBalance': currentCredits + amount,
+                          'reason': reasonController.text.trim().isEmpty
+                              ? 'Créditos agregados por administrador'
+                              : reasonController.text.trim(),
+                          'adminId': 'admin',
+                          'timestamp': FieldValue.serverTimestamp(),
+                        });
+
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Se agregaron S/. ${amount.toStringAsFixed(2)} créditos a $selectedDriverName'),
+                              backgroundColor: ModernTheme.oasisGreen,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Error: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+              child: const Text('Agregar Créditos'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Diálogo para agregar créditos a múltiples conductores
+  void _showBulkCreditsDialog() {
+    final amountController = TextEditingController();
+    final reasonController = TextEditingController();
+    final searchController = TextEditingController();
+    List<Map<String, dynamic>> allDrivers = [];
+    List<Map<String, dynamic>> filteredDrivers = [];
+    Set<String> selectedDriverIds = {};
+    bool isLoading = true;
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Cargar conductores al inicio
+          if (isLoading && allDrivers.isEmpty) {
+            _firebaseService.firestore
+                .collection('users')
+                .where('userType', whereIn: ['driver', 'dual'])
+                .get()
+                .then((snapshot) {
+              setDialogState(() {
+                allDrivers = snapshot.docs.map((doc) => {
+                  'id': doc.id,
+                  'name': doc.data()['displayName'] ?? doc.data()['name'] ?? 'Sin nombre',
+                  'email': doc.data()['email'] ?? '',
+                }).toList();
+                filteredDrivers = List.from(allDrivers);
+                isLoading = false;
+              });
+            });
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.group_add, color: ModernTheme.oasisGreen),
+                const SizedBox(width: 8),
+                const Text('Créditos Masivos'),
+              ],
+            ),
+            content: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.85,
+              height: MediaQuery.of(context).size.height * 0.65,
+              child: Column(
+                children: [
+                  // Campos de cantidad y razón
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: amountController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Cantidad',
+                            prefixText: 'S/. ',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: reasonController,
+                          decoration: const InputDecoration(
+                            labelText: 'Razón',
+                            border: OutlineInputBorder(),
+                            hintText: 'Ej: Promoción Año Nuevo',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Búsqueda y selección masiva
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: searchController,
+                          decoration: const InputDecoration(
+                            labelText: 'Buscar conductor',
+                            prefixIcon: Icon(Icons.search),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onChanged: (value) {
+                            setDialogState(() {
+                              filteredDrivers = allDrivers.where((d) =>
+                                d['name'].toString().toLowerCase().contains(value.toLowerCase()) ||
+                                d['email'].toString().toLowerCase().contains(value.toLowerCase())
+                              ).toList();
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () {
+                          setDialogState(() {
+                            if (selectedDriverIds.length == filteredDrivers.length) {
+                              selectedDriverIds.clear();
+                            } else {
+                              selectedDriverIds = filteredDrivers.map((d) => d['id'] as String).toSet();
+                            }
+                          });
+                        },
+                        icon: Icon(selectedDriverIds.length == filteredDrivers.length && filteredDrivers.isNotEmpty
+                            ? Icons.deselect : Icons.select_all),
+                        label: Text(selectedDriverIds.length == filteredDrivers.length && filteredDrivers.isNotEmpty
+                            ? 'Ninguno' : 'Todos'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Contador de seleccionados
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: ModernTheme.oasisGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.people, color: ModernTheme.oasisGreen, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${selectedDriverIds.length} de ${filteredDrivers.length} conductores seleccionados',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Lista de conductores
+                  Expanded(
+                    child: isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : filteredDrivers.isEmpty
+                            ? const Center(child: Text('No hay conductores'))
+                            : ListView.builder(
+                                itemCount: filteredDrivers.length,
+                                itemBuilder: (context, index) {
+                                  final driver = filteredDrivers[index];
+                                  final isSelected = selectedDriverIds.contains(driver['id']);
+                                  return CheckboxListTile(
+                                    value: isSelected,
+                                    onChanged: (value) {
+                                      setDialogState(() {
+                                        if (value == true) {
+                                          selectedDriverIds.add(driver['id']);
+                                        } else {
+                                          selectedDriverIds.remove(driver['id']);
+                                        }
+                                      });
+                                    },
+                                    title: Text(driver['name']),
+                                    subtitle: Text(driver['email'], style: const TextStyle(fontSize: 12)),
+                                    secondary: CircleAvatar(
+                                      backgroundColor: ModernTheme.oasisGreen.withValues(alpha: 0.2),
+                                      child: Text(
+                                        driver['name'].toString().isNotEmpty
+                                            ? driver['name'].toString()[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(color: ModernTheme.oasisGreen),
+                                      ),
+                                    ),
+                                    dense: true,
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton.icon(
+                onPressed: isProcessing || selectedDriverIds.isEmpty
+                    ? null
+                    : () async {
+                        final amount = double.tryParse(amountController.text) ?? 0;
+                        if (amount <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('La cantidad debe ser mayor a 0')),
+                          );
+                          return;
+                        }
+
+                        // Confirmar
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Confirmar'),
+                            content: Text(
+                              '¿Agregar S/. ${amount.toStringAsFixed(2)} a ${selectedDriverIds.length} conductores?\n\n'
+                              'Total a distribuir: S/. ${(amount * selectedDriverIds.length).toStringAsFixed(2)}'
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('No'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+                                child: const Text('Sí, confirmar'),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (confirm != true) return;
+
+                        setDialogState(() => isProcessing = true);
+
+                        int success = 0;
+                        int failed = 0;
+                        final reason = reasonController.text.trim().isEmpty
+                            ? 'Créditos masivos por administrador'
+                            : reasonController.text.trim();
+
+                        for (final driverId in selectedDriverIds) {
+                          try {
+                            final walletRef = _firebaseService.firestore
+                                .collection('wallets').doc(driverId);
+
+                            await walletRef.set({
+                              'serviceCredits': FieldValue.increment(amount),
+                              'totalCreditsRecharged': FieldValue.increment(amount),
+                              'lastCreditUpdate': FieldValue.serverTimestamp(),
+                            }, SetOptions(merge: true));
+
+                            // Registrar transacción individual
+                            await _firebaseService.firestore
+                                .collection('wallets')
+                                .doc(driverId)
+                                .collection('credit_transactions')
+                                .add({
+                              'type': 'admin_bulk_credit',
+                              'amount': amount,
+                              'reason': reason,
+                              'adminId': 'admin',
+                              'totalRecipients': selectedDriverIds.length,
+                              'timestamp': FieldValue.serverTimestamp(),
+                            });
+                            success++;
+                          } catch (e) {
+                            failed++;
+                          }
+                        }
+
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Créditos agregados a $success conductores${failed > 0 ? ' ($failed fallidos)' : ''}',
+                              ),
+                              backgroundColor: failed == 0 ? ModernTheme.oasisGreen : Colors.orange,
+                            ),
+                          );
+                          // Refrescar el dashboard para mostrar los nuevos totales
+                          _loadDashboardData();
+                        }
+                      },
+                icon: isProcessing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.send),
+                label: Text(isProcessing ? 'Procesando...' : 'Agregar Créditos'),
+                style: ElevatedButton.styleFrom(backgroundColor: ModernTheme.oasisGreen),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

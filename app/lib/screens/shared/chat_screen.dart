@@ -90,12 +90,22 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = authProvider.currentUser;
-      
+
       if (user == null) {
         debugPrint('Usuario no autenticado');
-        Navigator.pop(context);
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Debes iniciar sesión para usar el chat'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
         return;
       }
+
+      debugPrint('💬 Inicializando chat para usuario: ${user.id}, rol: ${user.activeMode}');
 
       // Inicializar el servicio de chat
       // ✅ DUAL-ACCOUNT: Usar activeMode para identificar rol actual del usuario
@@ -104,47 +114,72 @@ class _ChatScreenState extends State<ChatScreen>
         userRole: user.activeMode,
       );
 
+      debugPrint('💬 ChatService inicializado, marcando mensajes como leídos...');
+
       // Marcar mensajes como leídos al entrar
       await _chatService.markMessagesAsRead(widget.rideId, user.id);
 
+      debugPrint('💬 Configurando listener de mensajes...');
+
       // Escuchar mensajes en tiempo real
-      _chatService.getChatMessages(widget.rideId).listen((messages) {
-        if (mounted) {
-          setState(() {
-            _messages = messages;
-          });
-          _scrollToBottom();
-        }
-      });
+      _chatService.getChatMessages(widget.rideId).listen(
+        (messages) {
+          if (mounted) {
+            setState(() {
+              _messages = messages;
+            });
+            _scrollToBottom();
+          }
+        },
+        onError: (error) {
+          debugPrint('💬 Error en stream de mensajes: $error');
+        },
+      );
 
       // Obtener estado de presencia del otro usuario si está disponible
       if (widget.otherUserId != null) {
-        _chatService.getUserPresence(widget.otherUserId!).listen((presence) {
-          if (mounted) {
-            setState(() {
-              _isOtherUserOnline = presence.online;
-              _otherUserLastSeen = presence.lastSeen;
-            });
-          }
+        _chatService.getUserPresence(widget.otherUserId!).listen(
+          (presence) {
+            if (mounted) {
+              setState(() {
+                _isOtherUserOnline = presence.online;
+                _otherUserLastSeen = presence.lastSeen;
+              });
+            }
+          },
+          onError: (error) {
+            debugPrint('💬 Error en stream de presencia: $error');
+          },
+        );
+      }
+
+      // ✅ SIEMPRE terminar la carga, incluso si hay errores menores
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
         });
       }
 
-      setState(() {
-        _isLoading = false;
-      });
-
-      debugPrint('Chat inicializado para viaje ${widget.rideId}');
+      debugPrint('💬 Chat inicializado correctamente para viaje ${widget.rideId}');
 
     } catch (e) {
-      debugPrint('Error inicializando chat: $e');
+      debugPrint('💬 Error inicializando chat: $e');
+      // ✅ CORREGIDO: No cerrar el chat, solo mostrar error y permitir reintentar
       if (mounted) {
+        setState(() {
+          _isLoading = false; // Permitir ver la pantalla vacía
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(AppLocalizations.of(context)!.errorInitializingChat),
+            content: Text('Error al cargar chat: ${e.toString().length > 50 ? e.toString().substring(0, 50) : e.toString()}'),
             backgroundColor: ModernTheme.error,
+            action: SnackBarAction(
+              label: 'Reintentar',
+              textColor: Colors.white,
+              onPressed: () => _initializeChat(),
+            ),
           ),
         );
-        Navigator.pop(context);
       }
     }
   }
@@ -776,83 +811,129 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _buildMessageInput() {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: context.surfaceColor,
-        border: Border(
-          top: BorderSide(color: Theme.of(context).dividerColor),
-        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: SafeArea(
+        top: false,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            IconButton(
-              onPressed: () {
-                setState(() {
-                  _showQuickMessages = !_showQuickMessages;
-                });
-              },
-              icon: Icon(
-                _showQuickMessages ? Icons.keyboard : Icons.add,
-                color: ModernTheme.oasisGreen,
+            // Botón de mensajes rápidos / adjuntos
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () {
+                  setState(() {
+                    _showQuickMessages = !_showQuickMessages;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(
+                    _showQuickMessages ? Icons.keyboard : Icons.add_circle_outline,
+                    color: ModernTheme.oasisGreen,
+                    size: 24,
+                  ),
+                ),
               ),
             ),
+            const SizedBox(width: 4),
+            // Campo de texto expandido
             Expanded(
               child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 16),
+                constraints: const BoxConstraints(maxHeight: 120),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(25),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                child: TextField(
-                  controller: _messageController,
-                  focusNode: _messageFocusNode,
-                  decoration: InputDecoration(
-                    hintText: AppLocalizations.of(context)!.writeMessage,
-                    border: InputBorder.none,
-                    hintStyle: TextStyle(color: context.secondaryText),
-                  ),
-                  maxLines: null,
-                  textCapitalization: TextCapitalization.sentences,
-                  onChanged: (value) {
-                    // Aquí podrías implementar indicador de "escribiendo"
-                  },
-                  onSubmitted: (_) => _sendMessage(),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        focusNode: _messageFocusNode,
+                        decoration: InputDecoration(
+                          hintText: AppLocalizations.of(context)!.writeMessage,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          hintStyle: TextStyle(
+                            color: context.secondaryText,
+                            fontSize: 15,
+                          ),
+                        ),
+                        style: const TextStyle(fontSize: 15),
+                        maxLines: 4,
+                        minLines: 1,
+                        textCapitalization: TextCapitalization.sentences,
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    // Iconos de adjuntar y ubicación dentro del campo
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _pickAndSendMedia,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.attach_file,
+                            color: context.secondaryText,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _shareLocation,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4, top: 8, bottom: 8),
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            color: context.secondaryText,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            SizedBox(width: 8),
-            Row(
-              children: [
-                IconButton(
-                  onPressed: _pickAndSendMedia,
-                  icon: Icon(
-                    Icons.attach_file,
-                    color: ModernTheme.oasisGreen,
+            const SizedBox(width: 8),
+            // Botón de enviar
+            Material(
+              color: ModernTheme.oasisGreen,
+              borderRadius: BorderRadius.circular(24),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: _sendMessage,
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  child: Icon(
+                    Icons.send_rounded,
+                    color: Colors.white,
+                    size: 22,
                   ),
                 ),
-                IconButton(
-                  onPressed: _shareLocation,
-                  icon: Icon(
-                    Icons.location_on,
-                    color: ModernTheme.oasisGreen,
-                  ),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    color: ModernTheme.oasisGreen,
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    onPressed: _sendMessage,
-                    icon: Icon(
-                      Icons.send,
-                      color: context.surfaceColor,
-                      size: 20,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),

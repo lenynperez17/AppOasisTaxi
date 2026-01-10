@@ -607,7 +607,13 @@ class _TripCompletedScreenState extends State<TripCompletedScreen>
                           // Botón para volver al inicio
                           TextButton(
                             onPressed: () {
-                              Navigator.of(context).popUntil((route) => route.isFirst);
+                              // ✅ CORREGIDO: Navegar directamente al home del pasajero
+                              // en lugar de popUntil que podría saltar al splash
+                              Navigator.pushNamedAndRemoveUntil(
+                                context,
+                                '/passenger/home',
+                                (route) => false,
+                              );
                             },
                             child: const Text(
                               'Volver al inicio',
