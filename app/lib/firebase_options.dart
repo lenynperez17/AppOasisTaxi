@@ -53,8 +53,8 @@ class DefaultFirebaseOptions {
   /// Configuración Firebase para iOS - Project: app-oasis-taxi
   /// Bundle ID: com.oasistaxis.app
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
-    appId: '1:747030072271:ios:PLACEHOLDER',
+    apiKey: 'AIzaSyBdwktxZJBpUuKzEzrPMyEpFXIKY4p-UFc',
+    appId: '1:747030072271:ios:41418181e11cd237f560ba',
     messagingSenderId: '747030072271',
     projectId: 'app-oasis-taxi',
     storageBucket: 'app-oasis-taxi.firebasestorage.app',
@@ -63,8 +63,8 @@ class DefaultFirebaseOptions {
 
   /// Configuración Firebase para macOS - Project: app-oasis-taxi
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyDSJTGoS9yv6mi8-c3V1o1CltAeKZeHx5U',
-    appId: '1:747030072271:ios:PLACEHOLDER',
+    apiKey: 'AIzaSyBdwktxZJBpUuKzEzrPMyEpFXIKY4p-UFc',
+    appId: '1:747030072271:ios:41418181e11cd237f560ba',
     messagingSenderId: '747030072271',
     projectId: 'app-oasis-taxi',
     storageBucket: 'app-oasis-taxi.firebasestorage.app',
