@@ -44,8 +44,8 @@ class OAuthConfig {
   // ✅ ACTUALIZADO: Client ID con SHA-1 del debug keystore
   static const String googleAndroidClientId = '747030072271-5emcfqpq9l1tg5cmhm2l0em33fapd42c.apps.googleusercontent.com';
 
-  // iOS Client ID (configurar cuando se implemente iOS)
-  static const String googleIosClientId = '';
+  // iOS Client ID - Extraído de GoogleService-Info.plist (REVERSED_CLIENT_ID)
+  static const String googleIosClientId = '747030072271-9s3d31dadde9bipp954jbpp0stc92k12.apps.googleusercontent.com';
 
   // Facebook Login - ✅ CONFIGURADO DESDE FIREBASE CONSOLE
   // App ID extraído de Facebook Developers Console (público - puede estar en código)

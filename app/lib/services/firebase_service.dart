@@ -362,9 +362,11 @@ class FirebaseService {
       final googleSignIn = GoogleSignIn.instance;
 
       // Inicializar con Web Client ID para obtener idToken con email
+      // En iOS, también necesitamos especificar el clientId del GoogleService-Info.plist
       await googleSignIn.initialize(
         hostedDomain: null,
         serverClientId: OAuthConfig.googleWebClientId,
+        clientId: Platform.isIOS ? OAuthConfig.googleIosClientId : null,
       );
 
       // Cerrar sesión previa si existe
