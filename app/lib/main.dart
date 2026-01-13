@@ -101,8 +101,14 @@ void main() async {
   try {
     // 🔐 Cargar variables de entorno desde archivo .env
     AppLogger.debug('Cargando variables de entorno desde .env');
-    await dotenv.load(fileName: '.env');
-    AppLogger.info('✅ Variables de entorno cargadas correctamente');
+    try {
+      await dotenv.load(fileName: '.env');
+      AppLogger.info('✅ Variables de entorno cargadas correctamente');
+    } catch (envError) {
+      // En iOS el archivo .env puede no existir en el bundle
+      AppLogger.warning('⚠️ No se pudo cargar .env: $envError');
+      AppLogger.info('Continuando sin archivo .env - usando configuración por defecto');
+    }
 
     // Configurar orientación
     AppLogger.debug('Configurando orientación de pantalla');

@@ -1,6 +1,6 @@
 name: oasis_taxi
 description: Oasis Taxi - Aplicación de transporte
-version: 1.3.0+49
+version: 1.3.0+50
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
