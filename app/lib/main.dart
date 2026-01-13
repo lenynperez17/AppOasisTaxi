@@ -93,107 +93,216 @@ import 'screens/shared/change_phone_number_screen.dart';
 import 'screens/driver/active_trip_screen.dart'; // Pantalla de viaje activo para conductor
 import 'screens/passenger/trip_completed_screen.dart'; // Pantalla de viaje completado para pasajero
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+// ============================================================================
+// 🔍 BUILD DE DIAGNÓSTICO iOS - Build 1.3.0+54
+// Este build muestra CUALQUIER error en pantalla en vez de crashear
+// ============================================================================
 
-  // ✅ iOS FIX: Capturar errores de Flutter que no llegan a Crashlytics
+// Variable global para almacenar errores de inicialización
+String? _globalInitError;
+String _initStep = 'Iniciando...';
+
+void main() async {
+  // ✅ PASO 1: WidgetsFlutterBinding - Si esto falla, crashea antes de todo
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    _initStep = '✅ WidgetsFlutterBinding OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en WidgetsFlutterBinding: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
+
+  // ✅ iOS FIX: Capturar errores de Flutter
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    AppLogger.error('FlutterError capturado', details.exception, details.stack);
+    _globalInitError = 'FlutterError: ${details.exception}';
   };
 
-  // ✅ iOS FIX: Capturar errores de plataforma (crashes nativos de iOS/Android)
+  // ✅ iOS FIX: Capturar errores de plataforma
   PlatformDispatcher.instance.onError = (error, stack) {
-    AppLogger.error('PlatformError capturado', error, stack);
-    return true; // Prevenir crash - manejar gracefully
+    _globalInitError = 'PlatformError: $error';
+    return true;
   };
 
-  AppLogger.separator('INICIANDO OASIS TAXI APP');
-  AppLogger.info('Iniciando aplicación Oasis Taxi...');
-
+  // ✅ PASO 2: Cargar .env (puede fallar en iOS, es OK)
   try {
-    // 🔐 Cargar variables de entorno desde archivo .env
-    AppLogger.debug('Cargando variables de entorno desde .env');
-    try {
-      await dotenv.load(fileName: '.env');
-      AppLogger.info('✅ Variables de entorno cargadas correctamente');
-    } catch (envError) {
-      // En iOS el archivo .env puede no existir en el bundle
-      AppLogger.warning('⚠️ No se pudo cargar .env: $envError');
-      AppLogger.info('Continuando sin archivo .env - usando configuración por defecto');
-    }
+    _initStep = 'Cargando .env...';
+    await dotenv.load(fileName: '.env');
+    _initStep = '✅ .env cargado';
+  } catch (e) {
+    _initStep = '⚠️ .env no disponible (OK en iOS)';
+    // No es error crítico, continuar
+  }
 
-    // Configurar orientación
-    AppLogger.debug('Configurando orientación de pantalla');
+  // ✅ PASO 3: Configurar orientación
+  try {
+    _initStep = 'Configurando orientación...';
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    
-    // ✅ ANDROID 15: Configurar la barra de estado para Edge-to-Edge
-    AppLogger.debug('Configurando barra de estado para Edge-to-Edge');
-    SystemChrome.setSystemUIOverlayStyle(
-      const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent, // ✅ Transparente para edge-to-edge
-        statusBarIconBrightness: Brightness.dark,
-        systemNavigationBarColor: Colors.transparent, // ✅ Navegación también transparente
-        systemNavigationBarIconBrightness: Brightness.dark,
-      ),
-    );
-    
-    // Inicializar Firebase
-    AppLogger.info('Inicializando Firebase...');
+    _initStep = '✅ Orientación OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en SystemChrome.setPreferredOrientations: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
+
+  // ✅ PASO 4: Firebase.initializeApp - CRÍTICO
+  try {
+    _initStep = 'Inicializando Firebase...';
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    AppLogger.info('✅ Firebase inicializado correctamente');
+    _initStep = '✅ Firebase.initializeApp OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en Firebase.initializeApp: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
 
-    // ✅ NUEVO: Inicializar Firebase Analytics
-    AppLogger.info('Inicializando Firebase Analytics...');
+  // ✅ PASO 5: Firebase Analytics
+  try {
+    _initStep = 'Inicializando Analytics...';
     final analytics = FirebaseAnalytics.instance;
-    await analytics.logAppOpen(); // Log de apertura de app
-    AppLogger.info('✅ Firebase Analytics inicializado');
+    await analytics.logAppOpen();
+    _initStep = '✅ Firebase Analytics OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en Firebase Analytics: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
 
-    // ✅ DESARROLLO: Firebase App Check DESHABILITADO temporalmente
-    // El App Check con Play Integrity no funciona con builds debug (no firmados)
-    // Para producción, cambiar a AndroidProvider.playIntegrity
-    AppLogger.info('Firebase App Check deshabilitado para desarrollo...');
-    // NO activar App Check en desarrollo para evitar problemas de permisos
-    // await FirebaseAppCheck.instance.activate(
-    //   androidProvider: AndroidProvider.playIntegrity,
-    //   webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'),
-    // );
-    AppLogger.info('⚠️ Firebase App Check omitido (modo desarrollo)');
-
-    // Inicializar servicio Firebase
-    AppLogger.info('Inicializando servicios de Firebase...');
+  // ✅ PASO 6: FirebaseService
+  try {
+    _initStep = 'Inicializando FirebaseService...';
     await FirebaseService().initialize();
-    AppLogger.info('✅ Servicios de Firebase iniciados');
-    
-    // Configurar Firebase Messaging
-    AppLogger.info('Configurando Firebase Messaging...');
+    _initStep = '✅ FirebaseService OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en FirebaseService: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
+
+  // ✅ PASO 7: Firebase Messaging
+  try {
+    _initStep = 'Configurando Messaging...';
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    AppLogger.info('✅ Firebase Messaging configurado');
-    
-    // Inicializar servicio de notificaciones
-    AppLogger.info('Inicializando servicio de notificaciones...');
+    _initStep = '✅ Firebase Messaging OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en Firebase Messaging: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
+
+  // ✅ PASO 8: NotificationService
+  try {
+    _initStep = 'Inicializando NotificationService...';
     await NotificationService().initialize();
-    AppLogger.info('✅ Servicio de notificaciones iniciado');
+    _initStep = '✅ NotificationService OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en NotificationService: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
 
-    // ✅ NUEVO: Inicializar PreferencesProvider para cargar modo oscuro y otras preferencias
-    AppLogger.info('Inicializando preferencias de usuario...');
-    final preferencesProvider = PreferencesProvider();
+  // ✅ PASO 9: PreferencesProvider
+  PreferencesProvider preferencesProvider;
+  try {
+    _initStep = 'Inicializando PreferencesProvider...';
+    preferencesProvider = PreferencesProvider();
     await preferencesProvider.init();
-    AppLogger.info('✅ Preferencias de usuario cargadas');
+    _initStep = '✅ PreferencesProvider OK';
+  } catch (e) {
+    _globalInitError = 'CRASH en PreferencesProvider: $e';
+    runApp(_DiagnosticErrorApp(error: _globalInitError!));
+    return;
+  }
 
-    AppLogger.separator('APP LISTA PARA PRODUCCIÓN');
-    runApp(OasisTaxiApp(preferencesProvider: preferencesProvider));
-    
-  } catch (error, stackTrace) {
-    AppLogger.error('Error crítico al inicializar la app', error, stackTrace);
-    // Intentar iniciar la app incluso con errores, con provider por defecto
-    final fallbackProvider = PreferencesProvider();
-    runApp(OasisTaxiApp(preferencesProvider: fallbackProvider));
+  // ✅ PASO 10: Configurar UI
+  try {
+    _initStep = 'Configurando UI...';
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+    );
+    _initStep = '✅ UI configurada';
+  } catch (e) {
+    // No crítico, continuar
+  }
+
+  // ✅ PASO 11: Lanzar app completa
+  _initStep = '✅ TODOS LOS PASOS OK - Lanzando app...';
+  AppLogger.separator('APP LISTA PARA PRODUCCIÓN');
+  runApp(OasisTaxiApp(preferencesProvider: preferencesProvider));
+}
+
+// ============================================================================
+// 🔴 PANTALLA DE ERROR DE DIAGNÓSTICO
+// Esta pantalla se muestra si hay cualquier error durante la inicialización
+// ============================================================================
+class _DiagnosticErrorApp extends StatelessWidget {
+  final String error;
+  const _DiagnosticErrorApp({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.red.shade50,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 80, color: Colors.red),
+                const SizedBox(height: 20),
+                const Text(
+                  '🔍 DIAGNÓSTICO iOS',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Último paso: $_initStep',
+                  style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red),
+                  ),
+                  child: SelectableText(
+                    error,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: Colors.red,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Copia este error y compártelo para diagnosticar',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
