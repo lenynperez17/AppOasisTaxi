@@ -186,15 +186,18 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Cargar datos del usuario desde Firestore
+  /// ✅ iOS FIX: Timeout y mejor manejo de errores para evitar crashes silenciosos
   Future<void> _loadUserData(String uid) async {
     AppLogger.state('AuthProvider', 'Cargando datos del usuario', {'uid': uid});
     try {
+      // ✅ iOS FIX: Agregar timeout para evitar que la app se cuelgue
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 10));
 
-      if (doc.exists) {
+      if (doc.exists && doc.data() != null) {
         AppLogger.state('AuthProvider', 'Documento de usuario encontrado');
         _currentUser = UserModel.fromFirestore(doc.data()!, uid);
         _isAuthenticated = true;
@@ -217,11 +220,20 @@ class AuthProvider with ChangeNotifier {
           'availableRoles': _currentUser?.availableRoles,
         });
       } else {
+        // ✅ iOS FIX: Usuario en Auth pero no en Firestore - NO crashear
         AppLogger.warning('Documento de usuario no existe en Firestore', {'uid': uid});
+        _isAuthenticated = false; // Marcar como no autenticado para redirigir a login
       }
+    } on TimeoutException {
+      // ✅ iOS FIX: Manejar timeout específicamente
+      AppLogger.error('Timeout cargando datos de usuario - verificar conexión');
+      _errorMessage = 'Tiempo de espera agotado. Verifica tu conexión.';
+      _isAuthenticated = false;
     } catch (e) {
+      // ✅ iOS FIX: Cualquier error NO debe crashear la app
       AppLogger.error('Error cargando datos del usuario', e);
       _errorMessage = 'Error al cargar datos del usuario';
+      _isAuthenticated = false; // Marcar como no autenticado para evitar crash
     }
     notifyListeners();
   }

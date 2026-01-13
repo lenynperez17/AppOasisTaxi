@@ -150,6 +150,7 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
 
   /// Navegar a pantalla correspondiente según estado de autenticación y modo
   ///
+  /// ✅ iOS FIX: Todo envuelto en try-catch para evitar crashes silenciosos
   /// Implementa navegación inteligente estilo InDriver:
   /// - Usuario sin perfil completo → /auth/complete-profile
   /// - Usuario dual con currentMode='passenger' → /passenger/home
@@ -161,125 +162,137 @@ class _ModernSplashScreenState extends State<ModernSplashScreen>
   Future<void> _navigateToHome() async {
     if (!mounted) return;
 
-    final authProvider = context.read<AuthProvider>();
+    // ✅ iOS FIX: Try-catch global para TODA la navegación
+    try {
+      final authProvider = context.read<AuthProvider>();
 
-    // Verificar si hay usuario autenticado
-    if (authProvider.isAuthenticated && authProvider.currentUser != null) {
-      final user = authProvider.currentUser!;
+      // Verificar si hay usuario autenticado
+      if (authProvider.isAuthenticated && authProvider.currentUser != null) {
+        final user = authProvider.currentUser!;
 
-      AppLogger.info('Usuario autenticado detectado', {
-        'userId': user.id,
-        'userType': user.userType,
-        'currentMode': user.currentMode,
-        'isDualAccount': user.isDualAccount,
-      });
+        AppLogger.info('Usuario autenticado detectado', {
+          'userId': user.id,
+          'userType': user.userType,
+          'currentMode': user.currentMode,
+          'isDualAccount': user.isDualAccount,
+        });
 
-      // ✅ NUEVO: Verificar si necesita completar perfil ANTES de navegar a home
-      if (authProvider.needsProfileCompletion()) {
-        // Determinar método de login basado en proveedores vinculados
-        String loginMethod = 'email';
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        if (firebaseUser != null) {
-          for (final provider in firebaseUser.providerData) {
-            if (provider.providerId == 'google.com') {
-              loginMethod = 'google';
-              break;
-            } else if (provider.providerId == 'facebook.com') {
-              loginMethod = 'facebook';
-              break;
-            } else if (provider.providerId == 'apple.com') {
-              loginMethod = 'apple';
-              break;
+        // ✅ NUEVO: Verificar si necesita completar perfil ANTES de navegar a home
+        if (authProvider.needsProfileCompletion()) {
+          // Determinar método de login basado en proveedores vinculados
+          String loginMethod = 'email';
+          final firebaseUser = FirebaseAuth.instance.currentUser;
+          if (firebaseUser != null) {
+            for (final provider in firebaseUser.providerData) {
+              if (provider.providerId == 'google.com') {
+                loginMethod = 'google';
+                break;
+              } else if (provider.providerId == 'facebook.com') {
+                loginMethod = 'facebook';
+                break;
+              } else if (provider.providerId == 'apple.com') {
+                loginMethod = 'apple';
+                break;
+              }
             }
           }
+
+          AppLogger.navigation('ModernSplashScreen', '/auth/complete-profile', {
+            'reason': 'Perfil incompleto - falta teléfono o contraseña',
+            'loginMethod': loginMethod,
+          });
+          Navigator.pushReplacementNamed(
+            context,
+            '/auth/complete-profile',
+            arguments: {'loginMethod': loginMethod},
+          );
+          return;
         }
 
-        AppLogger.navigation('ModernSplashScreen', '/auth/complete-profile', {
-          'reason': 'Perfil incompleto - falta teléfono o contraseña',
-          'loginMethod': loginMethod,
-        });
-        Navigator.pushReplacementNamed(
-          context,
-          '/auth/complete-profile',
-          arguments: {'loginMethod': loginMethod},
-        );
-        return;
-      }
+        // Determinar ruta según tipo y modo
+        String route;
 
-      // Determinar ruta según tipo y modo
-      String route;
+        if (user.isAdmin) {
+          // Admin siempre va al dashboard
+          route = '/admin/dashboard';
+          AppLogger.navigation('ModernSplashScreen', route, {'reason': 'Usuario admin'});
+        } else {
+          // Usuario dual o single: usar currentMode o activeMode
+          final mode = user.activeMode; // Usa currentMode si existe, sino userType
 
-      if (user.isAdmin) {
-        // Admin siempre va al dashboard
-        route = '/admin/dashboard';
-        AppLogger.navigation('ModernSplashScreen', route, {'reason': 'Usuario admin'});
-      } else {
-        // Usuario dual o single: usar currentMode o activeMode
-        final mode = user.activeMode; // Usa currentMode si existe, sino userType
-
-        if (mode == 'driver') {
-          // Verificar si el conductor tiene documentos aprobados
-          if (user.documentVerified) {
-            route = '/driver/home';
-            AppLogger.navigation('ModernSplashScreen', route, {
-              'reason': 'Conductor aprobado',
-              'isDual': user.isDualAccount,
-            });
-          } else {
-            // Conductor sin documentos aprobados
-            // Verificar si ya envió documentos (pending_approval) o es nuevo
-            final driverStatus = user.driverStatus ?? 'pending_documents';
-
-            // ✅ FIX BUG ROL: Sincronizar currentMode con la pantalla real
-            // Si el usuario está en modo 'driver' pero NO tiene documentos verificados,
-            // actualizar currentMode a 'passenger' para evitar inconsistencia visual
-            if (user.currentMode == 'driver') {
-              AppLogger.info('🔄 Sincronizando currentMode a passenger (documentos no verificados)');
-              try {
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user.id)
-                    .update({'currentMode': 'passenger'});
-                // Refrescar datos del usuario en memoria
-                await authProvider.refreshUserData();
-              } catch (e) {
-                AppLogger.warning('Error sincronizando currentMode: $e');
-              }
-              // ✅ FIX: Verificar mounted después de operaciones async
-              if (!mounted) return;
-            }
-
-            if (driverStatus == 'pending_approval') {
-              // Ya envió documentos, puede usar como pasajero mientras espera
-              route = '/passenger/home';
+          if (mode == 'driver') {
+            // Verificar si el conductor tiene documentos aprobados
+            if (user.documentVerified) {
+              route = '/driver/home';
               AppLogger.navigation('ModernSplashScreen', route, {
-                'reason': 'Conductor esperando aprobación - usando como pasajero',
-                'driverStatus': driverStatus,
+                'reason': 'Conductor aprobado',
+                'isDual': user.isDualAccount,
               });
             } else {
-              // Conductor nuevo, debe subir documentos
-              route = '/upgrade-to-driver';
-              AppLogger.navigation('ModernSplashScreen', route, {
-                'reason': 'Conductor nuevo - debe subir documentos',
-                'driverStatus': driverStatus,
-              });
-            }
-          }
-        } else {
-          // Default: modo pasajero (passenger o cualquier otro)
-          route = '/passenger/home';
-          AppLogger.navigation('ModernSplashScreen', route, {
-            'reason': 'Usuario en modo pasajero',
-            'isDual': user.isDualAccount,
-          });
-        }
-      }
+              // Conductor sin documentos aprobados
+              // Verificar si ya envió documentos (pending_approval) o es nuevo
+              final driverStatus = user.driverStatus ?? 'pending_documents';
 
-      Navigator.pushReplacementNamed(context, route);
-    } else {
-      // Sin autenticación → Login
-      AppLogger.navigation('ModernSplashScreen', '/login', {'reason': 'Sin autenticación'});
-      Navigator.pushReplacementNamed(context, '/login');
+              // ✅ FIX BUG ROL: Sincronizar currentMode con la pantalla real
+              // Si el usuario está en modo 'driver' pero NO tiene documentos verificados,
+              // actualizar currentMode a 'passenger' para evitar inconsistencia visual
+              if (user.currentMode == 'driver') {
+                AppLogger.info('🔄 Sincronizando currentMode a passenger (documentos no verificados)');
+                // ✅ iOS FIX: Try-catch específico para Firestore con timeout
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(user.id)
+                      .update({'currentMode': 'passenger'})
+                      .timeout(const Duration(seconds: 5));
+                  // Refrescar datos del usuario en memoria
+                  await authProvider.refreshUserData();
+                } catch (e) {
+                  // ✅ iOS FIX: No crashear si falla - solo log warning
+                  AppLogger.warning('Error sincronizando currentMode: $e');
+                }
+                // ✅ FIX: Verificar mounted después de operaciones async
+                if (!mounted) return;
+              }
+
+              if (driverStatus == 'pending_approval') {
+                // Ya envió documentos, puede usar como pasajero mientras espera
+                route = '/passenger/home';
+                AppLogger.navigation('ModernSplashScreen', route, {
+                  'reason': 'Conductor esperando aprobación - usando como pasajero',
+                  'driverStatus': driverStatus,
+                });
+              } else {
+                // Conductor nuevo, debe subir documentos
+                route = '/upgrade-to-driver';
+                AppLogger.navigation('ModernSplashScreen', route, {
+                  'reason': 'Conductor nuevo - debe subir documentos',
+                  'driverStatus': driverStatus,
+                });
+              }
+            }
+          } else {
+            // Default: modo pasajero (passenger o cualquier otro)
+            route = '/passenger/home';
+            AppLogger.navigation('ModernSplashScreen', route, {
+              'reason': 'Usuario en modo pasajero',
+              'isDual': user.isDualAccount,
+            });
+          }
+        }
+
+        Navigator.pushReplacementNamed(context, route);
+      } else {
+        // Sin autenticación → Login
+        AppLogger.navigation('ModernSplashScreen', '/login', {'reason': 'Sin autenticación'});
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    } catch (e, stackTrace) {
+      // ✅ iOS FIX: FALLBACK - Si hay CUALQUIER error, ir a login en vez de crashear
+      AppLogger.error('Error en navegación desde splash - redirigiendo a login', e, stackTrace);
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     }
   }
 

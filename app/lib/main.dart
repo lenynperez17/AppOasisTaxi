@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use, unused_field, unused_element, avoid_print, unreachable_switch_default, avoid_web_libraries_in_flutter, unused_import
+import 'dart:ui' show PlatformDispatcher; // ✅ iOS FIX: Para capturar errores de plataforma
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -94,6 +95,18 @@ import 'screens/passenger/trip_completed_screen.dart'; // Pantalla de viaje comp
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ iOS FIX: Capturar errores de Flutter que no llegan a Crashlytics
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    AppLogger.error('FlutterError capturado', details.exception, details.stack);
+  };
+
+  // ✅ iOS FIX: Capturar errores de plataforma (crashes nativos de iOS/Android)
+  PlatformDispatcher.instance.onError = (error, stack) {
+    AppLogger.error('PlatformError capturado', error, stack);
+    return true; // Prevenir crash - manejar gracefully
+  };
 
   AppLogger.separator('INICIANDO OASIS TAXI APP');
   AppLogger.info('Iniciando aplicación Oasis Taxi...');
