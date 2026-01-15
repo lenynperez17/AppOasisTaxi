@@ -30,7 +30,7 @@ flutter_ios_podfile_setup
 target 'Runner' do
   # ✅ iOS FIX: Usar static linking para Firebase (recomendado por Firebase)
   use_frameworks! :linkage => :static
-  use_modular_headers!
+  # REMOVIDO: use_modular_headers! - causa conflictos de linking con Firebase
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 

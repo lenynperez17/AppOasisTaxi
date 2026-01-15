@@ -10,9 +10,10 @@ import UserNotifications
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     // ✅ PASO 1: Firebase DEBE inicializarse PRIMERO, ANTES de registrar plugins
-    // Los plugins de Firebase (messaging, analytics) intentan inicializar Firebase
-    // automáticamente. Si no lo hacemos nosotros primero, causa conflicto.
-    FirebaseApp.configure()
+    // Verificamos si ya está configurado para evitar duplicate-app crash
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
 
     // ✅ PASO 2: Configurar delegado de notificaciones manualmente
     // Requerido porque FirebaseAppDelegateProxyEnabled = false en Info.plist
