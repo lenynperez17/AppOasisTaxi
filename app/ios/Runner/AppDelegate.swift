@@ -1,5 +1,7 @@
 import Flutter
 import UIKit
+import FirebaseCore
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -7,9 +9,20 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // Firebase se inicializa desde Dart con Firebase.initializeApp()
-    // NO usar FirebaseApp.configure() aquí - causa [core/duplicate-app] crash
+    // ✅ PASO 1: Firebase DEBE inicializarse PRIMERO, ANTES de registrar plugins
+    // Los plugins de Firebase (messaging, analytics) intentan inicializar Firebase
+    // automáticamente. Si no lo hacemos nosotros primero, causa conflicto.
+    FirebaseApp.configure()
+
+    // ✅ PASO 2: Configurar delegado de notificaciones manualmente
+    // Requerido porque FirebaseAppDelegateProxyEnabled = false en Info.plist
+    if #available(iOS 10.0, *) {
+      UNUserNotificationCenter.current().delegate = self
+    }
+
+    // ✅ PASO 3: DESPUÉS de Firebase, registrar los plugins de Flutter
     GeneratedPluginRegistrant.register(with: self)
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }

@@ -93,136 +93,40 @@ import 'screens/shared/change_phone_number_screen.dart';
 import 'screens/driver/active_trip_screen.dart'; // Pantalla de viaje activo para conductor
 import 'screens/passenger/trip_completed_screen.dart'; // Pantalla de viaje completado para pasajero
 
-// ============================================================================
-// 🔍 BUILD DE DIAGNÓSTICO iOS - Build 1.3.0+54
-// Este build muestra CUALQUIER error en pantalla en vez de crashear
-// ============================================================================
-
-// Variable global para almacenar errores de inicialización
-String? _globalInitError;
-String _initStep = 'Iniciando...';
-
 void main() async {
-  // ✅ PASO 1: WidgetsFlutterBinding - Si esto falla, crashea antes de todo
-  try {
-    WidgetsFlutterBinding.ensureInitialized();
-    _initStep = '✅ WidgetsFlutterBinding OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en WidgetsFlutterBinding: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ iOS FIX: Capturar errores de Flutter
+  // ✅ iOS FIX: Capturar errores de Flutter que no llegan a Crashlytics
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    _globalInitError = 'FlutterError: ${details.exception}';
+    AppLogger.error('FlutterError capturado', details.exception, details.stack);
   };
 
-  // ✅ iOS FIX: Capturar errores de plataforma
+  // ✅ iOS FIX: Capturar errores de plataforma (crashes nativos de iOS/Android)
   PlatformDispatcher.instance.onError = (error, stack) {
-    _globalInitError = 'PlatformError: $error';
+    AppLogger.error('PlatformError capturado', error, stack);
     return true;
   };
 
-  // ✅ PASO 2: Cargar .env (puede fallar en iOS, es OK)
-  try {
-    _initStep = 'Cargando .env...';
-    await dotenv.load(fileName: '.env');
-    _initStep = '✅ .env cargado';
-  } catch (e) {
-    _initStep = '⚠️ .env no disponible (OK en iOS)';
-    // No es error crítico, continuar
-  }
+  AppLogger.separator('INICIANDO OASIS TAXI APP');
+  AppLogger.info('Iniciando aplicación Oasis Taxi...');
 
-  // ✅ PASO 3: Configurar orientación
   try {
-    _initStep = 'Configurando orientación...';
+    // Cargar .env (puede fallar en iOS, no es crítico)
+    try {
+      await dotenv.load(fileName: '.env');
+      AppLogger.info('Variables de entorno cargadas');
+    } catch (e) {
+      AppLogger.warning('No se pudo cargar .env (normal en iOS): $e');
+    }
+
+    // Configurar orientación
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    _initStep = '✅ Orientación OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en SystemChrome.setPreferredOrientations: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
 
-  // ✅ PASO 4: Firebase.initializeApp - CRÍTICO
-  try {
-    _initStep = 'Inicializando Firebase...';
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    _initStep = '✅ Firebase.initializeApp OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en Firebase.initializeApp: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 5: Firebase Analytics
-  try {
-    _initStep = 'Inicializando Analytics...';
-    final analytics = FirebaseAnalytics.instance;
-    await analytics.logAppOpen();
-    _initStep = '✅ Firebase Analytics OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en Firebase Analytics: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 6: FirebaseService
-  try {
-    _initStep = 'Inicializando FirebaseService...';
-    await FirebaseService().initialize();
-    _initStep = '✅ FirebaseService OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en FirebaseService: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 7: Firebase Messaging
-  try {
-    _initStep = 'Configurando Messaging...';
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    _initStep = '✅ Firebase Messaging OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en Firebase Messaging: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 8: NotificationService
-  try {
-    _initStep = 'Inicializando NotificationService...';
-    await NotificationService().initialize();
-    _initStep = '✅ NotificationService OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en NotificationService: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 9: PreferencesProvider
-  PreferencesProvider preferencesProvider;
-  try {
-    _initStep = 'Inicializando PreferencesProvider...';
-    preferencesProvider = PreferencesProvider();
-    await preferencesProvider.init();
-    _initStep = '✅ PreferencesProvider OK';
-  } catch (e) {
-    _globalInitError = 'CRASH en PreferencesProvider: $e';
-    runApp(_DiagnosticErrorApp(error: _globalInitError!));
-    return;
-  }
-
-  // ✅ PASO 10: Configurar UI
-  try {
-    _initStep = 'Configurando UI...';
+    // Configurar barra de estado
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -231,78 +135,49 @@ void main() async {
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
     );
-    _initStep = '✅ UI configurada';
-  } catch (e) {
-    // No crítico, continuar
-  }
 
-  // ✅ PASO 11: Lanzar app completa
-  _initStep = '✅ TODOS LOS PASOS OK - Lanzando app...';
-  AppLogger.separator('APP LISTA PARA PRODUCCIÓN');
-  runApp(OasisTaxiApp(preferencesProvider: preferencesProvider));
-}
+    // ✅ iOS FIX: Solo inicializar Firebase si NO está ya inicializado
+    // En iOS, AppDelegate.swift llama FirebaseApp.configure() ANTES
+    // de que este código ejecute. Si intentamos inicializar de nuevo,
+    // causa [core/duplicate-app] crash.
+    AppLogger.info('Verificando estado de Firebase...');
+    if (Firebase.apps.isEmpty) {
+      AppLogger.info('Firebase no inicializado, inicializando desde Dart...');
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } else {
+      AppLogger.info('Firebase ya inicializado desde nativo (iOS)');
+    }
+    AppLogger.info('Firebase listo');
 
-// ============================================================================
-// 🔴 PANTALLA DE ERROR DE DIAGNÓSTICO
-// Esta pantalla se muestra si hay cualquier error durante la inicialización
-// ============================================================================
-class _DiagnosticErrorApp extends StatelessWidget {
-  final String error;
-  const _DiagnosticErrorApp({required this.error});
+    // Firebase Analytics
+    final analytics = FirebaseAnalytics.instance;
+    await analytics.logAppOpen();
+    AppLogger.info('Firebase Analytics OK');
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        backgroundColor: Colors.red.shade50,
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, size: 80, color: Colors.red),
-                const SizedBox(height: 20),
-                const Text(
-                  '🔍 DIAGNÓSTICO iOS',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Último paso: $_initStep',
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red),
-                  ),
-                  child: SelectableText(
-                    error,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: Colors.red,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Copia este error y compártelo para diagnosticar',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    // Inicializar servicios
+    await FirebaseService().initialize();
+    AppLogger.info('FirebaseService OK');
+
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    AppLogger.info('Firebase Messaging OK');
+
+    await NotificationService().initialize();
+    AppLogger.info('NotificationService OK');
+
+    // Preferencias de usuario
+    final preferencesProvider = PreferencesProvider();
+    await preferencesProvider.init();
+    AppLogger.info('PreferencesProvider OK');
+
+    AppLogger.separator('APP LISTA PARA PRODUCCIÓN');
+    runApp(OasisTaxiApp(preferencesProvider: preferencesProvider));
+
+  } catch (error, stackTrace) {
+    AppLogger.error('Error crítico al inicializar', error, stackTrace);
+    final fallbackProvider = PreferencesProvider();
+    runApp(OasisTaxiApp(preferencesProvider: fallbackProvider));
   }
 }
 
