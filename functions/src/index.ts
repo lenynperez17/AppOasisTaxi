@@ -12,6 +12,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.FUNCTION_NAME) {
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { auth } from 'firebase-functions/v1';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
@@ -1848,6 +1849,171 @@ export const deleteOrphanedUser = onRequest({ cors: true }, async (req, res) => 
     res.status(500).json({
       error: 'Error interno',
       details: error.message,
+    });
+  }
+});
+
+/**
+ * 🗑️ TRIGGER: Limpieza automática ANTES de eliminar un usuario de Auth
+ *
+ * Se ejecuta automáticamente cuando se va a eliminar un usuario de Firebase Auth.
+ * Elimina todos los datos relacionados en Firestore y Storage.
+ *
+ * Usa beforeUserDeleted para limpiar datos ANTES de que el usuario sea eliminado,
+ * garantizando que no queden datos huérfanos.
+ */
+export const onUserDeleted = auth.user().onDelete(async (user: auth.UserRecord) => {
+  const uid = user.uid;
+  const email = user.email || 'sin email';
+
+  console.log(`🗑️ Usuario siendo eliminado de Auth: ${uid} (${email})`);
+  console.log('   Iniciando limpieza de datos relacionados...');
+
+  const deletedData: Record<string, number> = {};
+
+  try {
+    // 1. Eliminar documento de usuario
+    const userRef = db.collection('users').doc(uid);
+    const userDoc = await userRef.get();
+    if (userDoc.exists) {
+      await userRef.delete();
+      deletedData['users'] = 1;
+      console.log(`   ✓ Documento de usuario eliminado`);
+    }
+
+    // 2. Eliminar wallet
+    const walletRef = db.collection('wallets').doc(uid);
+    const walletDoc = await walletRef.get();
+    if (walletDoc.exists) {
+      await walletRef.delete();
+      deletedData['wallets'] = 1;
+      console.log(`   ✓ Wallet eliminada`);
+    }
+
+    // 3. Eliminar rides donde es pasajero
+    const ridesAsPassenger = await db.collection('rides')
+      .where('passengerId', '==', uid).get();
+    for (const doc of ridesAsPassenger.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['rides_passenger'] = ridesAsPassenger.size;
+    if (ridesAsPassenger.size > 0) {
+      console.log(`   ✓ ${ridesAsPassenger.size} viajes como pasajero eliminados`);
+    }
+
+    // 4. Eliminar rides donde es conductor
+    const ridesAsDriver = await db.collection('rides')
+      .where('driverId', '==', uid).get();
+    for (const doc of ridesAsDriver.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['rides_driver'] = ridesAsDriver.size;
+    if (ridesAsDriver.size > 0) {
+      console.log(`   ✓ ${ridesAsDriver.size} viajes como conductor eliminados`);
+    }
+
+    // 5. Eliminar transactions del usuario
+    const transactionsUser = await db.collection('transactions')
+      .where('userId', '==', uid).get();
+    for (const doc of transactionsUser.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['transactions_user'] = transactionsUser.size;
+
+    // 6. Eliminar transactions del conductor
+    const transactionsDriver = await db.collection('transactions')
+      .where('driverId', '==', uid).get();
+    for (const doc of transactionsDriver.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['transactions_driver'] = transactionsDriver.size;
+    if (transactionsUser.size + transactionsDriver.size > 0) {
+      console.log(`   ✓ ${transactionsUser.size + transactionsDriver.size} transacciones eliminadas`);
+    }
+
+    // 7. Eliminar walletTransactions
+    const walletTxPassenger = await db.collection('walletTransactions')
+      .where('passengerId', '==', uid).get();
+    for (const doc of walletTxPassenger.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['walletTransactions'] = walletTxPassenger.size;
+
+    // 8. Eliminar withdrawal_requests
+    const withdrawals = await db.collection('withdrawal_requests')
+      .where('driverId', '==', uid).get();
+    for (const doc of withdrawals.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['withdrawal_requests'] = withdrawals.size;
+
+    // 9. Eliminar emergencies
+    const emergencies = await db.collection('emergencies')
+      .where('userId', '==', uid).get();
+    for (const doc of emergencies.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['emergencies'] = emergencies.size;
+
+    // 10. Eliminar recharge_transactions
+    const recharges = await db.collection('recharge_transactions')
+      .where('userId', '==', uid).get();
+    for (const doc of recharges.docs) {
+      await doc.ref.delete();
+    }
+    deletedData['recharge_transactions'] = recharges.size;
+
+    // 11. Eliminar archivos de Storage del usuario
+    try {
+      const bucket = admin.storage().bucket();
+      const [userFiles] = await bucket.getFiles({ prefix: `users/${uid}/` });
+      for (const file of userFiles) {
+        await file.delete();
+      }
+      deletedData['storage_user_files'] = userFiles.length;
+      if (userFiles.length > 0) {
+        console.log(`   ✓ ${userFiles.length} archivos de usuario eliminados de Storage`);
+      }
+    } catch (storageError) {
+      console.warn(`   ⚠️ Error eliminando archivos de usuario en Storage:`, storageError);
+    }
+
+    // 12. Eliminar archivos de conductor en Storage
+    try {
+      const bucket = admin.storage().bucket();
+      const [driverFiles] = await bucket.getFiles({ prefix: `drivers/${uid}/` });
+      for (const file of driverFiles) {
+        await file.delete();
+      }
+      deletedData['storage_driver_files'] = driverFiles.length;
+      if (driverFiles.length > 0) {
+        console.log(`   ✓ ${driverFiles.length} archivos de conductor eliminados de Storage`);
+      }
+    } catch (storageError) {
+      console.warn(`   ⚠️ Error eliminando archivos de conductor en Storage:`, storageError);
+    }
+
+    // Registrar auditoría
+    await db.collection('deleted_users_log').add({
+      uid,
+      email,
+      deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      deletedFrom: 'auth_trigger_automatic',
+      deletedData,
+    });
+
+    console.log(`✅ Limpieza completada para ${uid}:`, deletedData);
+
+  } catch (error) {
+    console.error(`❌ Error limpiando datos de ${uid}:`, error);
+
+    // Registrar error pero NO lanzar excepción para permitir que Auth elimine al usuario
+    await db.collection('error_logs').add({
+      type: 'user_deletion_cleanup_failed',
+      uid,
+      email,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
 });
