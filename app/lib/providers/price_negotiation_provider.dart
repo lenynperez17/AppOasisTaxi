@@ -508,6 +508,11 @@ class PriceNegotiationProvider extends ChangeNotifier {
     required double offeredPrice,
     required PaymentMethod paymentMethod,
     String? notes,
+    // ✅ NUEVO: Parámetros de promoción
+    String? appliedPromotionId,
+    String? appliedPromotionCode,
+    double? discountAmount,
+    double? discountPercentage,
   }) async {
     try {
       final user = _auth.currentUser;
@@ -546,6 +551,11 @@ class PriceNegotiationProvider extends ChangeNotifier {
         driverOffers: [],
         paymentMethod: paymentMethod,
         notes: notes,
+        // ✅ Campos de promoción
+        appliedPromotionId: appliedPromotionId,
+        appliedPromotionCode: appliedPromotionCode,
+        discountAmount: discountAmount,
+        discountPercentage: discountPercentage,
       );
       
       _currentNegotiation = negotiation;
@@ -876,6 +886,17 @@ class PriceNegotiationProvider extends ChangeNotifier {
           'passengerPhoto': negotiation.passengerPhoto,
           'passengerRating': negotiation.passengerRating,
         },
+        // ✅ NUEVO: Campos de promoción (si aplica)
+        if (negotiation.appliedPromotionId != null)
+          'appliedPromotionId': negotiation.appliedPromotionId,
+        if (negotiation.appliedPromotionCode != null)
+          'appliedPromotionCode': negotiation.appliedPromotionCode,
+        if (negotiation.discountAmount != null)
+          'discountAmount': negotiation.discountAmount,
+        if (negotiation.discountPercentage != null)
+          'discountPercentage': negotiation.discountPercentage,
+        if (negotiation.discountAmount != null)
+          'originalFare': acceptedOffer.acceptedPrice,
       });
 
       // Actualizar la negociación en Firestore

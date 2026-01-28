@@ -64,6 +64,9 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
   // ✅ NUEVO: Listener para viajes activos del conductor (cuando ya tiene un viaje asignado)
   StreamSubscription<QuerySnapshot>? _activeRideSubscription;
 
+  // ✅ NUEVO: Referencia al WalletProvider para escuchar cambios de créditos en tiempo real
+  WalletProvider? _walletProvider;
+
   // Estadísticas del día
   double _todayEarnings = 0.0;
   int _todayTrips = 0;
@@ -136,6 +139,9 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       // ✅ VERIFICAR CRÉDITOS DEL CONDUCTOR
       await _checkDriverCredits();
       if (!mounted) return;
+
+      // ✅ NUEVO: Iniciar listener de créditos en tiempo real
+      _startWalletListener();
 
       // ✅ CARGAR ESTADO DE VERIFICACIÓN DE DOCUMENTOS
       await docProvider.loadVerificationStatus(_driverId!);
@@ -255,7 +261,44 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
       });
     }
   }
-  
+
+  // ✅ NUEVO: Listener de créditos en tiempo real
+  // Cuando el admin da créditos, se actualiza automáticamente sin necesidad de refrescar
+  void _startWalletListener() {
+    _walletProvider = Provider.of<WalletProvider>(context, listen: false);
+    _walletProvider?.addListener(_onWalletChanged);
+    AppLogger.info('👂 Listener de créditos iniciado');
+  }
+
+  // ✅ NUEVO: Callback cuando cambian los créditos en el WalletProvider
+  void _onWalletChanged() {
+    if (_isDisposed || !mounted) return;
+
+    final wallet = _walletProvider?.wallet;
+    if (wallet == null) return;
+
+    final newCredits = wallet.serviceCredits;
+    final minCredits = _minServiceCredits;
+    final serviceFee = _serviceFee;
+
+    // Solo actualizar si cambió el valor
+    if (newCredits != _serviceCredits) {
+      AppLogger.info('💳 Créditos actualizados en tiempo real: S/. $newCredits');
+
+      setState(() {
+        _serviceCredits = newCredits;
+        _hasEnoughCredits = newCredits >= serviceFee && newCredits >= minCredits;
+      });
+    }
+  }
+
+  // ✅ NUEVO: Detener listener de créditos
+  void _stopWalletListener() {
+    _walletProvider?.removeListener(_onWalletChanged);
+    _walletProvider = null;
+    AppLogger.info('🛑 Listener de créditos detenido');
+  }
+
   void _showDriverMenu() {
     showModalBottomSheet(
       context: context,
@@ -349,6 +392,9 @@ class _ModernDriverHomeScreenState extends State<ModernDriverHomeScreen>
 
     // ✅ DETENER LISTENER DE VIAJES ACTIVOS
     _stopActiveRideListener();
+
+    // ✅ DETENER LISTENER DE CRÉDITOS
+    _stopWalletListener();
 
     // ✅ Liberar MapController para evitar ImageReader buffer warnings
     _mapController?.dispose();

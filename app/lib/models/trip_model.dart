@@ -38,6 +38,13 @@ class TripModel {
   final bool isDriverVerified; // Si el pasajero verificó al conductor
   final DateTime? verificationCompletedAt; // Cuándo se completó la verificación mutua
 
+  // ✅ SISTEMA DE PROMOCIONES/DESCUENTOS
+  final String? appliedPromotionId; // ID de la promoción aplicada
+  final String? appliedPromotionCode; // Código de la promoción (ej: "WELCOME20")
+  final double? discountAmount; // Monto descontado en soles
+  final double? discountPercentage; // Porcentaje de descuento (ej: 20.0 para 20%)
+  final double? originalFare; // Tarifa original antes del descuento
+
   // ⚠️ DEPRECADO - Mantener por compatibilidad
   @Deprecated('Usar passengerVerificationCode en su lugar')
   final String? verificationCode;
@@ -78,6 +85,12 @@ class TripModel {
     this.isPassengerVerified = false,
     this.isDriverVerified = false,
     this.verificationCompletedAt,
+    // Campos de promociones/descuentos
+    this.appliedPromotionId,
+    this.appliedPromotionCode,
+    this.discountAmount,
+    this.discountPercentage,
+    this.originalFare,
     // Campos deprecados
     this.verificationCode,
     this.isVerificationCodeUsed = false,
@@ -142,6 +155,12 @@ class TripModel {
       isPassengerVerified: json['isPassengerVerified'] ?? false,
       isDriverVerified: json['isDriverVerified'] ?? false,
       verificationCompletedAt: _parseDateTime(json['verificationCompletedAt']),
+      // Campos de promociones/descuentos
+      appliedPromotionId: json['appliedPromotionId'],
+      appliedPromotionCode: json['appliedPromotionCode'],
+      discountAmount: json['discountAmount']?.toDouble(),
+      discountPercentage: json['discountPercentage']?.toDouble(),
+      originalFare: json['originalFare']?.toDouble(),
       // Campos deprecados (compatibilidad)
       verificationCode: json['verificationCode'],
       isVerificationCodeUsed: json['isVerificationCodeUsed'] ?? false,
@@ -203,6 +222,12 @@ class TripModel {
       'isPassengerVerified': isPassengerVerified,
       'isDriverVerified': isDriverVerified,
       'verificationCompletedAt': verificationCompletedAt?.toIso8601String(),
+      // Campos de promociones/descuentos
+      'appliedPromotionId': appliedPromotionId,
+      'appliedPromotionCode': appliedPromotionCode,
+      'discountAmount': discountAmount,
+      'discountPercentage': discountPercentage,
+      'originalFare': originalFare,
       // Campos deprecados (compatibilidad) - Ignorar warnings intencionalmente
       // ignore: deprecated_member_use_from_same_package
       'verificationCode': verificationCode,
@@ -246,6 +271,12 @@ class TripModel {
     bool? isPassengerVerified,
     bool? isDriverVerified,
     DateTime? verificationCompletedAt,
+    // Campos de promociones/descuentos
+    String? appliedPromotionId,
+    String? appliedPromotionCode,
+    double? discountAmount,
+    double? discountPercentage,
+    double? originalFare,
     // Campos deprecados
     String? verificationCode,
     bool? isVerificationCodeUsed,
@@ -284,6 +315,12 @@ class TripModel {
       isPassengerVerified: isPassengerVerified ?? this.isPassengerVerified,
       isDriverVerified: isDriverVerified ?? this.isDriverVerified,
       verificationCompletedAt: verificationCompletedAt ?? this.verificationCompletedAt,
+      // Campos de promociones/descuentos
+      appliedPromotionId: appliedPromotionId ?? this.appliedPromotionId,
+      appliedPromotionCode: appliedPromotionCode ?? this.appliedPromotionCode,
+      discountAmount: discountAmount ?? this.discountAmount,
+      discountPercentage: discountPercentage ?? this.discountPercentage,
+      originalFare: originalFare ?? this.originalFare,
       // Campos deprecados - Ignorar warnings intencionalmente
       // ignore: deprecated_member_use_from_same_package
       verificationCode: verificationCode ?? this.verificationCode,
@@ -294,6 +331,18 @@ class TripModel {
 
   /// ✅ Verificar si ambos códigos han sido verificados (verificación mutua completa)
   bool get isMutualVerificationComplete => isPassengerVerified && isDriverVerified;
+
+  /// ✅ Verificar si tiene promoción aplicada
+  bool get hasPromotion => appliedPromotionId != null || appliedPromotionCode != null;
+
+  /// ✅ Calcular tarifa efectiva (con descuento si aplica)
+  double get effectiveFare {
+    if (finalFare != null) return finalFare!;
+    if (discountAmount != null && discountAmount! > 0) {
+      return estimatedFare - discountAmount!;
+    }
+    return estimatedFare;
+  }
 
   /// ✅ Verificar si el viaje está listo para iniciar (ambos verificados)
   bool get canStartRide => isMutualVerificationComplete && status == 'accepted';

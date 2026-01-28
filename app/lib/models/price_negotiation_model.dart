@@ -20,6 +20,12 @@ class PriceNegotiation {
   final PaymentMethod paymentMethod;
   final String? notes;
 
+  // ✅ SISTEMA DE PROMOCIONES
+  final String? appliedPromotionId;
+  final String? appliedPromotionCode;
+  final double? discountAmount;
+  final double? discountPercentage;
+
   PriceNegotiation({
     required this.id,
     required this.passengerId,
@@ -39,6 +45,11 @@ class PriceNegotiation {
     this.selectedDriverId,
     required this.paymentMethod,
     this.notes,
+    // Campos de promoción
+    this.appliedPromotionId,
+    this.appliedPromotionCode,
+    this.discountAmount,
+    this.discountPercentage,
   });
 
   // Factory para crear desde Map (Firestore)
@@ -65,6 +76,11 @@ class PriceNegotiation {
       selectedDriverId: map['selectedDriverId'],
       paymentMethod: _paymentMethodFromString(map['paymentMethod'] ?? 'cash'),
       notes: map['notes'],
+      // Campos de promoción
+      appliedPromotionId: map['appliedPromotionId'],
+      appliedPromotionCode: map['appliedPromotionCode'],
+      discountAmount: map['discountAmount']?.toDouble(),
+      discountPercentage: map['discountPercentage']?.toDouble(),
     );
   }
 
@@ -88,6 +104,11 @@ class PriceNegotiation {
       'selectedDriverId': selectedDriverId,
       'paymentMethod': paymentMethod.toString().split('.').last,
       'notes': notes,
+      // Campos de promoción
+      'appliedPromotionId': appliedPromotionId,
+      'appliedPromotionCode': appliedPromotionCode,
+      'discountAmount': discountAmount,
+      'discountPercentage': discountPercentage,
     };
   }
 

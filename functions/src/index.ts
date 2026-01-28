@@ -73,9 +73,89 @@ async function processCompletedTripPayment(
   }
 
   // 2. Extraer datos del viaje
-  const fareAmount = rideData.finalFare || rideData.estimatedFare || 0;
+  let fareAmount = rideData.finalFare || rideData.estimatedFare || 0;
   const passengerId = rideData.userId || rideData.passengerId;
   const driverId = rideData.driverId;
+
+  // ✅ SISTEMA DE PROMOCIONES: Validar y aplicar descuento
+  const appliedPromotionId = rideData.appliedPromotionId;
+  const appliedPromotionCode = rideData.appliedPromotionCode;
+  let discountApplied = 0;
+  let originalFare = fareAmount;
+
+  if (appliedPromotionId || appliedPromotionCode) {
+    try {
+      console.log(`🎟️ Promoción detectada: ${appliedPromotionCode || appliedPromotionId}`);
+
+      // Buscar la promoción en Firestore
+      let promoDoc;
+      if (appliedPromotionId) {
+        promoDoc = await db.collection('promotions').doc(appliedPromotionId).get();
+      } else if (appliedPromotionCode) {
+        const promoQuery = await db.collection('promotions')
+          .where('code', '==', appliedPromotionCode)
+          .where('isActive', '==', true)
+          .limit(1)
+          .get();
+        promoDoc = promoQuery.docs[0];
+      }
+
+      if (promoDoc && promoDoc.exists) {
+        const promo = promoDoc.data();
+        const now = new Date();
+        const validUntil = promo?.validUntil?.toDate ? promo.validUntil.toDate() : null;
+
+        // Validar que la promoción siga vigente
+        if (promo?.isActive && (!validUntil || validUntil > now)) {
+          // Verificar límite de usos del usuario
+          const userUsageRef = db.collection('users').doc(passengerId)
+            .collection('used_promotions').doc(promoDoc.id);
+          const userUsageDoc = await userUsageRef.get();
+          const usedCount = userUsageDoc.exists ? (userUsageDoc.data()?.usedCount || 0) : 0;
+          const maxUses = promo?.maxUses || 1;
+
+          if (usedCount < maxUses) {
+            // Calcular descuento según tipo
+            if (promo?.type === 'percentage' && promo?.value) {
+              discountApplied = parseFloat((fareAmount * (promo.value / 100)).toFixed(2));
+              console.log(`   Descuento porcentaje: ${promo.value}% = S/ ${discountApplied}`);
+            } else if (promo?.type === 'fixed' && promo?.value) {
+              discountApplied = Math.min(promo.value, fareAmount);
+              console.log(`   Descuento fijo: S/ ${discountApplied}`);
+            } else if (promo?.type === 'freeRide') {
+              discountApplied = fareAmount;
+              console.log(`   Viaje gratis aplicado`);
+            }
+
+            // Aplicar descuento
+            if (discountApplied > 0) {
+              originalFare = fareAmount;
+              fareAmount = parseFloat((fareAmount - discountApplied).toFixed(2));
+              if (fareAmount < 0) fareAmount = 0;
+
+              // Registrar uso de la promoción
+              await userUsageRef.set({
+                usedCount: usedCount + 1,
+                lastUsedAt: admin.firestore.FieldValue.serverTimestamp(),
+                promotionCode: appliedPromotionCode,
+              }, { merge: true });
+
+              console.log(`✅ Promoción aplicada: S/ ${originalFare} → S/ ${fareAmount}`);
+            }
+          } else {
+            console.warn(`⚠️ Usuario ya usó esta promoción ${usedCount}/${maxUses} veces`);
+          }
+        } else {
+          console.warn(`⚠️ Promoción expirada o inactiva`);
+        }
+      } else {
+        console.warn(`⚠️ Promoción no encontrada: ${appliedPromotionCode || appliedPromotionId}`);
+      }
+    } catch (promoError) {
+      console.error('❌ Error procesando promoción:', promoError);
+      // Continuar sin descuento
+    }
+  }
 
   // ✅ MODELO INDRIVER: Verificar método de pago
   const paymentMethod = rideData.paymentMethod || 'cash'; // Default: efectivo
@@ -250,7 +330,7 @@ async function processCompletedTripPayment(
 
     // 4.6 Actualizar el viaje con información de pago
     const rideRef = db.collection('rides').doc(rideId);
-    transaction.update(rideRef, {
+    const rideUpdateData: Record<string, any> = {
       platformCommission: platformCommission,
       driverEarnings: driverEarnings,
       paymentProcessed: true,
@@ -259,7 +339,16 @@ async function processCompletedTripPayment(
       paymentMethodUsed: paymentMethod,
       wasPaidOutsideApp: isPaidOutsideApp,
       updatedAt: timestamp,
-    });
+    };
+
+    // ✅ Agregar información de promoción si se aplicó
+    if (discountApplied > 0) {
+      rideUpdateData.discountApplied = discountApplied;
+      rideUpdateData.originalFare = originalFare;
+      rideUpdateData.finalFareAfterDiscount = fareAmount;
+    }
+
+    transaction.update(rideRef, rideUpdateData);
 
     console.log(`✅ Transacción atómica completada exitosamente para viaje ${rideId}`);
   });
